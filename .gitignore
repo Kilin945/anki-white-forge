@@ -4,3 +4,5 @@ __pycache__/
 *.mp3
 *.jpg
 *.png
+.pexels_key
+.groq_key
