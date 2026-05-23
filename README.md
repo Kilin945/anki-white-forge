@@ -110,29 +110,47 @@ uv run python regen_audio.py
 
 ## 檔案說明
 
+### 共用模組 `core/`
+
+| 檔案 | 說明 |
+|------|------|
+| `core/llm.py` | LLM 統一入口。Groq API 優先，Ollama fallback。句子生成、圖片查詢、合併呼叫都在這裡 |
+| `core/tts.py` | TTS 語音生成。edge-tts wrapper，定義 Andrew（正面）和 Ava（背面）語音 |
+| `core/image.py` | 圖片搜尋下載。Pexels API 優先，DuckDuckGo fallback |
+| `core/text.py` | 文字處理。strip_html、normalize、is_placeholder、has_image |
+| `core/anki.py` | AnkiConnect API wrapper |
+
+### 模板 `templates/`
+
+| 檔案 | 說明 |
+|------|------|
+| `templates/style.css` | 卡片 CSS。科學配色 Light Mode + 手機 RWD |
+| `templates/front.html` | 正面 HTML（單字 + 播放鍵） |
+| `templates/back.html` | 背面 HTML（左圖右文 + 單字高亮 + 播放鍵 JS 定位） |
+
 ### 主程式
 
 | 檔案 | 說明 |
 |------|------|
-| `add_word.py` | CLI 新增單字。輸入單字和聯想後，自動用 Groq 生成例句、Pexels 下載圖片、edge-tts 生成雙語音（Andrew 正面 + Ava 背面）。含拼字檢查，圖片和音檔平行生成。用法：`uv run python add_word.py <word> [association]` |
-| `backfill_words.py` | 批次補齊所有缺少欄位的卡片。4 路跨卡片並發 + 卡片內圖片/音檔平行。句子和圖片查詢合併為一次 LLM 呼叫。句子重新生成時音檔也會跟著更新。用法：`uv run python backfill_words.py` |
-| `regen_audio.py` | 重新生成所有卡片的音檔（句子 Ava + 單字 Andrew）。用於切換語音或修正錯誤音檔。用法：`uv run python regen_audio.py` |
-| `update_template.py` | 更新 Anki 卡片的 HTML 模板和 CSS 樣式。包含完整的 Light Mode 科學配色和手機 RWD。用法：`uv run python update_template.py` |
+| `add_word.py` | CLI 新增單字。用法：`uv run python add_word.py <word> [association]` |
+| `backfill_words.py` | 批次補齊缺少欄位。4 路並發。用法：`uv run python backfill_words.py` |
+| `regen_audio.py` | 重新生成所有音檔。用法：`uv run python regen_audio.py` |
+| `update_template.py` | 讀取 `templates/` 並更新 Anki 模板。用法：`uv run python update_template.py` |
+| `debug_audio.py` | 音檔除錯。用法：`uv run python debug_audio.py <word>` |
 
-### 輔助模組（Addon 透過 subprocess 呼叫）
+### Addon subprocess 模組
 
 | 檔案 | 說明 |
 |------|------|
-| `_image_helper.py` | 圖片搜尋模組。用 Groq 生成搜尋關鍵字，Pexels 下載（DuckDuckGo fallback）。Addon 以 subprocess 呼叫，因為 Anki 內建 Python 沒有 groq 套件。 |
-| `_gtts_helper.py` | TTS 語音模組。用 edge-tts 生成 MP3。支援單檔模式和 `--batch` 模式（一次 subprocess 生成多個音檔，asyncio.gather 並行）。 |
-| `_validate_helper.py` | 拼字檢查模組。Addon 呼叫用於驗證單字和聯想的拼寫。 |
-| `debug_audio.py` | 音檔除錯工具。查看某個單字的句子文字和音檔狀態，生成測試音檔到 /tmp。用法：`uv run python debug_audio.py <word>` |
+| `_image_helper.py` | 圖片搜尋 CLI。Addon 以 subprocess 呼叫 |
+| `_gtts_helper.py` | TTS CLI。支援 `--batch` 模式 |
+| `_validate_helper.py` | 拼字檢查 CLI |
 
 ### Anki Addon
 
 | 檔案 | 說明 |
 |------|------|
-| `~/Library/.../my_word_adder/__init__.py` | Anki 插件主程式。提供兩個 UI 入口：`Ctrl+Shift+W` 新增單字、`Ctrl+Shift+C` 補齊缺失卡片。LLM 用 urllib 直呼 Groq API（需 User-Agent），TTS/圖片透過 subprocess 呼叫上面的輔助模組。BackfillWorker 3 路並發，卡片內圖片/音檔平行。 |
+| `~/Library/.../my_word_adder/__init__.py` | Anki 插件主程式。`⌘D` 新增單字、`⌘S` 補齊缺失卡片。LLM 用 urllib 直呼 Groq API，TTS/圖片透過 subprocess。BackfillWorker 3 路並發 |
 
 ### 設定與測試
 
@@ -140,9 +158,9 @@ uv run python regen_audio.py
 |------|------|
 | `.groq_key` | Groq API 金鑰（gitignored） |
 | `.pexels_key` | Pexels API 金鑰（gitignored） |
-| `test_backfill.py` | 單元測試（41 tests）：純函數、LLM fallback、音檔生成、process_note 邏輯 |
-| `test_integration.py` | 整合測試：新增 3 張卡片，驗證所有欄位填滿，自動清理 |
-| `pyproject.toml` | Python 依賴定義（requests, groq, edge-tts, duckduckgo-search, pyspellchecker） |
+| `test_backfill.py` | 單元測試（38 tests） |
+| `test_integration.py` | 整合測試（新增 3 字驗證） |
+| `pyproject.toml` | Python 依賴定義 |
 
 ---
 
