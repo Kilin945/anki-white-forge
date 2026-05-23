@@ -1,0 +1,233 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700&display=swap");
+
+.card {
+  font-family: "Inter", -apple-system, "Helvetica Neue", sans-serif;
+  color: #1E293B;
+  background-color: #FDFBF7;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  min-height: 100vh;
+  position: relative;
+}
+
+/* ── Front ── */
+.word {
+  font-family: "Poppins", "Inter", sans-serif;
+  font-size: clamp(96px, 18vw, 160px);
+  font-weight: 700;
+  color: #1E293B;
+  text-align: center;
+  padding: 20px 0 8px;
+  letter-spacing: 2px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.front-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 90vh;
+  gap: 20px;
+  padding: 48px 48px;
+}
+
+.front-audio {
+  text-align: center;
+}
+
+.front-audio .replay-button {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.front-audio .replay-button svg {
+  width: 28px;
+  height: 28px;
+}
+
+.front-audio .replay-button svg circle {
+  fill: #f0ebe3;
+  stroke: #e2ddd5;
+}
+
+.front-audio .replay-button svg path {
+  fill: #a8a29e;
+}
+
+/* ── Back layout ── */
+.container {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  width: 100%;
+  margin: 0;
+  min-height: 90vh;
+}
+
+.img-side {
+  flex: 0 0 40%;
+  max-width: 40%;
+  overflow: hidden;
+  background: #f0ebe3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.img-side img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.img-side div[style] {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  padding: 4px 10px;
+  background: rgba(253,251,247,0.85);
+  font-size: 10px;
+  color: #c4bfb6;
+  text-align: center;
+}
+
+.text-side {
+  flex: 1;
+  padding: 48px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  justify-content: center;
+}
+
+.text-side .word-title {
+  font-family: "Poppins", "Inter", sans-serif;
+  font-size: clamp(60px, 10vw, 96px);
+  font-weight: 700;
+  color: #1E293B;
+}
+
+.association {
+  font-size: clamp(26px, 4vw, 36px);
+  color: #0284C7;
+  font-weight: 500;
+}
+
+.divider {
+  width: 40px;
+  height: 2px;
+  background: #e2ddd5;
+  border-radius: 1px;
+}
+
+.sentence {
+  font-size: clamp(24px, 3.5vw, 32px);
+  color: #64748B;
+  line-height: 1.75;
+}
+
+.sentence .hl {
+  color: #EA580C;
+  font-weight: 600;
+}
+
+/* ── Play button ── */
+.play-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px 12px 12px;
+  cursor: pointer;
+  border-radius: 8px;
+  width: fit-content;
+  margin-top: 16px;
+}
+
+.play-row .audio-label {
+  font-size: 14px;
+  color: #a8a29e;
+  user-select: none;
+}
+
+/* Mac: override to fixed position */
+@media (min-width: 601px) {
+  .play-row {
+    position: fixed;
+    bottom: 60px;
+    left: 605px;
+    margin-top: 0;
+    background: rgba(253,251,247,0.9);
+    z-index: 100;
+  }
+}
+
+.audio-btn .replay-button {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.audio-btn .replay-button svg {
+  width: 28px;
+  height: 28px;
+}
+
+.audio-btn .replay-button svg circle {
+  fill: #f0ebe3;
+  stroke: #e2ddd5;
+}
+
+.audio-btn .replay-button svg path {
+  fill: #a8a29e;
+}
+
+/* ── Mobile RWD ── */
+@media (max-width: 600px) {
+  .word {
+    font-size: clamp(40px, 13vw, 72px);
+    letter-spacing: 0;
+    flex: none;
+  }
+  .front-wrap {
+    min-height: 67vh;
+    gap: 16px;
+    padding: 24px 20px;
+    justify-content: center;
+  }
+  .container {
+    flex-direction: column;
+    min-height: auto;
+  }
+  .img-side {
+    flex: none;
+    max-width: 100%;
+    max-height: 160px;
+  }
+  .img-side img {
+    height: 160px;
+  }
+  .text-side {
+    padding: 24px 20px;
+    gap: 12px;
+  }
+  .text-side .word-title {
+    font-size: clamp(22px, 7vw, 36px);
+  }
+  .association {
+    font-size: clamp(16px, 4.5vw, 20px);
+  }
+  .sentence {
+    font-size: clamp(15px, 4vw, 19px);
+  }
+  .play-row {
+    justify-content: center;
+    margin: 10px auto;
+  }
+}
