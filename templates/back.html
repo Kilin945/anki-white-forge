@@ -1,0 +1,35 @@
+<div class="container">
+  <div class="img-side">
+    {{Image_Prompt}}
+  </div>
+  <div class="text-side">
+    <div class="word-title">{{Front}}</div>
+    <div class="association">{{Association}}</div>
+    <div class="divider"></div>
+    <div class="sentence" id="sent">{{Sentence}}</div>
+    <div class="play-row" id="play2" onclick="var b=this.querySelector('.replay-button');if(b)b.click();">
+      <div class="audio-btn">{{Audio}}</div>
+      <span class="audio-label">play sentence</span>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var el = document.getElementById("sent");
+  if (el) {
+    var word = "{{Front}}".replace(/<[^>]+>/g,"").trim().toLowerCase();
+    word = word.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+    var html = el.innerHTML;
+    var re = new RegExp("(" + word + "[a-z]*)", "gi");
+    el.innerHTML = html.replace(re, "<span class=hl>$1</span>");
+  }
+  if(window.innerWidth>600)return;
+  var btn=document.getElementById("play2");
+  if(!btn)return;
+  btn.style.position="absolute";
+  btn.style.top=(window.innerHeight*0.55)+"px";
+  btn.style.left="50%";
+  btn.style.transform="translateX(-50%)";
+  btn.style.margin="0";
+})();
+</script>
