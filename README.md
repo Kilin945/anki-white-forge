@@ -108,6 +108,37 @@ uv run python regen_audio.py
 
 ---
 
+## 專案結構
+
+```
+Anki/
+├── core/                    # 共用模組
+│   ├── anki.py              # AnkiConnect API
+│   ├── image.py             # Pexels + DuckDuckGo 圖片
+│   ├── llm.py               # Groq + Ollama LLM
+│   ├── text.py              # strip_html, normalize, is_placeholder
+│   └── tts.py               # edge-tts (Andrew + Ava)
+├── templates/               # Anki 卡片模板
+│   ├── front.html
+│   ├── back.html
+│   └── style.css
+├── add_word.py              # CLI 新增單字
+├── backfill_words.py        # 批次補齊欄位
+├── regen_audio.py           # 重生所有音檔
+├── update_template.py       # 套用模板到 Anki
+├── debug_audio.py           # 音檔除錯
+├── _image_helper.py         # Addon subprocess: 圖片
+├── _gtts_helper.py          # Addon subprocess: TTS
+├── _validate_helper.py      # Addon subprocess: 拼字
+├── test_backfill.py         # 單元測試
+├── test_integration.py      # 整合測試
+├── .groq_key                # API key (gitignored)
+├── .pexels_key              # API key (gitignored)
+└── pyproject.toml
+```
+
+---
+
 ## 檔案說明
 
 ### 共用模組 `core/`

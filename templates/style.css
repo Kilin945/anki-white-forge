@@ -191,7 +191,7 @@
 /* ── Mobile RWD ── */
 @media (max-width: 600px) {
   .word {
-    font-size: clamp(40px, 13vw, 72px);
+    font-size: clamp(48px, 15vw, 80px);
     letter-spacing: 0;
     flex: none;
   }
@@ -208,23 +208,33 @@
   .img-side {
     flex: none;
     max-width: 100%;
-    max-height: 160px;
+    max-height: 180px;
+    overflow: visible;
+    flex-direction: column;
   }
   .img-side img {
     height: 160px;
+  }
+  .img-side div[style] {
+    position: relative;
+    background: transparent;
+    font-size: 9px;
+    padding: 2px 0;
+    text-align: left;
   }
   .text-side {
     padding: 24px 20px;
     gap: 12px;
   }
   .text-side .word-title {
-    font-size: clamp(22px, 7vw, 36px);
+    font-size: clamp(42px, 11vw, 56px);
   }
   .association {
-    font-size: clamp(16px, 4.5vw, 20px);
+    font-size: clamp(18px, 5vw, 24px);
   }
   .sentence {
-    font-size: clamp(15px, 4vw, 19px);
+    font-size: clamp(17px, 4.5vw, 22px);
+    text-align: left;
   }
   .play-row {
     justify-content: center;
