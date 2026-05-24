@@ -114,6 +114,27 @@
   color: #1E293B;
 }
 
+.title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
+}
+
+.cn-hint {
+  font-family: "Poppins", "Inter", sans-serif;
+  font-size: clamp(30px, 5vw, 48px);
+  font-weight: 700;
+  color: #1E293B;
+  filter: blur(8px);
+  cursor: pointer;
+  transition: filter 0.2s;
+  user-select: none;
+}
+
+.cn-hint.revealed {
+  filter: none;
+}
+
 .association {
   font-size: clamp(26px, 4vw, 36px);
   color: #0284C7;

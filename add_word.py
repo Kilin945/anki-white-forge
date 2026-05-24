@@ -8,7 +8,7 @@ import threading
 from spellchecker import SpellChecker
 
 from core.anki import anki, DECK_NAME, MODEL_NAME
-from core.llm import llm_sentence, llm_image_query, _groq_client, GROQ_MODEL, OLLAMA_MODEL
+from core.llm import llm_sentence, llm_image_query, llm_translate, _groq_client, GROQ_MODEL, OLLAMA_MODEL
 from core.tts import make_audio, VOICE_WORD, VOICE_SENTENCE
 from core.image import fetch_image
 
@@ -107,15 +107,20 @@ def main():
     sentence = llm_sentence(word) or f"Please add an example sentence for '{word}'."
     print(f"  {sentence[:80]}")
 
-    print("[2] Image + Audio (parallel)…")
+    print("[2] Image + Audio + Translation (parallel)…")
     img_filename = f"{word}_img_{int(time.time())}.jpg"
     img_query = llm_image_query(word, definition=association, sentence=sentence)
 
     image_result = [False, ""]
+    translation_result = [""]
     def do_image():
         image_result[0], image_result[1] = fetch_image(word, os.path.join(MEDIA_DIR, img_filename), search_query=img_query)
+    def do_translate():
+        translation_result[0] = llm_translate(word, sentence)
     img_thread = threading.Thread(target=do_image)
+    trans_thread = threading.Thread(target=do_translate)
     img_thread.start()
+    trans_thread.start()
 
     audio_filename = f"{word}_tts.mp3"
     front_audio_filename = f"{word}_word.mp3"
@@ -124,9 +129,12 @@ def main():
     print(f"  Audio ✓")
 
     img_thread.join()
+    trans_thread.join()
     ok, attribution = image_result
+    translation = translation_result[0]
     image_field = (f'<img src="{img_filename}">' + attribution) if ok else ""
     print(f"  Image {'✓' if ok else '⚠️ not found'}")
+    print(f"  翻譯: {translation or '⚠️'}")
 
     print("[3] Adding card…")
     try:
@@ -137,6 +145,7 @@ def main():
                 "Sentence": sentence, "Image_Prompt": image_field,
                 "Audio": f"[sound:{audio_filename}]",
                 "Front_Audio": f"[sound:{front_audio_filename}]",
+                "Translation": translation,
             },
             "options": {"allowDuplicate": False},
             "tags": ["auto-added"],
