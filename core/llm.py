@@ -64,6 +64,12 @@ def llm_sentence(word):
     return result if len(result) > 10 else ""
 
 
+def llm_translate(word, sentence=""):
+    context = f' (used in: "{sentence}")' if sentence else ""
+    result = llm(f'Translate the English word "{word}"{context} into Traditional Chinese. Output only the Chinese translation, 1-4 characters, no explanation.')
+    return result.strip() if result else ""
+
+
 def llm_sentence_and_query(word, definition="", sentence=""):
     context_parts = []
     if definition:

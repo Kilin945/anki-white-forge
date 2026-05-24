@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from core.anki import anki, DECK_NAME
 from core.text import strip_html, is_placeholder, has_image
-from core.llm import llm_sentence_and_query, _groq_client, GROQ_MODEL, OLLAMA_MODEL
+from core.llm import llm_sentence_and_query, llm_translate, _groq_client, GROQ_MODEL, OLLAMA_MODEL
 from core.tts import make_audio, VOICE_WORD, VOICE_SENTENCE
 from core.image import fetch_image
 
@@ -44,14 +44,16 @@ def process_note(note):
     current_image = note["fields"]["Image_Prompt"]["value"]
     current_audio = note["fields"]["Audio"]["value"]
     current_front_audio = note["fields"].get("Front_Audio", {}).get("value", "")
+    current_translation = note["fields"].get("Translation", {}).get("value", "")
     current_assoc = strip_html(note["fields"].get("Association", {}).get("value", ""))
 
     has_sentence = bool(current_sentence) and not is_placeholder(current_sentence)
     has_img = has_image(current_image)
     has_audio = bool(current_audio)
     has_front_audio = bool(current_front_audio)
+    has_translation = bool(current_translation)
 
-    if has_sentence and has_img and has_audio and has_front_audio:
+    if has_sentence and has_img and has_audio and has_front_audio and has_translation:
         return word, "skipped"
 
     lines = [f"[{word}]"]
@@ -82,6 +84,8 @@ def process_note(note):
             futures["audio"] = pool.submit(_do_sentence_audio, word, sentence)
         if not has_front_audio:
             futures["front_audio"] = pool.submit(_do_word_audio, word)
+        if not has_translation:
+            futures["translation"] = pool.submit(llm_translate, word, sentence)
 
         if "image" in futures:
             img_filename, ok, attr = futures["image"].result()
@@ -95,6 +99,12 @@ def process_note(note):
         if "front_audio" in futures:
             fields["Front_Audio"] = f"[sound:{futures['front_audio'].result()}]"
             lines.append(f"  FrontAud : ✓ [Andrew]")
+
+        if "translation" in futures:
+            trans = futures["translation"].result()
+            if trans:
+                fields["Translation"] = trans
+                lines.append(f"  翻譯     : {trans}")
 
     if fields:
         anki("updateNoteFields", note={"id": note_id, "fields": fields})
@@ -115,7 +125,8 @@ def main():
         not is_placeholder(strip_html(n["fields"]["Sentence"]["value"])) and
         has_image(n["fields"]["Image_Prompt"]["value"]) and
         bool(n["fields"]["Audio"]["value"]) and
-        bool(n["fields"].get("Front_Audio", {}).get("value", ""))
+        bool(n["fields"].get("Front_Audio", {}).get("value", "")) and
+        bool(n["fields"].get("Translation", {}).get("value", ""))
     )]
     print(f"Found {len(notes)} total, {len(pending)} need backfill.\n")
     engine = f"Groq ({GROQ_MODEL})" if _groq_client else f"Ollama ({OLLAMA_MODEL})"

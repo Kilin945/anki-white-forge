@@ -3,7 +3,10 @@
     {{Image_Prompt}}
   </div>
   <div class="text-side">
-    <div class="word-title">{{Front}}</div>
+    <div class="title-row">
+      <div class="word-title">{{Front}}</div>
+      <div class="cn-hint" onclick="this.classList.toggle('revealed')">{{Translation}}</div>
+    </div>
     <div class="association">{{Association}}</div>
     <div class="divider"></div>
     <div class="sentence" id="sent">{{Sentence}}</div>
