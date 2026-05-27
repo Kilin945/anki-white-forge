@@ -369,6 +369,8 @@ class AddWordDialog(QDialog):
         status, suggestion = _groq_spellcheck(word)
         if status != "unknown":
             return status, suggestion
+        if " " in word:          # offline speller treats a phrase as one token → false typo; skip
+            return "ok", None
         try:
             result = subprocess.run(
                 [VENV_PYTHON, VALIDATE_SCRIPT, "word", word],
