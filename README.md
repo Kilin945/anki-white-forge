@@ -66,6 +66,10 @@ uv sync   # 自動安裝所有依賴
 - 掃描所有缺少欄位的卡片
 - 3 張並發處理，左圖右文即時進度顯示
 
+**找重複單字**：`⌘F`（Ctrl+F）
+- 正規化後 Front 相同的卡片分組列出（抓得到手機漏進來的 HTML / 大小寫變體）
+- 勾選要刪的（每組至少保留一張）→ 確認刪除
+
 ### 方式二：Terminal
 
 ```bash
@@ -187,7 +191,7 @@ Anki/
 
 | 檔案 | 說明 |
 |------|------|
-| `addon/__init__.py` | Anki 插件主程式（symlink 到 `~/Library/.../addons21/my_word_adder/`）。`⌘D` 新增單字、`⌘S` 補齊缺失卡片，兩者皆生成全欄位含 Translation。LLM 用 urllib 直呼 Groq API，TTS/圖片透過 subprocess。BackfillWorker 3 路並發。改完需重啟 Anki |
+| `addon/__init__.py` | Anki 插件主程式（symlink 到 `~/Library/.../addons21/my_word_adder/`）。`⌘D` 新增單字、`⌘S` 補齊缺失卡片（皆生成全欄位含 Translation）、`⌘F` 找重複單字。新增防護用正規化比對（HTML/大小寫變體都擋）。LLM 用 urllib 直呼 Groq，TTS/圖片透過 subprocess，BackfillWorker 3 路並發。改完需重啟 Anki |
 
 ### 設定與測試
 

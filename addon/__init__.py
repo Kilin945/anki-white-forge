@@ -16,6 +16,7 @@ from aqt import mw
 from aqt.qt import (
     QAction, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QPushButton, QProgressBar, QListWidget,
+    QTreeWidget, QTreeWidgetItem,
     QMessageBox, QInputDialog,
     Qt, QThread, pyqtSignal,
 )
@@ -643,6 +644,104 @@ class BackfillDialog(QDialog):
         self.run_btn.setEnabled(False)
 
 
+# ── find duplicates dialog ─────────────────────────────────────────────────────
+
+class FindDuplicatesDialog(QDialog):
+    """Find cards whose Front is the same after normalization (HTML/case-insensitive),
+    and let the user pick which to delete. Catches dupes that slipped in via mobile."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Find Duplicate Words")
+        self.setMinimumWidth(540)
+        self.setMinimumHeight(420)
+        self._setup_ui()
+        self._scan()
+
+    def _setup_ui(self):
+        root = QVBoxLayout(self)
+        root.addWidget(QLabel("正規化後 Front 相同的重複卡片。勾選要刪除的（每組至少保留一張）："))
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["單字 / 卡片", "例句"])
+        self.tree.setColumnWidth(0, 220)
+        root.addWidget(self.tree)
+
+        self.status = QLabel("")
+        root.addWidget(self.status)
+
+        btns = QHBoxLayout()
+        self.del_btn = QPushButton("刪除勾選的卡片")
+        self.del_btn.setEnabled(False)
+        self.del_btn.clicked.connect(self._on_delete)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        btns.addWidget(self.del_btn)
+        btns.addWidget(close_btn)
+        root.addLayout(btns)
+
+    def _scan(self):
+        from collections import defaultdict
+        self.tree.clear()
+
+        groups = defaultdict(list)
+        for nid in mw.col.find_notes(f'deck:"{DECK_NAME}"'):
+            note = mw.col.get_note(nid)
+            key = _clean_text(note["Front"], lower=True)
+            if key:
+                groups[key].append((nid, note))
+        dup_groups = {k: v for k, v in groups.items() if len(v) > 1}
+
+        total = 0
+        for key, items in sorted(dup_groups.items()):
+            parent = QTreeWidgetItem(self.tree, [f"{key}  ({len(items)} 張)", ""])
+            parent.setFlags(parent.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
+            parent.setExpanded(True)
+            for nid, note in items:
+                sentence = _clean_text(note["Sentence"]) if "Sentence" in note else ""
+                child = QTreeWidgetItem(parent, [_clean_text(note["Front"]) or key, sentence[:70]])
+                child.setFlags(child.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                child.setCheckState(0, Qt.CheckState.Unchecked)
+                child.setData(0, Qt.ItemDataRole.UserRole, nid)
+                total += 1
+
+        if dup_groups:
+            self.status.setText(f"找到 {len(dup_groups)} 組重複，共 {total} 張卡片。")
+            self.del_btn.setEnabled(True)
+        else:
+            self.status.setText("沒有重複卡片 ✓")
+            self.del_btn.setEnabled(False)
+
+    def _on_delete(self):
+        to_delete = []
+        for i in range(self.tree.topLevelItemCount()):
+            parent = self.tree.topLevelItem(i)
+            checked = [parent.child(j).data(0, Qt.ItemDataRole.UserRole)
+                       for j in range(parent.childCount())
+                       if parent.child(j).checkState(0) == Qt.CheckState.Checked]
+            if checked and len(checked) == parent.childCount():
+                self.status.setText(f"⚠ 「{parent.text(0)}」整組都勾選了，每組至少要留一張。")
+                return
+            to_delete.extend(checked)
+
+        if not to_delete:
+            self.status.setText("沒有勾選任何卡片。")
+            return
+
+        reply = QMessageBox.question(
+            self, "確認刪除",
+            f"確定刪除勾選的 {len(to_delete)} 張卡片？此動作無法復原。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        mw.col.remove_notes(to_delete)
+        mw.col.save()
+        mw.reset()
+        self._scan()
+        self.status.setText(f"✓ 已刪除 {len(to_delete)} 張。記得同步 Anki！")
+
+
 # ── menu entries ──────────────────────────────────────────────────────────────
 
 def open_dialog():
@@ -650,6 +749,9 @@ def open_dialog():
 
 def open_backfill_dialog():
     BackfillDialog(mw).exec()
+
+def open_duplicates_dialog():
+    FindDuplicatesDialog(mw).exec()
 
 action = QAction("Add English Word…", mw)
 action.setShortcut("Ctrl+D")
@@ -660,3 +762,8 @@ action2 = QAction("Complete Missing Cards…", mw)
 action2.setShortcut("Ctrl+S")
 action2.triggered.connect(open_backfill_dialog)
 mw.form.menuTools.addAction(action2)
+
+action3 = QAction("Find Duplicate Words…", mw)
+action3.setShortcut("Ctrl+F")
+action3.triggered.connect(open_duplicates_dialog)
+mw.form.menuTools.addAction(action3)
