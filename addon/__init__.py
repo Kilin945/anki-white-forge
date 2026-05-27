@@ -625,11 +625,14 @@ class BackfillWorker(QThread):
                 "action": "updateNoteFields", "version": 6,
                 "params": {"note": {"id": note_id, "fields": fields}}
             }).encode()
-            urllib.request.urlopen(
+            with urllib.request.urlopen(
                 urllib.request.Request(ANKI_URL, data=payload,
                             headers={"Content-Type": "application/json"}),
-                timeout=5,
-            )
+                timeout=15,
+            ) as resp:
+                err = json.loads(resp.read().decode()).get("error")
+            if err:
+                raise RuntimeError(f"AnkiConnect: {err}")
 
         t_icon = "✅" if translation_result[0] else "⚠️"
         self._update_status(word, f"{s_icon} Sentence  {i_icon} Image  ✅ Audio  {t_icon} 翻譯")
