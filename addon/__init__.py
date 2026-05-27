@@ -392,7 +392,7 @@ class AddWordDialog(QDialog):
         """Returns the word to add (possibly corrected), or None to abort."""
         # Layer 1 — charset hard block: any non-English letter / digit is definitely wrong
         if not _looks_english(word):
-            showWarning(f"'{word}' 不是英文字。")
+            showWarning(f"'{word}' 包含非英文字元，無法建立。")
             return None
 
         # Layer 2 — spelling (Groq, offline fallback)
@@ -711,7 +711,7 @@ class BackfillDialog(QDialog):
             word = _clean_text(note["Front"])
             if not _looks_english(word):       # not English → don't fill, just flag it
                 invalid += 1
-                self.list_widget.addItem(f"⚠ {word or note['Front']}（不是英文，略過）")
+                self.list_widget.addItem(f"{word or note['Front']}（包含非英文字元，無法建立）")
                 continue
 
             self.list_widget.addItem(word)
@@ -732,7 +732,7 @@ class BackfillDialog(QDialog):
         if notes:
             parts.append(f"{len(notes)} card(s) need filling.")
         if invalid:
-            parts.append(f"{invalid} 張不是英文、已略過（請修正或刪除）。")
+            parts.append(f"{invalid} 張包含非英文字元、無法建立（請修正或刪除）。")
         self.status.setText(" ".join(parts) if parts else "All cards are complete!")
         self.run_btn.setEnabled(bool(notes))
 
