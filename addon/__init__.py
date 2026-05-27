@@ -9,7 +9,6 @@ import json
 import html
 import subprocess
 import urllib.request
-import urllib.parse
 import urllib.error
 
 from aqt import mw
@@ -18,7 +17,7 @@ from aqt.qt import (
     QLabel, QLineEdit, QPushButton, QProgressBar, QListWidget,
     QTreeWidget, QTreeWidgetItem, QWidget,
     QKeySequenceEdit, QKeySequence,
-    QMessageBox, QInputDialog,
+    QMessageBox,
     Qt, QThread, pyqtSignal,
 )
 from aqt.utils import showWarning, tooltip
@@ -107,7 +106,6 @@ def _groq_spellcheck(word):
 # ── background worker ────────────────────────────────────────────────────────
 
 class Worker(QThread):
-    progress = pyqtSignal(str)
     step     = pyqtSignal(str, str)   # (field key, state: "ok" / "warn")
     finished = pyqtSignal(dict)
     error    = pyqtSignal(str)
@@ -264,14 +262,6 @@ class Worker(QThread):
                     break
             return html
         return ""
-
-    def _make_audio(self, text, filepath, voice=VOICE_SENTENCE):
-        result = subprocess.run(
-            [VENV_PYTHON, GTTS_SCRIPT, text, filepath, voice],
-            capture_output=True, text=True, timeout=20,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"TTS failed: {result.stderr.strip()}")
 
     def _make_audio_batch(self, items):
         result = subprocess.run(
