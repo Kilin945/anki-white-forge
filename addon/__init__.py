@@ -549,8 +549,8 @@ MAX_BACKFILL_WORKERS = 3
 
 
 class BackfillWorker(QThread):
-    step      = pyqtSignal(int, str, str)   # (note_id, field, "ok"/"warn")
-    card_done = pyqtSignal(int)             # (note_id) finished successfully
+    step      = pyqtSignal(object, str, str)   # (note_id, field, ...) — object: note ids exceed 32-bit int
+    card_done = pyqtSignal(object)             # (note_id) finished successfully
     finished  = pyqtSignal(list)
     error     = pyqtSignal(str)
 
