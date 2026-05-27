@@ -31,7 +31,7 @@ def normalized(raw):
 def main():
     apply = "--apply" in sys.argv
 
-    ids = anki("findNotes", query="deck:My_Daily_English")
+    ids = anki("findNotes", query='deck:My_Daily_English note:English_White_Method')
     info = anki("notesInfo", notes=ids)
 
     # collision guard: a normalized value shared by >1 note would create duplicate Fronts
