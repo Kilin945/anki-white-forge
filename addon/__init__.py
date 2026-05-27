@@ -68,6 +68,28 @@ def _deck_note_ids():
     return mw.col.find_notes(f'deck:"{DECK_NAME}" note:"{MODEL_NAME}"')
 
 
+def _groq_chat(prompt, *, temperature, max_tokens, timeout):
+    """POST one user prompt to Groq; return the stripped reply, or '' on no key / any failure."""
+    key = _load_groq_key()
+    if not key:
+        return ""
+    payload = json.dumps({
+        "model": GROQ_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }).encode()
+    try:
+        req = urllib.request.Request(GROQ_API_URL, data=payload,
+                  headers={"Content-Type": "application/json",
+                           "Authorization": f"Bearer {key}",
+                           "User-Agent": "AnkiWordAdder/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode())["choices"][0]["message"]["content"].strip()
+    except Exception:
+        return ""
+
+
 def _groq_spellcheck(word):
     """Spell-check a word/phrase via Groq. Returns:
       ("ok", None)          correctly spelled English word/phrase
@@ -75,9 +97,6 @@ def _groq_spellcheck(word):
       ("nonword", None)     gibberish / not an English word at all
       ("unknown", None)     Groq unavailable / couldn't decide
     """
-    key = _load_groq_key()
-    if not key:
-        return ("unknown", None)
     prompt = (
         f'You are an English spell checker. The user typed: "{word}".\n'
         f'- If it is a correctly spelled English word or common phrase, reply exactly: OK\n'
@@ -85,20 +104,8 @@ def _groq_spellcheck(word):
         f'- If it is not an English word at all (random letters / gibberish), reply exactly: NONWORD\n'
         f'Reply with only OK, NONWORD, or the corrected word — no other text.'
     )
-    payload = json.dumps({
-        "model": GROQ_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0,
-        "max_tokens": 12,
-    }).encode()
-    try:
-        req = urllib.request.Request(GROQ_API_URL, data=payload,
-                  headers={"Content-Type": "application/json",
-                           "Authorization": f"Bearer {key}",
-                           "User-Agent": "AnkiWordAdder/1.0"})
-        with urllib.request.urlopen(req, timeout=8) as r:
-            reply = json.loads(r.read().decode())["choices"][0]["message"]["content"].strip()
-    except Exception:
+    reply = _groq_chat(prompt, temperature=0, max_tokens=12, timeout=8)
+    if not reply:
         return ("unknown", None)
     cleaned = reply.strip().strip('".').strip().lower()
     if cleaned in ("ok", word.lower()):
@@ -180,26 +187,8 @@ class Worker(QThread):
     # ── helpers ──────────────────────────────────────────────────────────────
 
     def _groq_sentence(self, word):
-        key = _load_groq_key()
-        if not key:
-            return ""
         prompt = f'Write one short, natural English example sentence using "{word}" in context. Output only the sentence, no explanation.'
-        payload = json.dumps({
-            "model": GROQ_MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.7,
-            "max_tokens": 200,
-        }).encode()
-        try:
-            req = urllib.request.Request(GROQ_API_URL, data=payload,
-                              headers={"Content-Type": "application/json",
-                                       "Authorization": f"Bearer {key}",
-                                       "User-Agent": "AnkiWordAdder/1.0"})
-            with urllib.request.urlopen(req, timeout=15) as r:
-                result = json.loads(r.read().decode())
-                return result["choices"][0]["message"]["content"].strip()
-        except Exception:
-            return ""
+        return _groq_chat(prompt, temperature=0.7, max_tokens=200, timeout=15)
 
     def _ollama_sentence(self, word):
         payload = json.dumps({
@@ -229,27 +218,10 @@ class Worker(QThread):
 
     def _groq_translate(self, word, sentence):
         """Traditional Chinese translation of word in context. Returns '' on failure."""
-        key = _load_groq_key()
-        if not key:
-            return ""
         prompt = (f'Translate the English word "{word}" (used in: "{sentence}") into '
                   f'Traditional Chinese. Output only the Chinese translation, '
                   f'1-4 characters, no explanation.')
-        payload = json.dumps({
-            "model": GROQ_MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3,
-            "max_tokens": 20,
-        }).encode()
-        try:
-            req = urllib.request.Request(GROQ_API_URL, data=payload,
-                              headers={"Content-Type": "application/json",
-                                       "Authorization": f"Bearer {key}",
-                                       "User-Agent": "AnkiWordAdder/1.0"})
-            with urllib.request.urlopen(req, timeout=10) as r:
-                reply = json.loads(r.read().decode())["choices"][0]["message"]["content"].strip()
-        except Exception:
-            return ""
+        reply = _groq_chat(prompt, temperature=0.3, max_tokens=20, timeout=10)
         # reject implausible output → leave empty so ⌘S re-generates it later
         if re.search(r"[A-Za-z]", reply):                    # English preamble / refusal / paren
             return ""
