@@ -14,7 +14,7 @@ import urllib.error
 from aqt import mw
 from aqt.qt import (
     QAction, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLabel, QLineEdit, QPushButton, QProgressBar, QListWidget,
+    QLabel, QLineEdit, QPushButton, QProgressBar, QScrollArea,
     QTreeWidget, QTreeWidgetItem, QWidget,
     QKeySequenceEdit, QKeySequence,
     QMessageBox,
@@ -37,6 +37,16 @@ IMAGE_SCRIPT    = os.path.expanduser("~/Workspace/Anki/_image_helper.py")
 VALIDATE_SCRIPT = os.path.expanduser("~/Workspace/Anki/_validate_helper.py")
 VOICE_WORD     = "en-US-AndrewNeural"
 VOICE_SENTENCE = "en-US-AvaNeural"
+
+# field progress boxes — shared by Add (single row) and Complete (one row per card)
+FIELD_BOXES = [("sentence", "Sentence"), ("image", "Image"),
+               ("audio", "Audio"), ("translation", "翻譯")]
+BOX_STYLE = {  # text is just the field label; state shown by colour only (no ✓ / ⚠)
+    "working": ("border:1.5px solid #94a3b8; border-radius:6px; padding:6px 12px; color:#64748b;", "{}"),
+    "ok":      ("border:1.5px solid #16a34a; border-radius:6px; padding:6px 12px; color:#16a34a; font-weight:600;", "{}"),
+    "warn":    ("border:1.5px solid #ea580c; border-radius:6px; padding:6px 12px; color:#ea580c; font-weight:600;", "{}"),
+}
+_FIELD_LABEL = dict(FIELD_BOXES)
 
 
 def _load_groq_key():
@@ -262,14 +272,6 @@ class Worker(QThread):
 # ── dialog ───────────────────────────────────────────────────────────────────
 
 class AddWordDialog(QDialog):
-    # fields generated per add, shown as a row of boxes that flip to ✓ when done
-    FIELD_BOXES = [("sentence", "Sentence"), ("image", "Image"),
-                   ("audio", "Audio"), ("translation", "翻譯")]
-    _BOX_STYLE = {
-        "working": ("border:1.5px solid #94a3b8; border-radius:6px; padding:6px 12px; color:#64748b;", "{} …"),
-        "ok":      ("border:1.5px solid #16a34a; border-radius:6px; padding:6px 12px; color:#16a34a; font-weight:600;", "✓ {}"),
-        "warn":    ("border:1.5px solid #ea580c; border-radius:6px; padding:6px 12px; color:#ea580c; font-weight:600;", "⚠ {}"),
-    }
     _STATUS_STYLE = {
         "info": "font-size:13px; color:#64748b;",
         "ok":   "font-size:18px; color:#16a34a; font-weight:700; padding:6px;",
@@ -298,7 +300,7 @@ class AddWordDialog(QDialog):
         # per-field progress boxes — shown when adding, each flips to ✓ when done
         self._boxes = {}
         boxes_row = QHBoxLayout()
-        for key, label in self.FIELD_BOXES:
+        for key, label in FIELD_BOXES:
             box = QLabel(label)
             box.setAlignment(Qt.AlignmentFlag.AlignCenter)
             box.setVisible(False)
@@ -331,9 +333,9 @@ class AddWordDialog(QDialog):
         box = self._boxes.get(key)
         if not box:
             return
-        style, fmt = self._BOX_STYLE[state]
+        style, fmt = BOX_STYLE[state]
         box.setStyleSheet(style)
-        box.setText(fmt.format(dict(self.FIELD_BOXES)[key]))
+        box.setText(fmt.format(_FIELD_LABEL[key]))
 
     def _start_boxes(self):
         for key in self._boxes:
@@ -488,7 +490,7 @@ class AddWordDialog(QDialog):
             mw.col.save()
             mw.reset()
 
-            self._set_status(f"✓ '{data['word']}' added!", "ok")
+            self._set_status(f"'{data['word']}' added!", "ok")
             self.word_input.clear()
             self.assoc_input.clear()
             tooltip(f"'{data['word']}' added to {DECK_NAME}", period=2000)
@@ -504,15 +506,53 @@ class AddWordDialog(QDialog):
         self.progress_bar.setVisible(False)
 
 
+class FieldRow(QWidget):
+    """One card's progress: word + Sentence/Image/Audio/翻譯 boxes + 'added!' badge.
+    Fields already present start green; missing ones start grey and flip on completion."""
+
+    def __init__(self, word, present, parent=None):
+        super().__init__(parent)
+        self.word = word
+        self._boxes = {}
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(4, 2, 4, 2)
+        wl = QLabel(word)
+        wl.setMinimumWidth(120)
+        wl.setStyleSheet("font-weight:600; color:#1E293B;")
+        lay.addWidget(wl)
+        for key, _label in FIELD_BOXES:
+            box = QLabel()
+            box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._boxes[key] = box
+            lay.addWidget(box)
+            self.set_box(key, "ok" if present.get(key) else "working")
+        self.badge = QLabel("")
+        self.badge.setStyleSheet("color:#16a34a; font-weight:700; padding-left:8px;")
+        lay.addWidget(self.badge)
+        lay.addStretch()
+
+    def set_box(self, key, state):
+        box = self._boxes.get(key)
+        if not box:
+            return
+        style, fmt = BOX_STYLE[state]
+        box.setStyleSheet(style)
+        box.setText(fmt.format(_FIELD_LABEL[key]))
+
+    def set_done(self):
+        self.badge.setText(f"'{self.word}' added!")
+
+
 # ── backfill worker ───────────────────────────────────────────────────────────
 
 MAX_BACKFILL_WORKERS = 3
 
 
 class BackfillWorker(QThread):
-    progress = pyqtSignal(str)
-    finished = pyqtSignal(list)
-    error    = pyqtSignal(str)
+    step      = pyqtSignal(int, str, str)   # (note_id, field, "ok"/"warn")
+    card_done = pyqtSignal(int)             # (note_id) finished successfully
+    finished  = pyqtSignal(list)
+    error     = pyqtSignal(str)
 
     def __init__(self, notes, media_dir):
         super().__init__()
@@ -520,50 +560,32 @@ class BackfillWorker(QThread):
         self.media_dir = media_dir
         self._w = Worker.__new__(Worker)
         self._w.media_dir = media_dir
-        self._card_status = {}
-        self._lock = __import__('threading').Lock()
-
-    def _update_status(self, word, step):
-        with self._lock:
-            self._card_status[word] = step
-            lines = []
-            for w, s in self._card_status.items():
-                lines.append(f"{w}:  {s}")
-            self.progress.emit("\n".join(lines))
 
     def _process_one(self, note):
-        raw  = note["fields"]["Front"]["value"]
-        word = _clean_text(raw, lower=True)
         note_id = note["noteId"]
-
-        self._update_status(word, "Sentence…")
+        word = _clean_text(note["fields"]["Front"]["value"], lower=True)
         fields = {}
-        engine = ""
 
         current = note["fields"]["Sentence"]["value"]
         if not current or any(p in current for p in PLACEHOLDERS):
-            sentence, engine = self._w._llm_sentence(word)
+            sentence, _ = self._w._llm_sentence(word)
             if not sentence:
                 sentence = f"Please add an example sentence for '{word}'."
             fields["Sentence"] = sentence
+            self.step.emit(note_id, "sentence",
+                           "ok" if not any(p in sentence for p in PLACEHOLDERS) else "warn")
         else:
             sentence = _clean_text(current)
-            engine = "kept"
-
-        s_icon = "✅" if not any(p in sentence for p in PLACEHOLDERS) else "⚠️"
-        self._update_status(word, f"{s_icon} Sentence ({engine}) → Image + Audio + 翻譯…")
 
         import threading
         need_image = "<img" not in note["fields"]["Image_Prompt"]["value"]
         need_audio = not note["fields"]["Audio"]["value"]
-        front_audio_val = note["fields"].get("Front_Audio", {}).get("value", "")
-        need_front = not front_audio_val
+        need_front = not note["fields"].get("Front_Audio", {}).get("value", "")
         need_translation = not note["fields"].get("Translation", {}).get("value", "")
 
         image_result = [None]
         translation_result = [""]
-        img_thread = None
-        trans_thread = None
+        img_thread = trans_thread = None
 
         if need_translation:
             def do_translate(w=word, s=sentence):
@@ -587,20 +609,23 @@ class BackfillWorker(QThread):
             front_filename = f"{word}_word.mp3"
             audio_batch.append({"text": word, "filepath": os.path.join(self.media_dir, front_filename), "voice": VOICE_WORD})
             fields["Front_Audio"] = f"[sound:{front_filename}]"
-        if audio_batch:
-            self._w._make_audio_batch(audio_batch)
+        try:
+            if audio_batch:
+                self._w._make_audio_batch(audio_batch)
+                self.step.emit(note_id, "audio", "ok")
+        finally:
+            if img_thread:
+                img_thread.join()
+            if trans_thread:
+                trans_thread.join()
 
-        if img_thread:
-            img_thread.join()
+        if need_image:
             fields["Image_Prompt"] = image_result[0] or ""
-            i_icon = "✅" if image_result[0] else "⚠️"
-        else:
-            i_icon = "✅"
-
-        if trans_thread:
-            trans_thread.join()
+            self.step.emit(note_id, "image", "ok" if image_result[0] else "warn")
+        if need_translation:
             if translation_result[0]:
                 fields["Translation"] = translation_result[0]
+            self.step.emit(note_id, "translation", "ok" if translation_result[0] else "warn")
 
         if fields:
             payload = json.dumps({
@@ -616,7 +641,7 @@ class BackfillWorker(QThread):
             if err:
                 raise RuntimeError(f"AnkiConnect: {err}")
 
-        self._update_status(word, f"{s_icon} Sentence  {i_icon} Image  ✅ Audio")
+        self.card_done.emit(note_id)
         return f"✓ {word}" if fields else f"— {word}"
 
     def run(self):
@@ -630,7 +655,6 @@ class BackfillWorker(QThread):
                 except Exception as e:
                     note = futures[future]
                     word = _clean_text(note["fields"]["Front"]["value"], lower=True)
-                    self._update_status(word, f"✗ {e}")
                     results.append(f"✗ {word}: {e}")
         self.finished.emit(results)
 
@@ -641,19 +665,24 @@ class BackfillDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Complete Missing Cards")
-        self.setMinimumWidth(460)
-        self.setMinimumHeight(320)
+        self.setMinimumWidth(720)
+        self.setMinimumHeight(380)
         self._worker = None
+        self._rows = {}
         self._setup_ui()
         self._scan()
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
+        root.addWidget(QLabel("Cards missing Sentence / Image / Audio / Translation:"))
 
-        root.addWidget(QLabel("Cards missing Sentence / Image / Audio / Front Audio / Translation:"))
-
-        self.list_widget = QListWidget()
-        root.addWidget(self.list_widget)
+        self._rows_host = QWidget()
+        self._rows_box = QVBoxLayout(self._rows_host)
+        self._rows_box.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self._rows_host)
+        root.addWidget(scroll)
 
         self.status = QLabel("")
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -675,15 +704,15 @@ class BackfillDialog(QDialog):
         root.addLayout(btns)
 
     def _scan(self):
-        ids   = _deck_note_ids()
         notes = []
         invalid = 0
-        for nid in ids:
+        for nid in _deck_note_ids():
             note = mw.col.get_note(nid)
             bad_sentence = any(p in note["Sentence"] for p in PLACEHOLDERS)
             front_audio = note["Front_Audio"] if "Front_Audio" in note else ""
             translation = note["Translation"] if "Translation" in note else ""
             has_img = "<img" in note["Image_Prompt"]
+            audio_ok = bool(note["Audio"]) and bool(front_audio)
             incomplete = (not note["Sentence"] or bad_sentence or not note["Audio"]
                           or not has_img or not front_audio or not translation)
             if not incomplete:
@@ -692,10 +721,20 @@ class BackfillDialog(QDialog):
             word = _clean_text(note["Front"])
             if not _looks_english(word):       # not English → don't fill, just flag it
                 invalid += 1
-                self.list_widget.addItem(f"{word or note['Front']}（包含非英文字元，無法建立）")
+                lbl = QLabel(f"{word or note['Front']}（包含非英文字元，無法建立）")
+                lbl.setStyleSheet("color:#ea580c; padding:4px;")
+                self._rows_box.addWidget(lbl)
                 continue
 
-            self.list_widget.addItem(word)
+            present = {
+                "sentence": bool(note["Sentence"]) and not bad_sentence,
+                "image": has_img,
+                "audio": audio_ok,
+                "translation": bool(translation),
+            }
+            row = FieldRow(word, present)
+            self._rows_box.addWidget(row)
+            self._rows[nid] = row
             notes.append({
                 "noteId": nid,
                 "fields": {
@@ -708,6 +747,7 @@ class BackfillDialog(QDialog):
                     "Translation":  {"value": translation},
                 }
             })
+        self._rows_box.addStretch()
         self._pending_notes = notes
         parts = []
         if notes:
@@ -721,16 +761,24 @@ class BackfillDialog(QDialog):
         self.run_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
         self._worker = BackfillWorker(self._pending_notes, mw.col.media.dir())
-        self._worker.progress.connect(self.status.setText)
+        self._worker.step.connect(self._on_step)
+        self._worker.card_done.connect(self._on_card_done)
         self._worker.finished.connect(self._on_finished)
         self._worker.error.connect(lambda e: self.status.setText(f"Error: {e}"))
         self._worker.start()
 
+    def _on_step(self, note_id, field, state):
+        row = self._rows.get(note_id)
+        if row:
+            row.set_box(field, state)
+
+    def _on_card_done(self, note_id):
+        row = self._rows.get(note_id)
+        if row:
+            row.set_done()
+
     def _on_finished(self, results):
         self.progress_bar.setVisible(False)
-        self.list_widget.clear()
-        for r in results:
-            self.list_widget.addItem(r)
         mw.col.save()
         mw.reset()
         ok = sum(1 for r in results if r.startswith("✓"))
