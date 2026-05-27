@@ -62,6 +62,12 @@ def _looks_english(word):
     return bool(ENGLISH_WORD_RE.fullmatch((word or "").strip()))
 
 
+def _deck_note_ids():
+    """Note ids in the deck restricted to our note type, so deck scans never touch a
+    stray note type (e.g. a Cloze card) that lacks our fields and would KeyError."""
+    return mw.col.find_notes(f'deck:"{DECK_NAME}" note:"{MODEL_NAME}"')
+
+
 def _groq_spellcheck(word):
     """Spell-check a word/phrase via Groq. Returns:
       ("ok", None)          correctly spelled English word/phrase
@@ -464,7 +470,7 @@ class AddWordDialog(QDialog):
         # not just exact match — e.g. an existing "<div>audit</div>" or "Audit")
         target = _clean_text(word, lower=True)
         if any(_clean_text(mw.col.get_note(nid)["Front"], lower=True) == target
-               for nid in mw.col.find_notes(f'deck:"{DECK_NAME}"')):
+               for nid in _deck_note_ids()):
             self._set_status(f"⚠ '{word}' already exists in the deck.", "warn")
             return
 
@@ -685,7 +691,7 @@ class BackfillDialog(QDialog):
         root.addLayout(btns)
 
     def _scan(self):
-        ids   = mw.col.find_notes(f'deck:"{DECK_NAME}"')
+        ids   = _deck_note_ids()
         notes = []
         invalid = 0
         for nid in ids:
@@ -788,7 +794,7 @@ class FindDuplicatesDialog(QDialog):
         self.tree.clear()
 
         groups = defaultdict(list)
-        for nid in mw.col.find_notes(f'deck:"{DECK_NAME}"'):
+        for nid in _deck_note_ids():
             note = mw.col.get_note(nid)
             key = _clean_text(note["Front"], lower=True)
             if key:
