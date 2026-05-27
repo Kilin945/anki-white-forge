@@ -242,6 +242,11 @@ class AddWordDialog(QDialog):
         "ok":      ("border:1.5px solid #16a34a; border-radius:6px; padding:6px 12px; color:#16a34a; font-weight:600;", "✓ {}"),
         "warn":    ("border:1.5px solid #ea580c; border-radius:6px; padding:6px 12px; color:#ea580c; font-weight:600;", "⚠ {}"),
     }
+    _STATUS_STYLE = {
+        "info": "font-size:13px; color:#64748b;",
+        "ok":   "font-size:18px; color:#16a34a; font-weight:700; padding:6px;",
+        "warn": "font-size:14px; color:#ea580c; font-weight:600;",
+    }
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -306,6 +311,10 @@ class AddWordDialog(QDialog):
         for key in self._boxes:
             self._boxes[key].setVisible(True)
             self._set_box(key, "working")
+
+    def _set_status(self, text, kind="info"):
+        self.status.setStyleSheet(self._STATUS_STYLE[kind])
+        self.status.setText(text)
 
     def _check_word_api(self, word):
         url = "https://api.dictionaryapi.dev/api/v2/entries/en/" + urllib.parse.quote(word)
@@ -389,7 +398,7 @@ class AddWordDialog(QDialog):
             showWarning("Please enter a word.")
             return
 
-        self.status.setText("Checking word…")
+        self._set_status("Checking word…")
         word = self._validate_word_ui(word)
         if word is None:
             self.status.setText("")
@@ -406,12 +415,12 @@ class AddWordDialog(QDialog):
         target = _clean_text(word, lower=True)
         if any(_clean_text(mw.col.get_note(nid)["Front"], lower=True) == target
                for nid in mw.col.find_notes(f'deck:"{DECK_NAME}"')):
-            self.status.setText(f"⚠ '{word}' already exists in the deck.")
+            self._set_status(f"⚠ '{word}' already exists in the deck.", "warn")
             return
 
         self.add_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
-        self.status.setText(f"生成中：{word}")
+        self._set_status(f"生成中：{word}")
         self._start_boxes()
 
         self._worker = Worker(word, assoc, mw.col.media.dir())
@@ -441,18 +450,18 @@ class AddWordDialog(QDialog):
             mw.col.save()
             mw.reset()
 
-            self.status.setText(f"✓ '{data['word']}' added!")
+            self._set_status(f"✓ '{data['word']}' added!", "ok")
             self.word_input.clear()
             self.assoc_input.clear()
             tooltip(f"'{data['word']}' added to {DECK_NAME}", period=2000)
         except Exception as e:
-            self.status.setText(f"Error: {e}")
+            self._set_status(f"Error: {e}", "warn")
         finally:
             self.add_btn.setEnabled(True)
             self.progress_bar.setVisible(False)
 
     def _on_error(self, msg):
-        self.status.setText(f"Error: {msg}")
+        self._set_status(f"Error: {msg}", "warn")
         self.add_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
 
