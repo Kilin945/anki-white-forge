@@ -48,7 +48,8 @@ def _load_groq_key():
 
 
 def _clean_text(raw, *, lower=False):
-    text = html.unescape(re.sub(r"<[^>]+>", "", raw)).replace("\xa0", " ").strip()
+    # strip only real HTML tags (`<tag ...>` / `</tag>`); leave literal `<`…`>` in content
+    text = html.unescape(re.sub(r"</?[a-zA-Z][^>]*>", "", raw)).replace("\xa0", " ").strip()
     return text.lower() if lower else text
 
 
