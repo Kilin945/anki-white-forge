@@ -16,7 +16,8 @@ from aqt import mw
 from aqt.qt import (
     QAction, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QPushButton, QProgressBar, QListWidget,
-    QTreeWidget, QTreeWidgetItem,
+    QTreeWidget, QTreeWidgetItem, QWidget,
+    QKeySequenceEdit, QKeySequence,
     QMessageBox, QInputDialog,
     Qt, QThread, pyqtSignal,
 )
@@ -754,11 +755,11 @@ def open_duplicates_dialog():
     FindDuplicatesDialog(mw).exec()
 
 DEFAULT_SHORTCUTS = {"add": "Ctrl+D", "complete": "Ctrl+S", "find_duplicates": "Ctrl+F"}
+ACTIONS = {}  # key -> QAction, so the settings dialog can re-bind shortcuts live
 
 
 def _shortcut(key):
-    """User-configurable via addon config (config.json / Anki Config editor).
-    Empty string = no shortcut (menu only). Change needs an Anki restart."""
+    """Current shortcut from addon config; empty string = no shortcut (menu only)."""
     cfg = mw.addonManager.getConfig(__name__) or {}
     return cfg.get("shortcuts", {}).get(key, DEFAULT_SHORTCUTS[key])
 
@@ -770,8 +771,75 @@ def _add_menu_action(title, key, handler):
         act.setShortcut(sc)
     act.triggered.connect(handler)
     mw.form.menuTools.addAction(act)
+    ACTIONS[key] = act
+
+
+class SettingsDialog(QDialog):
+    """Friendly shortcut editor — press a key combo per action, no JSON, applies live."""
+
+    LABELS = [
+        ("add", "Add English Word"),
+        ("complete", "Complete Missing Cards"),
+        ("find_duplicates", "Find Duplicate Words"),
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("My Word Adder — 快捷鍵設定")
+        self.setMinimumWidth(440)
+        self._edits = {}
+        self._setup_ui()
+
+    def _setup_ui(self):
+        root = QVBoxLayout(self)
+        root.addWidget(QLabel("點欄位後直接按你要的組合鍵；按「清除」＝不綁，只走選單。"))
+
+        form = QFormLayout()
+        for key, title in self.LABELS:
+            edit = QKeySequenceEdit(QKeySequence(_shortcut(key)))
+            edit.setMaximumSequenceLength(1)
+            self._edits[key] = edit
+
+            clear = QPushButton("清除")
+            clear.clicked.connect(lambda _, e=edit: e.clear())
+            row = QHBoxLayout()
+            row.addWidget(edit)
+            row.addWidget(clear)
+            wrap = QWidget()
+            wrap.setLayout(row)
+            form.addRow(f"{title}：", wrap)
+        root.addLayout(form)
+
+        btns = QHBoxLayout()
+        save = QPushButton("儲存")
+        save.setDefault(True)
+        save.clicked.connect(self._on_save)
+        cancel = QPushButton("取消")
+        cancel.clicked.connect(self.reject)
+        btns.addWidget(save)
+        btns.addWidget(cancel)
+        root.addLayout(btns)
+
+    def _on_save(self):
+        cfg = mw.addonManager.getConfig(__name__) or {}
+        sc = cfg.setdefault("shortcuts", {})
+        for key, edit in self._edits.items():
+            sc[key] = edit.keySequence().toString()
+        mw.addonManager.writeConfig(__name__, cfg)
+        for key, act in ACTIONS.items():          # apply live — no restart needed
+            act.setShortcut(QKeySequence(sc.get(key, DEFAULT_SHORTCUTS[key])))
+        tooltip("快捷鍵已更新", period=2000)
+        self.accept()
+
+
+def open_settings_dialog():
+    SettingsDialog(mw).exec()
 
 
 _add_menu_action("Add English Word…", "add", open_dialog)
 _add_menu_action("Complete Missing Cards…", "complete", open_backfill_dialog)
 _add_menu_action("Find Duplicate Words…", "find_duplicates", open_duplicates_dialog)
+
+_settings_action = QAction("My Word Adder Settings…", mw)
+_settings_action.triggered.connect(open_settings_dialog)
+mw.form.menuTools.addAction(_settings_action)
