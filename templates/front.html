@@ -26,6 +26,9 @@
   }
   fit();
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit); // refit after webfont loads
-  window.addEventListener('resize', fit);
+  if (!window.__wordFitResize) {            // Anki reruns this script per card — bind resize only once
+    window.__wordFitResize = true;
+    window.addEventListener('resize', fit); // fit() re-queries .word each call, so it tracks the current card
+  }
 })();
 </script>
