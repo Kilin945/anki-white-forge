@@ -945,10 +945,14 @@ class SettingsDialog(QDialog):
         cancel.setFocus()  # start with focus off the key fields — nothing armed
 
     def _on_save(self):
+        new = {key: edit.keySequence().toString() for key, edit in self._edits.items()}
+        used = [s for s in new.values() if s]
+        if len(used) != len(set(used)):       # same combo on two actions = ambiguous, neither fires
+            showWarning("兩個功能設了相同的快捷鍵，請改成不同的。")
+            return
         cfg = mw.addonManager.getConfig(__name__) or {}
         sc = cfg.setdefault("shortcuts", {})
-        for key, edit in self._edits.items():
-            sc[key] = edit.keySequence().toString()
+        sc.update(new)
         mw.addonManager.writeConfig(__name__, cfg)
         for key, act in ACTIONS.items():          # apply live — no restart needed
             act.setShortcut(QKeySequence(sc.get(key, DEFAULT_SHORTCUTS[key])))
