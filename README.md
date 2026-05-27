@@ -131,6 +131,7 @@ Anki/
 ├── regen_audio.py           # 重生所有音檔
 ├── update_template.py       # 套用模板到 Anki
 ├── debug_audio.py           # 音檔除錯
+├── normalize_fronts.py      # 正規化既有 Front（去 HTML / 轉小寫）
 ├── _image_helper.py         # Addon subprocess: 圖片
 ├── _gtts_helper.py          # Addon subprocess: TTS
 ├── _validate_helper.py      # Addon subprocess: 拼字
@@ -172,6 +173,7 @@ Anki/
 | `regen_audio.py` | 重新生成所有音檔。用法：`uv run python regen_audio.py` |
 | `update_template.py` | 讀取 `templates/` 並更新 Anki 模板。用法：`uv run python update_template.py` |
 | `debug_audio.py` | 音檔除錯。用法：`uv run python debug_audio.py <word>` |
+| `normalize_fronts.py` | 正規化既有 Front：去殘留 HTML + 轉小寫，全大寫縮寫（如 ASAP）保留。預設只預覽，加 `--apply` 才寫入 |
 
 ### Addon subprocess 模組
 
