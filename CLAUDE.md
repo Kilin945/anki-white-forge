@@ -22,6 +22,7 @@ Anki 自動化單字系統，牌組 `My_Daily_English`、筆記類型 `English_W
 - 圖片偵測用 `"<img" in value`（不是 `bool(value)`），以處理殘留 HTML
 - `backfill_words.py` 在句子變動時會重生音檔（`need_sentence` flag）
 - ⌘D（Add）和 ⌘S（Complete）都會生成全部欄位含 `Translation`，共用 `Worker._groq_translate()`
+- ⌘D 新增驗證：非英文字元硬擋 → Groq 拼字檢查 `_groq_spellcheck()`（回 OK／更正字／NONWORD），斷網退 `_validate_helper.py` 離線拼字
 
 ## Git 規則
 

@@ -53,6 +53,48 @@ def _clean_text(raw, *, lower=False):
     return text.lower() if lower else text
 
 
+def _groq_spellcheck(word):
+    """Spell-check a word/phrase via Groq. Returns:
+      ("ok", None)          correctly spelled English word/phrase
+      ("typo", suggestion)  misspelled — with the single best correction
+      ("nonword", None)     gibberish / not an English word at all
+      ("unknown", None)     Groq unavailable / couldn't decide
+    """
+    key = _load_groq_key()
+    if not key:
+        return ("unknown", None)
+    prompt = (
+        f'You are an English spell checker. The user typed: "{word}".\n'
+        f'- If it is a correctly spelled English word or common phrase, reply exactly: OK\n'
+        f'- If it is a misspelling of a real English word, reply only the single correct spelling.\n'
+        f'- If it is not an English word at all (random letters / gibberish), reply exactly: NONWORD\n'
+        f'Reply with only OK, NONWORD, or the corrected word — no other text.'
+    )
+    payload = json.dumps({
+        "model": GROQ_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0,
+        "max_tokens": 12,
+    }).encode()
+    try:
+        req = urllib.request.Request(GROQ_API_URL, data=payload,
+                  headers={"Content-Type": "application/json",
+                           "Authorization": f"Bearer {key}",
+                           "User-Agent": "AnkiWordAdder/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            reply = json.loads(r.read().decode())["choices"][0]["message"]["content"].strip()
+    except Exception:
+        return ("unknown", None)
+    cleaned = reply.strip().strip('".').strip().lower()
+    if cleaned in ("ok", word.lower()):
+        return ("ok", None)
+    if cleaned == "nonword":
+        return ("nonword", None)
+    if cleaned and re.fullmatch(r"[a-z][a-z'\- ]*", cleaned):
+        return ("typo", cleaned)
+    return ("unknown", None)
+
+
 # ── background worker ────────────────────────────────────────────────────────
 
 class Worker(QThread):
@@ -316,26 +358,11 @@ class AddWordDialog(QDialog):
         self.status.setStyleSheet(self._STATUS_STYLE[kind])
         self.status.setText(text)
 
-    def _check_word_api(self, word):
-        url = "https://api.dictionaryapi.dev/api/v2/entries/en/" + urllib.parse.quote(word)
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        try:
-            with urllib.request.urlopen(req, timeout=3) as r:
-                data = json.loads(r.read().decode())
-                return isinstance(data, list) and len(data) > 0
-        except Exception:
-            return None  # network error — skip validation
-
-    def _validate_word_ui(self, word):
-        """Returns corrected word, or None if user cancelled."""
-        found = self._check_word_api(word)
-        if found is True:
-            return word
-        if found is None:
-            return word  # API unavailable, proceed anyway
-
-        # Not found — get spell suggestions via venv subprocess
-        suggestions = []
+    def _spellcheck(self, word):
+        """(status, suggestion) — Groq primary, offline pyspellchecker fallback."""
+        status, suggestion = _groq_spellcheck(word)
+        if status != "unknown":
+            return status, suggestion
         try:
             result = subprocess.run(
                 [VENV_PYTHON, VALIDATE_SCRIPT, "word", word],
@@ -343,27 +370,50 @@ class AddWordDialog(QDialog):
             )
             if result.returncode == 0:
                 data = json.loads(result.stdout.strip())
-                suggestions = data.get("suggestions", [])
+                if data.get("valid"):
+                    return "ok", None
+                sugg = data.get("suggestions", [])
+                if sugg:
+                    return "typo", sugg[0]
         except Exception:
             pass
+        return "unknown", None
 
-        if suggestions:
-            items = suggestions + [f"Keep '{word}' as-is"]
-            choice, ok = QInputDialog.getItem(
-                self, "Word Not Found",
-                f"'{word}' was not found in the dictionary.\nDid you mean:",
-                items, 0, False,
-            )
-            if not ok:
-                return None
-            return word if choice == f"Keep '{word}' as-is" else choice
-        else:
-            reply = QMessageBox.question(
-                self, "Word Not Found",
-                f"'{word}' was not found in the dictionary.\nContinue anyway?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            return word if reply == QMessageBox.StandardButton.Yes else None
+    def _validate_word_ui(self, word):
+        """Returns the word to add (possibly corrected), or None to abort."""
+        # Layer 1 — charset hard block: any non-English letter / digit is definitely wrong
+        if not re.fullmatch(r"[A-Za-z][A-Za-z'\- ]*", word):
+            showWarning(f"'{word}' 不是英文字。")
+            return None
+
+        # Layer 2 — spelling (Groq, offline fallback)
+        status, suggestion = self._spellcheck(word)
+        if status == "ok":
+            return word
+
+        if status == "typo" and suggestion and suggestion != word:
+            box = QMessageBox(self)
+            box.setWindowTitle("拼字檢查")
+            box.setText(f"'{word}' 可能拼錯了，您是不是想用 '{suggestion}'？")
+            use_btn  = box.addButton(f"改用 '{suggestion}'", QMessageBox.ButtonRole.AcceptRole)
+            keep_btn = box.addButton(f"仍用 '{word}'", QMessageBox.ButtonRole.DestructiveRole)
+            box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+            box.setDefaultButton(use_btn)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked is use_btn:
+                return suggestion
+            if clicked is keep_btn:
+                return word
+            return None
+
+        # unknown / no usable suggestion → let the user decide
+        reply = QMessageBox.question(
+            self, "查不到這個字",
+            f"'{word}' 查不到、可能拼錯，確定要建立嗎？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        return word if reply == QMessageBox.StandardButton.Yes else None
 
     def _validate_assoc_ui(self, assoc):
         """Returns (possibly unchanged) assoc, or None if user cancelled."""
@@ -398,7 +448,7 @@ class AddWordDialog(QDialog):
             showWarning("Please enter a word.")
             return
 
-        self._set_status("Checking word…")
+        self._set_status("檢查拼字中…")
         word = self._validate_word_ui(word)
         if word is None:
             self.status.setText("")
