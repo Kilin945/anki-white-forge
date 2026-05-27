@@ -113,7 +113,9 @@
   font-size: clamp(60px, 10vw, 96px);
   font-weight: 700;
   color: #1E293B;
-  overflow-wrap: anywhere;   /* ultra-long word breaks instead of overflowing screen */
+  -webkit-hyphens: auto;
+  hyphens: auto;             /* long single word breaks at syllables with a hyphen (needs lang="en") */
+  overflow-wrap: break-word; /* emergency char-break only if no hyphenation point fits */
   min-width: 0;
 }
 
