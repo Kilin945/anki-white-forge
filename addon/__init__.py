@@ -753,17 +753,25 @@ def open_backfill_dialog():
 def open_duplicates_dialog():
     FindDuplicatesDialog(mw).exec()
 
-action = QAction("Add English Word…", mw)
-action.setShortcut("Ctrl+D")
-action.triggered.connect(open_dialog)
-mw.form.menuTools.addAction(action)
+DEFAULT_SHORTCUTS = {"add": "Ctrl+D", "complete": "Ctrl+S", "find_duplicates": "Ctrl+F"}
 
-action2 = QAction("Complete Missing Cards…", mw)
-action2.setShortcut("Ctrl+S")
-action2.triggered.connect(open_backfill_dialog)
-mw.form.menuTools.addAction(action2)
 
-action3 = QAction("Find Duplicate Words…", mw)
-action3.setShortcut("Ctrl+F")
-action3.triggered.connect(open_duplicates_dialog)
-mw.form.menuTools.addAction(action3)
+def _shortcut(key):
+    """User-configurable via addon config (config.json / Anki Config editor).
+    Empty string = no shortcut (menu only). Change needs an Anki restart."""
+    cfg = mw.addonManager.getConfig(__name__) or {}
+    return cfg.get("shortcuts", {}).get(key, DEFAULT_SHORTCUTS[key])
+
+
+def _add_menu_action(title, key, handler):
+    act = QAction(title, mw)
+    sc = _shortcut(key)
+    if sc:
+        act.setShortcut(sc)
+    act.triggered.connect(handler)
+    mw.form.menuTools.addAction(act)
+
+
+_add_menu_action("Add English Word…", "add", open_dialog)
+_add_menu_action("Complete Missing Cards…", "complete", open_backfill_dialog)
+_add_menu_action("Find Duplicate Words…", "find_duplicates", open_duplicates_dialog)

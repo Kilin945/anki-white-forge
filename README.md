@@ -70,6 +70,8 @@ uv sync   # 自動安裝所有依賴
 - 正規化後 Front 相同的卡片分組列出（抓得到手機漏進來的 HTML / 大小寫變體）
 - 勾選要刪的（每組至少保留一張）→ 確認刪除
 
+> 三個快捷鍵都可在 **Tools → Add-ons → my_word_adder → Config** 自訂或留空關閉（改完重啟 Anki）。
+
 ### 方式二：Terminal
 
 ```bash
