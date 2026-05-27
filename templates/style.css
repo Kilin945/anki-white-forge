@@ -124,15 +124,14 @@
   font-family: "Poppins", "Inter", sans-serif;
   font-size: clamp(30px, 5vw, 48px);
   font-weight: 700;
-  color: #1E293B;
-  filter: blur(8px);
+  color: #FDFBF7;
   cursor: pointer;
-  transition: filter 0.2s;
+  transition: color 0.2s;
   user-select: none;
 }
 
 .cn-hint.revealed {
-  filter: none;
+  color: #1E293B;
 }
 
 .association {
