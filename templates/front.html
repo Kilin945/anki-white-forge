@@ -5,3 +5,26 @@
     <span class="audio-label">play sentence</span>
   </div>
 </div>
+<script>
+(function () {
+  function fit() {
+    var el = document.querySelector('.word');
+    if (!el) return;
+    el.style.fontSize = '';                       // reset to CSS size each time
+    var p = el.parentElement, cs = getComputedStyle(p);
+    var avail = p.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    if (avail <= 0) return;
+    var size = parseFloat(getComputedStyle(el).fontSize);
+    if (el.scrollWidth > avail) {                 // word wider than screen → shrink to fit
+      size = Math.max(20, Math.floor(size * avail / el.scrollWidth));
+      el.style.fontSize = size + 'px';
+      for (var i = 0; el.scrollWidth > avail && size > 20 && i < 40; i++) {
+        el.style.fontSize = (--size) + 'px';      // fine-tune any rounding overflow
+      }
+    }
+  }
+  fit();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit); // refit after webfont loads
+  window.addEventListener('resize', fit);
+})();
+</script>
