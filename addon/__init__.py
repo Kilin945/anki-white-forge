@@ -367,9 +367,11 @@ class AddWordDialog(QDialog):
             self.status.setText("")
             return
 
-        # duplicate check before doing any network work
-        existing = mw.col.find_notes(f'deck:"{DECK_NAME}" Front:"{word}"')
-        if existing:
+        # duplicate check (normalized: catches HTML / case / whitespace variants,
+        # not just exact match — e.g. an existing "<div>audit</div>" or "Audit")
+        target = _clean_text(word, lower=True)
+        if any(_clean_text(mw.col.get_note(nid)["Front"], lower=True) == target
+               for nid in mw.col.find_notes(f'deck:"{DECK_NAME}"')):
             self.status.setText(f"⚠ '{word}' already exists in the deck.")
             return
 
