@@ -57,6 +57,7 @@ def _clean_text(raw, *, lower=False):
 
 class Worker(QThread):
     progress = pyqtSignal(str)
+    step     = pyqtSignal(str, str)   # (field key, state: "ok" / "warn")
     finished = pyqtSignal(dict)
     error    = pyqtSignal(str)
 
@@ -71,12 +72,10 @@ class Worker(QThread):
             word = self.word
             import threading
 
-            self.progress.emit("Sentence…")
             sentence, engine = self._llm_sentence(word)
             if not sentence:
                 sentence = f"Please add an example sentence for '{word}'."
-            s_icon = "✅" if not any(p in sentence for p in PLACEHOLDERS) else "⚠️"
-            self.progress.emit(f"{s_icon} Sentence ({engine})\nImage + Audio + 翻譯…")
+            self.step.emit("sentence", "ok" if not any(p in sentence for p in PLACEHOLDERS) else "warn")
 
             # Image, Translation and Audio in parallel
             image_result = [None]
@@ -100,13 +99,13 @@ class Worker(QThread):
                 {"text": sentence, "filepath": os.path.join(self.media_dir, audio_filename), "voice": VOICE_SENTENCE},
             ]
             self._make_audio_batch(audio_items)
+            self.step.emit("audio", "ok")
 
             img_thread.join()
+            self.step.emit("image", "ok" if image_result[0] else "warn")
             trans_thread.join()
+            self.step.emit("translation", "ok" if translation_result[0] else "warn")
             image_field = image_result[0]
-            img_icon = "✅" if image_field else "⚠️"
-            t_icon = "✅" if translation_result[0] else "⚠️"
-            self.progress.emit(f"{s_icon} Sentence\n{img_icon} Image\n✅ Audio\n{t_icon} 翻譯")
 
             self.finished.emit({
                 "word":        word,
@@ -235,6 +234,15 @@ class Worker(QThread):
 # ── dialog ───────────────────────────────────────────────────────────────────
 
 class AddWordDialog(QDialog):
+    # fields generated per add, shown as a row of boxes that flip to ✓ when done
+    FIELD_BOXES = [("sentence", "Sentence"), ("image", "Image"),
+                   ("audio", "Audio"), ("translation", "翻譯")]
+    _BOX_STYLE = {
+        "working": ("border:1.5px solid #94a3b8; border-radius:6px; padding:6px 12px; color:#64748b;", "{} …"),
+        "ok":      ("border:1.5px solid #16a34a; border-radius:6px; padding:6px 12px; color:#16a34a; font-weight:600;", "✓ {}"),
+        "warn":    ("border:1.5px solid #ea580c; border-radius:6px; padding:6px 12px; color:#ea580c; font-weight:600;", "⚠ {}"),
+    }
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Add English Word")
@@ -253,6 +261,17 @@ class AddWordDialog(QDialog):
         form.addRow("Word:", self.word_input)
         form.addRow("Association:", self.assoc_input)
         root.addLayout(form)
+
+        # per-field progress boxes — shown when adding, each flips to ✓ when done
+        self._boxes = {}
+        boxes_row = QHBoxLayout()
+        for key, label in self.FIELD_BOXES:
+            box = QLabel(label)
+            box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            box.setVisible(False)
+            self._boxes[key] = box
+            boxes_row.addWidget(box)
+        root.addLayout(boxes_row)
 
         self.status = QLabel("")
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -274,6 +293,19 @@ class AddWordDialog(QDialog):
         root.addLayout(btns)
 
         self.word_input.returnPressed.connect(self._on_add)
+
+    def _set_box(self, key, state):
+        box = self._boxes.get(key)
+        if not box:
+            return
+        style, fmt = self._BOX_STYLE[state]
+        box.setStyleSheet(style)
+        box.setText(fmt.format(dict(self.FIELD_BOXES)[key]))
+
+    def _start_boxes(self):
+        for key in self._boxes:
+            self._boxes[key].setVisible(True)
+            self._set_box(key, "working")
 
     def _check_word_api(self, word):
         url = "https://api.dictionaryapi.dev/api/v2/entries/en/" + urllib.parse.quote(word)
@@ -379,10 +411,11 @@ class AddWordDialog(QDialog):
 
         self.add_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
-        self.status.setText("Working…")
+        self.status.setText(f"生成中：{word}")
+        self._start_boxes()
 
         self._worker = Worker(word, assoc, mw.col.media.dir())
-        self._worker.progress.connect(self.status.setText)
+        self._worker.step.connect(self._set_box)
         self._worker.finished.connect(self._on_finished)
         self._worker.error.connect(self._on_error)
         self._worker.start()
