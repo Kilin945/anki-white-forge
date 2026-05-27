@@ -245,9 +245,15 @@ class Worker(QThread):
                                        "Authorization": f"Bearer {key}",
                                        "User-Agent": "AnkiWordAdder/1.0"})
             with urllib.request.urlopen(req, timeout=10) as r:
-                return json.loads(r.read().decode())["choices"][0]["message"]["content"].strip()
+                reply = json.loads(r.read().decode())["choices"][0]["message"]["content"].strip()
         except Exception:
             return ""
+        # reject implausible output → leave empty so ⌘S re-generates it later
+        if re.search(r"[A-Za-z]", reply):                    # English preamble / refusal / paren
+            return ""
+        if len(re.findall(r"[一-鿿]", reply)) > 6:   # >6 漢字 = a sentence, not a word
+            return ""
+        return reply
 
     def _fetch_image(self, word, definition="", sentence=""):
         filename = f"{word}_img_{int(__import__('time').time())}.jpg"
