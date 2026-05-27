@@ -1,6 +1,6 @@
 """
 My Word Adder — add English words to My_Daily_English with auto-fill.
-Tools > Add English Word… (or Ctrl+Shift+W)
+Tools > Add English Word… (⌘D / Ctrl+D)  ·  Complete Missing Cards (⌘S / Ctrl+S)
 """
 
 import os
