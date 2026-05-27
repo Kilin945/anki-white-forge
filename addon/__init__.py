@@ -831,6 +831,7 @@ class SettingsDialog(QDialog):
         for key, title in self.LABELS:
             edit = QKeySequenceEdit(QKeySequence(_shortcut(key)))
             edit.setMaximumSequenceLength(1)
+            edit.setFocusPolicy(Qt.FocusPolicy.ClickFocus)  # only arm when clicked, not on open
             self._edits[key] = edit
 
             clear = QPushButton("清除")
@@ -852,6 +853,8 @@ class SettingsDialog(QDialog):
         btns.addWidget(save)
         btns.addWidget(cancel)
         root.addLayout(btns)
+
+        cancel.setFocus()  # start with focus off the key fields — nothing armed
 
     def _on_save(self):
         cfg = mw.addonManager.getConfig(__name__) or {}
