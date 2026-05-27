@@ -634,8 +634,7 @@ class BackfillWorker(QThread):
             if err:
                 raise RuntimeError(f"AnkiConnect: {err}")
 
-        t_icon = "✅" if translation_result[0] else "⚠️"
-        self._update_status(word, f"{s_icon} Sentence  {i_icon} Image  ✅ Audio  {t_icon} 翻譯")
+        self._update_status(word, f"{s_icon} Sentence  {i_icon} Image  ✅ Audio")
         return f"✓ {word}" if fields else f"— {word}"
 
     def run(self):
