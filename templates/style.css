@@ -112,12 +112,16 @@
   font-size: clamp(60px, 10vw, 96px);
   font-weight: 700;
   color: #1E293B;
+  overflow-wrap: anywhere;   /* ultra-long word breaks instead of overflowing screen */
+  min-width: 0;
 }
 
 .title-row {
   display: flex;
+  flex-wrap: wrap;           /* long word → translation drops to its own line below */
   align-items: baseline;
-  gap: 20px;
+  column-gap: 20px;
+  row-gap: 4px;
 }
 
 .cn-hint {
@@ -128,6 +132,7 @@
   cursor: pointer;
   transition: color 0.2s;
   user-select: none;
+  flex: 1;                   /* tap target fills the strip right of the title */
 }
 
 .cn-hint.revealed {
