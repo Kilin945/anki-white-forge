@@ -1,23 +1,15 @@
 # My Word Adder — 設定
 
-`shortcuts` 設定三個功能的快捷鍵（Anki 格式；Mac 上 `Ctrl` 會對應到 `⌘`）：
+**最簡單的方式：** Anki 選單 **Tools → My Word Adder Settings…**，每個功能的欄位點一下、直接按你要的組合鍵即可（按「清除」＝不綁）。**免改 JSON、按儲存即時生效、不用重啟。**
+
+---
+
+下面的 JSON 是給進階使用者直接編輯用的。`shortcuts` 是三個功能的快捷鍵（Anki 格式；Mac 上 `Ctrl` 對應 `⌘`）：
 
 - `add` — Add English Word（預設 `Ctrl+D` = ⌘D）
 - `complete` — Complete Missing Cards（預設 `Ctrl+S` = ⌘S）
 - `find_duplicates` — Find Duplicate Words（預設 `Ctrl+F` = ⌘F）
 
-設成空字串 `""` 代表不綁快捷鍵，只能從 **Tools 選單**開啟。
+空字串 `""` = 不綁快捷鍵，只能從 Tools 選單開。
 
-例：把找重複改成 ⌘⇧F、其餘維持預設：
-
-```json
-{
-  "shortcuts": {
-    "add": "Ctrl+D",
-    "complete": "Ctrl+S",
-    "find_duplicates": "Ctrl+Shift+F"
-  }
-}
-```
-
-⚠️ **改完設定後要重啟 Anki 才會生效**（快捷鍵在 addon 載入時綁定）。
+⚠️ 直接改這個 JSON 要**重啟 Anki** 才生效；用上面的 Settings 畫面則即時生效。
