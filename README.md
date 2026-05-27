@@ -28,6 +28,7 @@
 | `Image_Prompt` | 插圖 | 自動（Pexels） |
 | `Audio` | 句子語音 (Ava) | 自動（edge-tts） |
 | `Front_Audio` | 單字發音 (Andrew) | 自動（edge-tts） |
+| `Translation` | 中文翻譯（背面點擊顯示） | 自動（Groq LLM） |
 
 ---
 
@@ -57,11 +58,11 @@ uv sync   # 自動安裝所有依賴
 
 ### 方式一：Anki UI（推薦）
 
-**新增單字**：`Ctrl+Shift+W` → 輸入單字 → Enter
-- 自動生成例句、圖片、雙語音
+**新增單字**：`⌘D`（Ctrl+D）→ 輸入單字 → Enter
+- 自動生成例句、圖片、雙語音、中文翻譯
 - 有拼字檢查和重複防呆
 
-**補齊缺失卡片**：`Ctrl+Shift+C`
+**補齊缺失卡片**：`⌘S`（Ctrl+S）
 - 掃描所有缺少欄位的卡片
 - 3 張並發處理，左圖右文即時進度顯示
 
@@ -86,7 +87,7 @@ uv run python regen_audio.py
 
 1. 手機 AnkiMobile → 新增卡片（只填 Front + Association）→ 同步
 2. Mac Anki → 同步
-3. `Ctrl+Shift+C`（Complete Missing Cards）或 `uv run python backfill_words.py`
+3. `⌘S`（Complete Missing Cards）或 `uv run python backfill_words.py`
 4. Mac Anki → 同步（選「上傳到 AnkiWeb」）
 5. 手機 → 同步 → 完整卡片出現
 
@@ -122,6 +123,9 @@ Anki/
 │   ├── front.html
 │   ├── back.html
 │   └── style.css
+├── addon/                   # Anki 插件原始碼（symlink → Anki addons 資料夾）
+│   ├── __init__.py
+│   └── manifest.json
 ├── add_word.py              # CLI 新增單字
 ├── backfill_words.py        # 批次補齊欄位
 ├── regen_audio.py           # 重生所有音檔
@@ -181,7 +185,7 @@ Anki/
 
 | 檔案 | 說明 |
 |------|------|
-| `~/Library/.../my_word_adder/__init__.py` | Anki 插件主程式。`⌘D` 新增單字、`⌘S` 補齊缺失卡片。LLM 用 urllib 直呼 Groq API，TTS/圖片透過 subprocess。BackfillWorker 3 路並發 |
+| `addon/__init__.py` | Anki 插件主程式（symlink 到 `~/Library/.../addons21/my_word_adder/`）。`⌘D` 新增單字、`⌘S` 補齊缺失卡片，兩者皆生成全欄位含 Translation。LLM 用 urllib 直呼 Groq API，TTS/圖片透過 subprocess。BackfillWorker 3 路並發。改完需重啟 Anki |
 
 ### 設定與測試
 
