@@ -154,12 +154,14 @@ class Worker(QThread):
                 {"text": word, "filepath": os.path.join(self.media_dir, front_audio_filename), "voice": VOICE_WORD},
                 {"text": sentence, "filepath": os.path.join(self.media_dir, audio_filename), "voice": VOICE_SENTENCE},
             ]
-            self._make_audio_batch(audio_items)
-            self.step.emit("audio", "ok")
+            try:
+                self._make_audio_batch(audio_items)
+                self.step.emit("audio", "ok")
+            finally:
+                img_thread.join()          # always join so threads don't leak on audio failure
+                trans_thread.join()
 
-            img_thread.join()
             self.step.emit("image", "ok" if image_result[0] else "warn")
-            trans_thread.join()
             self.step.emit("translation", "ok" if translation_result[0] else "warn")
             image_field = image_result[0]
 
