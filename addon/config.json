@@ -1,0 +1,7 @@
+{
+  "shortcuts": {
+    "add": "Ctrl+D",
+    "complete": "Ctrl+S",
+    "find_duplicates": "Ctrl+F"
+  }
+}
