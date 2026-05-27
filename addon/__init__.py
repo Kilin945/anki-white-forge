@@ -53,6 +53,15 @@ def _clean_text(raw, *, lower=False):
     return text.lower() if lower else text
 
 
+ENGLISH_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\- ]*")
+
+
+def _looks_english(word):
+    """True if plausibly English (letters + space / - / '); rejects CJK, digits, symbols.
+    Shared charset gate for both ⌘D (add) and ⌘S (complete)."""
+    return bool(ENGLISH_WORD_RE.fullmatch((word or "").strip()))
+
+
 def _groq_spellcheck(word):
     """Spell-check a word/phrase via Groq. Returns:
       ("ok", None)          correctly spelled English word/phrase
@@ -382,7 +391,7 @@ class AddWordDialog(QDialog):
     def _validate_word_ui(self, word):
         """Returns the word to add (possibly corrected), or None to abort."""
         # Layer 1 — charset hard block: any non-English letter / digit is definitely wrong
-        if not re.fullmatch(r"[A-Za-z][A-Za-z'\- ]*", word):
+        if not _looks_english(word):
             showWarning(f"'{word}' 不是英文字。")
             return None
 
@@ -687,34 +696,45 @@ class BackfillDialog(QDialog):
     def _scan(self):
         ids   = mw.col.find_notes(f'deck:"{DECK_NAME}"')
         notes = []
+        invalid = 0
         for nid in ids:
             note = mw.col.get_note(nid)
             bad_sentence = any(p in note["Sentence"] for p in PLACEHOLDERS)
             front_audio = note["Front_Audio"] if "Front_Audio" in note else ""
             translation = note["Translation"] if "Translation" in note else ""
             has_img = "<img" in note["Image_Prompt"]
-            if not note["Sentence"] or bad_sentence or not note["Audio"] or not has_img or not front_audio or not translation:
-                raw  = note["Front"]
-                word = _clean_text(raw)
-                self.list_widget.addItem(word)
-                notes.append({
-                    "noteId": nid,
-                    "fields": {
-                        "Front":        {"value": note["Front"]},
-                        "Association":  {"value": note["Association"]},
-                        "Sentence":     {"value": note["Sentence"]},
-                        "Image_Prompt": {"value": note["Image_Prompt"]},
-                        "Audio":        {"value": note["Audio"]},
-                        "Front_Audio":  {"value": front_audio},
-                        "Translation":  {"value": translation},
-                    }
-                })
+            incomplete = (not note["Sentence"] or bad_sentence or not note["Audio"]
+                          or not has_img or not front_audio or not translation)
+            if not incomplete:
+                continue
+
+            word = _clean_text(note["Front"])
+            if not _looks_english(word):       # not English → don't fill, just flag it
+                invalid += 1
+                self.list_widget.addItem(f"⚠ {word or note['Front']}（不是英文，略過）")
+                continue
+
+            self.list_widget.addItem(word)
+            notes.append({
+                "noteId": nid,
+                "fields": {
+                    "Front":        {"value": note["Front"]},
+                    "Association":  {"value": note["Association"]},
+                    "Sentence":     {"value": note["Sentence"]},
+                    "Image_Prompt": {"value": note["Image_Prompt"]},
+                    "Audio":        {"value": note["Audio"]},
+                    "Front_Audio":  {"value": front_audio},
+                    "Translation":  {"value": translation},
+                }
+            })
         self._pending_notes = notes
+        parts = []
         if notes:
-            self.status.setText(f"{len(notes)} card(s) need filling.")
-            self.run_btn.setEnabled(True)
-        else:
-            self.status.setText("All cards are complete!")
+            parts.append(f"{len(notes)} card(s) need filling.")
+        if invalid:
+            parts.append(f"{invalid} 張不是英文、已略過（請修正或刪除）。")
+        self.status.setText(" ".join(parts) if parts else "All cards are complete!")
+        self.run_btn.setEnabled(bool(notes))
 
     def _on_run(self):
         self.run_btn.setEnabled(False)
