@@ -259,6 +259,7 @@
   }
   .association {
     font-size: clamp(18px, 5vw, 24px);
+    text-align: right;
   }
   .sentence {
     font-size: clamp(17px, 4.5vw, 22px);
