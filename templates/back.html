@@ -30,9 +30,15 @@
   var btn=document.getElementById("play2");
   if(!btn)return;
   btn.style.position="absolute";
-  btn.style.top=(window.innerHeight*0.55)+"px";
   btn.style.left="50%";
   btn.style.transform="translateX(-50%)";
   btn.style.margin="0";
+  function reposition(){
+    var y=window.scrollY||window.pageYOffset||0;
+    btn.style.top=(y+window.innerHeight*0.55)+"px";
+  }
+  reposition();
+  window.addEventListener("scroll",reposition,{passive:true});
+  window.addEventListener("resize",reposition);
 })();
 </script>

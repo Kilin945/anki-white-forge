@@ -266,7 +266,7 @@
     text-align: left;
   }
   .play-row {
-    justify-content: center;
-    margin: 10px auto;
+    background: rgba(253,251,247,0.9);
+    z-index: 10;
   }
 }
