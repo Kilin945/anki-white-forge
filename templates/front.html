@@ -22,7 +22,6 @@
         el.style.fontSize = (--size) + 'px';      // fine-tune; 28px floor keeps it readable
       }
     }
-    el.style.whiteSpace = '';                     // restore: extreme token wraps (overflow-wrap)
   }
   fit();
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit); // refit after webfont loads
