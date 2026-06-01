@@ -28,7 +28,10 @@
 | `Image_Prompt` | 插圖 | 自動（Pexels） |
 | `Audio` | 句子語音 (Ava) | 自動（edge-tts） |
 | `Front_Audio` | 單字發音 (Andrew) | 自動（edge-tts） |
-| `Translation` | 中文翻譯（背面點擊顯示） | 自動（Groq LLM） |
+| `Translation` | 單字中文翻譯（背面點擊顯示） | 自動（Groq LLM） |
+| `Sentence_CN` | 整句中文翻譯（背面點擊顯示） | ⌘D 即時 / 專用選單批次（Groq LLM） |
+
+> 背面的 `Translation`（單字）與 `Sentence_CN`（整句）都是**點一下才顯示**的填空框。
 
 ---
 
@@ -59,18 +62,24 @@ uv sync   # 自動安裝所有依賴
 ### 方式一：Anki UI（推薦）
 
 **新增單字**：`⌘D`（Ctrl+D）→ 輸入單字 → Enter
-- 自動生成例句、圖片、雙語音、中文翻譯
+- 自動生成例句、圖片、雙語音、單字翻譯、整句翻譯
 - 驗證：非英文字元直接擋；Groq 拼字檢查，疑似拼錯會建議正確字；重複防呆（正規化比對）
 
 **補齊缺失卡片**：`⌘S`（Ctrl+S）
-- 掃描所有缺少欄位的卡片
+- 掃描所有缺少欄位的卡片（例句／圖／音／單字翻譯）
 - 3 張並發處理，左圖右文即時進度顯示
+- 註：不含整句翻譯 `Sentence_CN`（那由下方專用選單負責）
+
+**批次回填整句翻譯**：**Tools → Backfill Sentence Translations…**
+- 專補 `Sentence_CN`，開啟先顯示「共 N 筆、約 X 分鐘」
+- 選時間盒（1/2/5/10 分鐘）或「直接完成」；以不超過 Groq 速率（約 25/分）的節奏持續翻
+- 隨時可「停止」，下次再開從沒翻的續
 
 **找重複單字**：`⌘F`（Ctrl+F）
 - 正規化後 Front 相同的卡片分組列出（抓得到手機漏進來的 HTML / 大小寫變體）
 - 勾選要刪的（每組至少保留一張）→ 確認刪除
 
-> 三個快捷鍵可在 **Tools → My Word Adder Settings…** 直接按組合鍵設定（免改 JSON、即時生效），或清除以關閉。
+> ⌘D / ⌘S / ⌘F 可在 **Tools → My Word Adder Settings…** 直接按組合鍵設定（免改 JSON、即時生效），或清除以關閉。
 
 ### 方式二：Terminal
 
@@ -80,8 +89,11 @@ cd ~/Workspace/Anki
 # 新增單字
 uv run python add_word.py "glimpse" "a brief look"
 
-# 批次補齊所有空白欄位（4 路並發）
+# 批次補齊所有空白欄位（例句/圖/音/單字翻譯，4 路並發）
 uv run python backfill_words.py
+
+# 批次回填整句翻譯 Sentence_CN（撞速率上限自動等 60s 續跑，Ctrl-C 結束）
+uv run python backfill_sentence_cn.py
 
 # 重新生成所有音檔（換語音後用）
 uv run python regen_audio.py
@@ -109,9 +121,10 @@ uv run python regen_audio.py
 | 邏輯理解 | 中文定義 | `#0284C7` 湛藍 | 冷色促進概念連結 |
 | 降低負荷 | 例句 | `#64748B` 知性灰 | 低飽和減少疲勞 |
 | 背景 | 底色 | `#FDFBF7` 乳白 | WCAG 對比度 5:1 |
+| 互動 | 翻譯填空框外框 | `#d6cfc4` 米色 | 透明底＋細外框＝可點但不搶戲 |
 
 字體：**Poppins**（標題）+ **Inter**（內文）
-佈局：左圖右文、手機響應式（圖上文下，圖片限高 200px）
+佈局：左圖右文、手機響應式（圖上文下，圖片限高 200px）。單字翻譯與整句翻譯為**點擊顯示**的填空框（同款同字級）
 
 ---
 
@@ -123,6 +136,7 @@ Anki/
 │   ├── anki.py              # AnkiConnect API
 │   ├── image.py             # Pexels + DuckDuckGo 圖片
 │   ├── llm.py               # Groq + Ollama LLM
+│   ├── rate_limiter.py      # 通用 429 偵測 / 批次節流
 │   ├── text.py              # strip_html, normalize, is_placeholder
 │   └── tts.py               # edge-tts (Andrew + Ava)
 ├── templates/               # Anki 卡片模板
@@ -133,7 +147,8 @@ Anki/
 │   ├── __init__.py
 │   └── manifest.json
 ├── add_word.py              # CLI 新增單字
-├── backfill_words.py        # 批次補齊欄位
+├── backfill_words.py        # 批次補齊欄位（不含整句翻譯）
+├── backfill_sentence_cn.py  # 批次回填整句翻譯 Sentence_CN
 ├── regen_audio.py           # 重生所有音檔
 ├── update_template.py       # 套用模板到 Anki
 ├── debug_audio.py           # 音檔除錯
@@ -168,14 +183,15 @@ Anki/
 |------|------|
 | `templates/style.css` | 卡片 CSS。科學配色 Light Mode + 手機 RWD |
 | `templates/front.html` | 正面 HTML（單字 + 播放鍵） |
-| `templates/back.html` | 背面 HTML（左圖右文 + 單字高亮 + 播放鍵 JS 定位） |
+| `templates/back.html` | 背面 HTML（左圖右文 + 單字高亮 + 播放鍵 JS 定位 + 兩個點擊顯示的翻譯框，用 `<button>` 以相容 AnkiMobile 手勢） |
 
 ### 主程式
 
 | 檔案 | 說明 |
 |------|------|
 | `add_word.py` | CLI 新增單字。用法：`uv run python add_word.py <word> [association]` |
-| `backfill_words.py` | 批次補齊缺少欄位。4 路並發。用法：`uv run python backfill_words.py` |
+| `backfill_words.py` | 批次補齊缺少欄位（例句/圖/音/單字翻譯，不含整句翻譯）。4 路並發。用法：`uv run python backfill_words.py` |
+| `backfill_sentence_cn.py` | 批次回填整句翻譯 `Sentence_CN`。撞速率上限自動等待續跑、可 Ctrl-C 結束、下次續。用法：`uv run python backfill_sentence_cn.py` |
 | `regen_audio.py` | 重新生成所有音檔。用法：`uv run python regen_audio.py` |
 | `update_template.py` | 讀取 `templates/` 並更新 Anki 模板。用法：`uv run python update_template.py` |
 | `debug_audio.py` | 音檔除錯。用法：`uv run python debug_audio.py <word>` |
@@ -193,7 +209,7 @@ Anki/
 
 | 檔案 | 說明 |
 |------|------|
-| `addon/__init__.py` | Anki 插件主程式（symlink 到 `~/Library/.../addons21/my_word_adder/`）。`⌘D` 新增單字、`⌘S` 補齊缺失卡片（皆生成全欄位含 Translation）、`⌘F` 找重複單字。新增防護用正規化比對（HTML/大小寫變體都擋）。LLM 用 urllib 直呼 Groq，TTS/圖片透過 subprocess，BackfillWorker 3 路並發。改完需重啟 Anki |
+| `addon/__init__.py` | Anki 插件主程式（symlink 到 `~/Library/.../addons21/my_word_adder/`）。`⌘D` 新增單字（含整句翻譯）、`⌘S` 補齊缺失卡片（例句/圖/音/單字翻譯，不含整句翻譯）、`⌘F` 找重複、選單 **Backfill Sentence Translations…**（節流批次回填整句翻譯）。新增防護用正規化比對（HTML/大小寫變體都擋）。LLM 用 urllib 直呼 Groq，TTS/圖片透過 subprocess，BackfillWorker 3 路並發。改完需重啟 Anki |
 
 ### 設定與測試
 
@@ -201,7 +217,7 @@ Anki/
 |------|------|
 | `.groq_key` | Groq API 金鑰（gitignored） |
 | `.pexels_key` | Pexels API 金鑰（gitignored） |
-| `test_backfill.py` | 單元測試（38 tests） |
+| `test_backfill.py` | 單元測試（57 tests） |
 | `test_integration.py` | 整合測試（新增 3 字驗證） |
 | `pyproject.toml` | Python 依賴定義 |
 
