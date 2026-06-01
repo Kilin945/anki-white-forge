@@ -8,7 +8,7 @@ import threading
 from spellchecker import SpellChecker
 
 from core.anki import anki, DECK_NAME, MODEL_NAME
-from core.llm import llm_sentence, llm_image_query, llm_translate, _groq_client, GROQ_MODEL, OLLAMA_MODEL
+from core.llm import llm_sentence, llm_image_query, llm_translate, llm_translate_sentence, _groq_client, GROQ_MODEL, OLLAMA_MODEL
 from core.tts import make_audio, VOICE_WORD, VOICE_SENTENCE
 from core.image import fetch_image
 
@@ -136,6 +136,9 @@ def main():
     print(f"  Image {'✓' if ok else '⚠️ not found'}")
     print(f"  翻譯: {translation or '⚠️'}")
 
+    sentence_cn = llm_translate_sentence(sentence)
+    print(f"  整句譯: {sentence_cn or '⚠️'}")
+
     print("[3] Adding card…")
     try:
         note_id = anki("addNote", note={
@@ -146,6 +149,7 @@ def main():
                 "Audio": f"[sound:{audio_filename}]",
                 "Front_Audio": f"[sound:{front_audio_filename}]",
                 "Translation": translation,
+                "Sentence_CN": sentence_cn,
             },
             "options": {"allowDuplicate": False},
             "tags": ["auto-added"],
