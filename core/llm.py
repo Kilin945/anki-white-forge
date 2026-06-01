@@ -140,10 +140,10 @@ SENTENCE_CN_PROMPT = (
 def _looks_like_chinese_translation(text):
     if not text:
         return False
-    if not re.search(r"[一-鿿]", text):   # must contain Chinese
+    if not re.search(r"[一-鿿]", text):                 # must contain Chinese
         return False
-    if re.search(r"[A-Za-z]{6,}", text):           # long latin run = preamble/refusal
-        return False
+    if len(re.findall(r"[A-Za-z]{2,}", text)) >= 3:     # 3+ English words = preamble/English prose;
+        return False                                    # a single embedded term (concurrency, Microsoft…) is kept
     return True
 
 

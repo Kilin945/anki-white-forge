@@ -300,9 +300,9 @@ class Worker(QThread):
                   f'English.\n\nSentence: "{sentence}"')
         chat = _groq_chat_strict if strict else _groq_chat
         reply = chat(prompt, temperature=0.3, max_tokens=200, timeout=15).strip().strip('"').strip()
-        if not re.search(r"[一-鿿]", reply):     # no Chinese → fail
+        if not re.search(r"[一-鿿]", reply):              # no Chinese → fail
             return ""
-        if re.search(r"[A-Za-z]{6,}", reply):            # long English run → preamble
+        if len(re.findall(r"[A-Za-z]{2,}", reply)) >= 3:  # 3+ English words = preamble; keep a single embedded term
             return ""
         return reply
 
@@ -1018,8 +1018,11 @@ class SentenceCNWorker(QThread):
                         time.sleep(0.3)
                     continue
                 if cn:
-                    self._update(note["noteId"], cn)
-                    done += 1
+                    try:
+                        self._update(note["noteId"], cn)
+                        done += 1
+                    except Exception:
+                        pass   # write failed (AnkiConnect hiccup) → leave unfilled, re-picked next run
                 i += 1
                 self.progress.emit(done, total, self._remaining(start))
         finally:

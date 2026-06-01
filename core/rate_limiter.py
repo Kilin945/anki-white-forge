@@ -12,18 +12,9 @@ class RateLimitReached(Exception):
         self.retry_after = retry_after
 
 
-def is_rate_limit_error(exc):
-    """True if exc represents HTTP 429 (urllib HTTPError, groq RateLimitError, etc.)."""
-    if isinstance(exc, RateLimitReached):
-        return True
-    code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
-    if code == 429:
-        return True
-    return "429" in str(exc)
-
-
 class BatchLimiter:
-    """Counts successful calls; stops a batch at batch_limit or on rate-limit."""
+    """Counts successful calls; stops a batch at batch_limit or on rate-limit.
+    batch_limit=None means no cap (run until rate-limited or the work runs out)."""
 
     def __init__(self, batch_limit=25):
         self.batch_limit = batch_limit
@@ -34,7 +25,7 @@ class BatchLimiter:
     def should_continue(self):
         if self.stopped_reason:
             return False
-        if self.processed >= self.batch_limit:
+        if self.batch_limit is not None and self.processed >= self.batch_limit:
             self.stopped_reason = "batch_limit"
             return False
         return True

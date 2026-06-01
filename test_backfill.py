@@ -8,7 +8,7 @@ from core.text import strip_html, normalize, is_placeholder, has_image
 import core.llm as llm_mod
 import core.image as img_mod
 from core.tts import make_audio, VOICE_WORD
-from core.rate_limiter import BatchLimiter, RateLimitReached, is_rate_limit_error
+from core.rate_limiter import BatchLimiter, RateLimitReached
 
 
 class TestStripHtml:
@@ -210,6 +210,12 @@ class TestLlmTranslateSentence:
         mock_llm.return_value = "I cannot translate this."
         assert llm_mod.llm_translate_sentence("foo") == ""
 
+    @patch.object(llm_mod, 'llm')
+    def test_keeps_embedded_english_term(self, mock_llm):
+        # a valid translation that keeps the target/brand word must NOT be discarded
+        mock_llm.return_value = "系統能妥善處理 concurrency。"
+        assert llm_mod.llm_translate_sentence("The system handles concurrency.") == "系統能妥善處理 concurrency。"
+
     def test_empty_sentence_returns_empty(self):
         assert llm_mod.llm_translate_sentence("") == ""
 
@@ -231,24 +237,11 @@ class TestBatchLimiter:
         assert lim.should_continue() is False
         assert lim.stopped_reason == "rate_limited"
 
-
-class TestIsRateLimitError:
-    def test_rate_limit_reached(self):
-        assert is_rate_limit_error(RateLimitReached()) is True
-
-    def test_code_429(self):
-        e = Exception(); e.code = 429
-        assert is_rate_limit_error(e) is True
-
-    def test_status_code_429(self):
-        e = Exception(); e.status_code = 429
-        assert is_rate_limit_error(e) is True
-
-    def test_message_contains_429(self):
-        assert is_rate_limit_error(Exception("Error 429 rate limit")) is True
-
-    def test_other_error_false(self):
-        assert is_rate_limit_error(Exception("boom")) is False
+    def test_no_cap_runs_unbounded(self):
+        lim = BatchLimiter(batch_limit=None)
+        for _ in range(1000):
+            lim.record_success()
+        assert lim.should_continue() is True
 
 
 import backfill_sentence_cn as bf_cn

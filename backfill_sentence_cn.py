@@ -7,12 +7,10 @@ protection) and tells you to re-run after ~60s.
 """
 import time
 
-from core.anki import anki
+from core.anki import anki, DECK_NAME, MODEL_NAME
 from core.llm import llm_translate_sentence
 from core.text import strip_html
 from core.rate_limiter import BatchLimiter, RateLimitReached
-
-DECK_NAME = "My_Daily_English"
 
 
 def pending_notes(notes):
@@ -72,9 +70,9 @@ def main():
 
     print("Fetching notes…")
     while True:
-        ids = anki("findNotes", query=f"deck:{DECK_NAME}")
+        ids = anki("findNotes", query=f'deck:"{DECK_NAME}" note:"{MODEL_NAME}"')   # restrict to our note type → no KeyError on foreign cards
         notes = anki("notesInfo", notes=ids)
-        limiter = BatchLimiter(batch_limit=10**9)   # no batch cap: run until 429 or done
+        limiter = BatchLimiter(batch_limit=None)   # no batch cap: run until 429 or done
         done, remaining = run_batch(
             notes,
             translate=lambda s: llm_translate_sentence(s, strict=True),

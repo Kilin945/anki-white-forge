@@ -136,21 +136,26 @@ def main():
     print(f"  Image {'✓' if ok else '⚠️ not found'}")
     print(f"  翻譯: {translation or '⚠️'}")
 
-    sentence_cn = llm_translate_sentence(sentence)
-    print(f"  整句譯: {sentence_cn or '⚠️'}")
+    # only translate / write Sentence_CN if the note type actually has the field
+    has_cn = "Sentence_CN" in anki("modelFieldNames", modelName=MODEL_NAME)
+    sentence_cn = llm_translate_sentence(sentence) if has_cn else ""
+    if has_cn:
+        print(f"  整句譯: {sentence_cn or '⚠️'}")
 
     print("[3] Adding card…")
     try:
+        fields = {
+            "Front": word, "Association": association,
+            "Sentence": sentence, "Image_Prompt": image_field,
+            "Audio": f"[sound:{audio_filename}]",
+            "Front_Audio": f"[sound:{front_audio_filename}]",
+            "Translation": translation,
+        }
+        if has_cn:
+            fields["Sentence_CN"] = sentence_cn
         note_id = anki("addNote", note={
             "deckName": DECK_NAME, "modelName": MODEL_NAME,
-            "fields": {
-                "Front": word, "Association": association,
-                "Sentence": sentence, "Image_Prompt": image_field,
-                "Audio": f"[sound:{audio_filename}]",
-                "Front_Audio": f"[sound:{front_audio_filename}]",
-                "Translation": translation,
-                "Sentence_CN": sentence_cn,
-            },
+            "fields": fields,
             "options": {"allowDuplicate": False},
             "tags": ["auto-added"],
         })
