@@ -249,3 +249,58 @@ class TestIsRateLimitError:
 
     def test_other_error_false(self):
         assert is_rate_limit_error(Exception("boom")) is False
+
+
+import backfill_sentence_cn as bf_cn
+
+
+def _cn_note(nid, sentence, cn=""):
+    return {"noteId": nid, "fields": {
+        "Sentence": {"value": sentence}, "Sentence_CN": {"value": cn}}}
+
+
+class TestPendingNotes:
+    def test_picks_missing_cn_with_sentence(self):
+        notes = [_cn_note(1, "A cat.", ""), _cn_note(2, "A dog.", "一隻狗。")]
+        assert [n["noteId"] for n in bf_cn.pending_notes(notes)] == [1]
+
+    def test_skips_when_no_sentence(self):
+        notes = [_cn_note(1, "", "")]
+        assert bf_cn.pending_notes(notes) == []
+
+
+class TestRunBatch:
+    def test_stops_at_batch_limit(self):
+        notes = [_cn_note(i, f"Sentence {i}.") for i in range(5)]
+        updates = []
+        lim = BatchLimiter(batch_limit=2)
+        done, remaining = bf_cn.run_batch(
+            notes, translate=lambda s: "譯文", update=lambda nid, cn: updates.append(nid), limiter=lim)
+        assert done == 2
+        assert remaining == 3
+        assert lim.stopped_reason == "batch_limit"
+        assert updates == [0, 1]
+
+    def test_stops_on_rate_limit(self):
+        notes = [_cn_note(i, f"Sentence {i}.") for i in range(5)]
+        calls = {"n": 0}
+        def translate(s):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RateLimitReached()
+            return "譯文"
+        lim = BatchLimiter(batch_limit=99)
+        done, remaining = bf_cn.run_batch(
+            notes, translate=translate, update=lambda nid, cn: None, limiter=lim)
+        assert done == 1
+        assert lim.stopped_reason == "rate_limited"
+
+    def test_skips_empty_translation(self):
+        notes = [_cn_note(1, "A cat."), _cn_note(2, "A dog.")]
+        updates = []
+        lim = BatchLimiter(batch_limit=99)
+        done, remaining = bf_cn.run_batch(
+            notes, translate=lambda s: "" if s == "A cat." else "一隻狗。",
+            update=lambda nid, cn: updates.append(nid), limiter=lim)
+        assert done == 1
+        assert updates == [2]
