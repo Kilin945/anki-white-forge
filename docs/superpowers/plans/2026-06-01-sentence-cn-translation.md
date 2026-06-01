@@ -10,6 +10,13 @@
 
 **Commit 規則：** 每個 py 檔案獨立成自己的 commit，不與模板／文件混。模板（UI）改動等使用者重啟 Anki 驗證滿意後才提交。
 
+> **設計修正（實作中與使用者多輪確認，取代下方 Task 6 §4 / Task 3 / Task 4 的部分內容）：**
+> 1. **Sentence_CN 改由專用工具負責**：新增 addon 選單「批次回填整句翻譯」(`SentenceCNDialog` + `SentenceCNWorker`) 與 CLI `backfill_sentence_cn.py`。**⌘S Complete 與 `backfill_words.py` 都不碰 `Sentence_CN`**（completeness 不含它），避免「補全部欄位」觸發未節流大量翻譯。⌘D 仍即時產生。
+> 2. **速率＝持續節流（pacing）+ 時間盒選單**：以不超過速率的節奏持續翻譯，撞 429 就等 `Retry-After`（~幾秒）再續，**直到選定秒數用完**（`直接完成`=全部翻完）。選單 `30秒/2分/5分/10分/直接完成`，按鈕顯示預估筆數，開跑前顯示總預估 `⌈N/RPM⌉ 分`，跑時顯示剩餘秒數。（不用 burst：對 <60s 的預算會失效、剛跑過時秒撞 429 只跑 2 秒。）CLI 為 run-to-completion + Ctrl-C 結束。
+> 3. 進度 box 分流：`FIELD_BOXES`（⌘D，含 Sentence-CN）vs `BACKFILL_BOXES`（⌘S，不含）。
+>
+> 詳見 spec §3、§4。下方原始 Task 文字保留作歷程，實作以本註記與 spec 為準。
+
 ---
 
 ## File Structure

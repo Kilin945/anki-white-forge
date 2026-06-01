@@ -51,65 +51,58 @@
 
 ## 3. 三處接線
 
+`Sentence_CN` 只由兩條路徑填，刻意與「補全部欄位」分開，避免大量未節流翻譯：
+
 | 路徑 | 檔案 | 行為 |
 |------|------|------|
-| 單張新增（⌘D） | `add_word.py` / `addon/__init__.py` ⌘D 流程 | 例句確定後翻譯整句，連同其他欄位一起寫入 `Sentence_CN`。呼叫量小，**不套用速率控制**。 |
-| 大量回填（⌘S Complete） | `addon/__init__.py` BackfillWorker | 完整性判斷加入「缺 `Sentence_CN`」；沿用既有逐卡進度框 UI；**套用速率控制**。 |
-| 大量回填（CLI） | `backfill_words.py` + 新 `backfill_sentence_cn.py` | `process_note` 加 `need_sentence_cn`；句子變動（`need_sentence`）時強制重翻。 |
+| 單張新增（⌘D） | `add_word.py` / `addon/__init__.py` ⌘D 流程 | 例句確定後翻譯整句，連同其他欄位一起寫入 `Sentence_CN`。呼叫量小，**不套用速率控制**，顯示 `Sentence-CN` 進度 box。 |
+| 大量回填（專用） | addon 選單「批次回填整句翻譯」(`SentenceCNDialog`) + CLI `backfill_sentence_cn.py` | 只處理 `Sentence_CN`；**burst 引擎 + 時間盒選單**（見 §4）。 |
 
-### 完整性判斷更新
+**刻意不碰 `Sentence_CN` 的路徑**：
 
-三處的「卡片是否完整」條件都加上 `bool(Sentence_CN)`：
-- `backfill_words.py`：`process_note` 的 skip 條件、`main()` 的 `pending` 過濾。
-- `addon/__init__.py` ⌘S：`incomplete` 判斷與逐卡欄位狀態 signal。
+- **⌘S Complete**（`addon/__init__.py` BackfillWorker）：維持原樣，completeness 不含 `Sentence_CN`，進度 box 用 `BACKFILL_BOXES`（不含 Sentence-CN）。
+- **`backfill_words.py`**（CLI 補全部欄位）：`note_complete()` 不檢查 `Sentence_CN`。
 
-**影響**：所有既有舊卡因缺 `Sentence_CN` 會被視為不完整，下次 ⌘S 或批次回填會逐一補上（一次性大量處理，符合預期）。單張新增不受影響。
-
-### 句子變動時重翻
-
-`backfill_words.py` 既有 `need_sentence` flag：當句子被重新生成時，`Sentence_CN` 也必須重翻（舊翻譯對不上新句）。在 `need_sentence or not has_sentence_cn` 時都翻譯。
+理由：加入後所有舊卡都會被判為不完整，會在「補全部」路徑觸發未節流的大量翻譯（撞速率上限）。改由專用 burst 工具負責，職責分明。`note_complete()` helper 仍抽出共用（DRY），只是不含 `Sentence_CN`。
 
 ---
 
-## 4. 速率控制（可重用模組）
+## 4. 速率控制：持續節流（pacing）+ 時間盒選單
 
-### 設計動機
+### 設計動機與模型
 
-批次回填會連續打數百次 Groq；`llama-3.3-70b-versatile` 在 Groq 免費層 RPM 上限約 30。目前 `_groq_chat` / `groq_generate` 把 429 吞掉回 `""`，無法分辨「速率限制」與「翻譯失敗」。批次回填需要能分辨並主動煞車。
+`llama-3.3-70b-versatile` 免費層 RPM ~25-30（令牌桶：用完後每幾秒回補一個）。**長期吞吐量被 RPM 卡死**（N 筆至少 `⌈N / RPM⌉` 分鐘）。
 
-### 模組：`core/rate_limiter.py`（通用、可重用）
+**模型 = 持續節流（pacing）**：以不超過速率的節奏**持續**翻譯；撞 429 就等 `Retry-After`（≈令牌回補的幾秒）再續同一筆，**直到選定的秒數用完**（`直接完成` = 直到全部翻完）。
 
-- 設定：每批上限 `batch_limit`（預設 25）。
-- 提供狀態：已處理數、是否達上限、是否偵測到 429。
-- 偵測 Groq 回 429（SDK 的 `RateLimitError` 或 urllib 的 HTTP 429）時，標記煞車、停止當批。
-- 不含 Anki／欄位邏輯，純粹的批次節流／煞車器，未來其他批次功能可 import 重用。
+> 為何不用 burst（爆發→等滿 60s→再爆發）：burst 對**短於一個視窗**的預算失效 —— 例「30 秒」只能做 1 輪，且剛跑過時那輪會秒撞 429、2 秒就結束，沒「用滿 30 秒」。pacing 則在 30 秒內隨令牌回補陸續翻 ~12 筆，真正用滿時間且吞吐最大。
 
-### 批次行為（resume，非定時硬跑）
+### 共用偵測：`core/rate_limiter.py` + addon `_AddonRateLimited`
 
-- 不存進度檔。**resume 天然達成**：每次只挑「仍缺 `Sentence_CN`」的卡片，所以隨時 Ctrl-C 中斷、下次再跑都從未處理的繼續。
-- 跑滿一批（達 `batch_limit` 或偵測到 429）即停下，回報「已處理 X 張、剩餘 Y 張、請稍後再跑」。
-- fallback：任一張翻譯失敗（含 429）不中止整批的資料完整性 —— 失敗的卡片保持 `Sentence_CN` 空，自然會在下次被重挑。
+- `RateLimitReached(retry_after=60)` / `_AddonRateLimited(retry_after=60)`：429 例外，攜帶秒數（讀 `Retry-After`，缺失退 60）。
+- `is_rate_limit_error(exc)`、`groq_generate_strict` / `_groq_chat_strict`：surface 429 而非吞掉。
+- 純偵測邏輯，無 Anki／欄位知識，未來其他資料的批次也能重用。
 
-### `batch_limit` 校準（dry-run）
+### addon 專用選單 `SentenceCNDialog`（主路徑）
 
-`25` 為保守預設。實作階段以安全的 dry-run 校準確認實際值：
-- 連續呼叫翻譯 API（**不寫卡片**）直到第一次 429，記錄成功數與耗時 → 得出實際每分鐘安全批量。
-- 會消耗少量 API 額度，但不更動任何卡片。
-- 校準結果回填成 `batch_limit` 預設。
+「批次回填整句翻譯」選單（Tools，無快捷鍵）：
+- 開啟先掃描缺 `Sentence_CN` 的卡，顯示**預估時間** `共 N 筆，約 24/分 → 全部約 ⌈N/24⌉ 分鐘` + pacing 說明。
+- 5 顆時間盒按鈕，標籤含預估筆數（`secs/60 × RPM`，capped）：`30 秒(~12) / 2 分鐘(~48) / 5 分鐘(~120) / 10 分鐘(~240) / 直接完成(全部)`。
+- `SentenceCNWorker`（QThread）跑 pacing 引擎：`_groq_translate_sentence(strict=True)` 翻譯、AnkiConnect 寫回；撞 429 等 `Retry-After` 重試同筆。狀態顯示「翻譯中 X/N（剩 Ns）」「額度回補中 Ns」。
+- 若 `Retry-After` 過長（> ~130s，可能每日額度）→ 停下回報，不在程式裡乾等。
+- **resume 天然達成**：每次開啟重新只挑缺的；隨時「停止」，下次續。
 
-### CLI 進度顯示做區別
+### CLI `backfill_sentence_cn.py`
 
-`backfill_sentence_cn.py` 終端輸出與其他 script 視覺區隔，例如：
+run-to-completion 版：跑到 429 → 等 `max(60, Retry-After)` 秒 → 續，直到全部完成；按 **Ctrl-C** 結束（下次再跑從缺的續）。
 
 ```
 ┌─ Sentence_CN 回填 ──────────────────┐
-│  ●●●●●●●●●●●●●●●●●●●●●●●●●  25/25     │
-│  ⚠ 已達本批上限（速率保護），請 60 秒後再跑
-│  剩餘 312 張未處理（下次自動從這裡續）
+│  ●●●●●●●●●●●●●●●●●●●●●  本輪完成 21 張
+│  剩餘 312 張未處理
 └─────────────────────────────────────┘
+達 Groq 速率上限， 60s 後自動續跑…（Ctrl-C 結束）
 ```
-
-addon ⌘S 路徑沿用既有逐卡進度框，達上限時於框內顯示「遞 60 秒」提示。
 
 ---
 
