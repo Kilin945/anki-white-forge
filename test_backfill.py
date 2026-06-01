@@ -186,3 +186,28 @@ class TestImageQuery:
     def test_fallback(self, mock):
         result = llm_mod.llm_image_query("audit")
         assert "audit" in result
+
+
+class TestLlmTranslateSentence:
+    @patch.object(llm_mod, 'llm')
+    def test_returns_chinese(self, mock_llm):
+        mock_llm.return_value = "這個系統能妥善處理併發。"
+        assert llm_mod.llm_translate_sentence("The system handles concurrency well.") == "這個系統能妥善處理併發。"
+
+    @patch.object(llm_mod, 'llm')
+    def test_strips_wrapping_quotes(self, mock_llm):
+        mock_llm.return_value = '"這是一隻貓。"'
+        assert llm_mod.llm_translate_sentence("This is a cat.") == "這是一隻貓。"
+
+    @patch.object(llm_mod, 'llm')
+    def test_rejects_english_preamble(self, mock_llm):
+        mock_llm.return_value = "Here is the translation: 這是一隻貓。"
+        assert llm_mod.llm_translate_sentence("This is a cat.") == ""
+
+    @patch.object(llm_mod, 'llm')
+    def test_rejects_no_chinese(self, mock_llm):
+        mock_llm.return_value = "I cannot translate this."
+        assert llm_mod.llm_translate_sentence("foo") == ""
+
+    def test_empty_sentence_returns_empty(self):
+        assert llm_mod.llm_translate_sentence("") == ""

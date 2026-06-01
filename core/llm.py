@@ -1,6 +1,7 @@
 import os
+import re
 import requests
-from groq import Groq
+from groq import Groq, RateLimitError
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "gemma4:26b"
@@ -96,6 +97,37 @@ def llm_sentence_and_query(word, definition="", sentence=""):
     if len(lines) == 1 and len(lines[0]) > 10:
         return lines[0].strip('"\''), f"{word} {definition} photo" if definition else f"{word} illustration"
     return "", f"{word} {definition} photo" if definition else f"{word} illustration"
+
+
+SENTENCE_CN_PROMPT = (
+    "Translate this English sentence into natural, complete Traditional Chinese. "
+    "Output only the translation. No explanation, no quotes, no English.\n\n"
+    'Sentence: "{sentence}"'
+)
+
+
+def _looks_like_chinese_translation(text):
+    if not text:
+        return False
+    if not re.search(r"[一-鿿]", text):   # must contain Chinese
+        return False
+    if re.search(r"[A-Za-z]{6,}", text):           # long latin run = preamble/refusal
+        return False
+    return True
+
+
+def llm_translate_sentence(sentence, *, strict=False):
+    """Traditional-Chinese translation of a full English sentence. '' on failure.
+
+    strict=True surfaces Groq 429 as RateLimitReached (for batch jobs);
+    otherwise uses the normal swallowing llm() path (single-add / per-card).
+    """
+    if not sentence:
+        return ""
+    prompt = SENTENCE_CN_PROMPT.format(sentence=sentence)
+    result = groq_generate_strict(prompt) if strict else llm(prompt)
+    result = result.strip().strip('"').strip()
+    return result if _looks_like_chinese_translation(result) else ""
 
 
 def llm_image_query(word, definition="", sentence=""):
