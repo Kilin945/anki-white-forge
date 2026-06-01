@@ -304,3 +304,29 @@ class TestRunBatch:
             update=lambda nid, cn: updates.append(nid), limiter=lim)
         assert done == 1
         assert updates == [2]
+
+
+import backfill_words as bw
+
+
+def _full_note(sentence="A cat.", img='<img src="x.jpg">', audio="[sound:a.mp3]",
+               front_audio="[sound:b.mp3]", translation="貓", sentence_cn="一隻貓。"):
+    return {"fields": {
+        "Sentence": {"value": sentence},
+        "Image_Prompt": {"value": img},
+        "Audio": {"value": audio},
+        "Front_Audio": {"value": front_audio},
+        "Translation": {"value": translation},
+        "Sentence_CN": {"value": sentence_cn},
+    }}
+
+
+class TestNoteComplete:
+    def test_full_note_is_complete(self):
+        assert bw.note_complete(_full_note()) is True
+
+    def test_missing_sentence_cn_incomplete(self):
+        assert bw.note_complete(_full_note(sentence_cn="")) is False
+
+    def test_missing_translation_incomplete(self):
+        assert bw.note_complete(_full_note(translation="")) is False
