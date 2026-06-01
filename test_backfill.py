@@ -295,6 +295,14 @@ class TestRunBatch:
         assert done == 1
         assert lim.stopped_reason == "rate_limited"
 
+    def test_propagates_retry_after(self):
+        notes = [_cn_note(i, f"Sentence {i}.") for i in range(3)]
+        def translate(s):
+            raise RateLimitReached(retry_after=18)
+        lim = BatchLimiter(batch_limit=99)
+        bf_cn.run_batch(notes, translate=translate, update=lambda nid, cn: None, limiter=lim)
+        assert lim.retry_after == 18
+
     def test_skips_empty_translation(self):
         notes = [_cn_note(1, "A cat."), _cn_note(2, "A dog.")]
         updates = []
@@ -325,8 +333,9 @@ class TestNoteComplete:
     def test_full_note_is_complete(self):
         assert bw.note_complete(_full_note()) is True
 
-    def test_missing_sentence_cn_incomplete(self):
-        assert bw.note_complete(_full_note(sentence_cn="")) is False
+    def test_sentence_cn_not_checked(self):
+        # backfill_words ignores Sentence_CN (filled only by ⌘D / dedicated paced tool)
+        assert bw.note_complete(_full_note(sentence_cn="")) is True
 
     def test_missing_translation_incomplete(self):
         assert bw.note_complete(_full_note(translation="")) is False

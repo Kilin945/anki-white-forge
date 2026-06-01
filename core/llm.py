@@ -56,11 +56,21 @@ def groq_generate_strict(prompt):
             max_tokens=200,
         )
         return resp.choices[0].message.content.strip()
-    except RateLimitError:
-        raise RateLimitReached()
+    except RateLimitError as e:
+        raise RateLimitReached(_retry_after_from(e))
     except Exception as e:
         print(f"  [groq error] {e}")
         return ""
+
+
+def _retry_after_from(exc, default=60):
+    """Seconds to wait from a Groq RateLimitError's Retry-After header; default if absent."""
+    try:
+        raw = exc.response.headers.get("retry-after")
+        secs = int(float(raw))
+        return secs if secs > 0 else default
+    except (AttributeError, TypeError, ValueError):
+        return default
 
 
 def ollama_generate(prompt):

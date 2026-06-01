@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from core.anki import anki, DECK_NAME
 from core.text import strip_html, is_placeholder, has_image
-from core.llm import llm_sentence_and_query, llm_translate, llm_translate_sentence, _groq_client, GROQ_MODEL, OLLAMA_MODEL
+from core.llm import llm_sentence_and_query, llm_translate, _groq_client, GROQ_MODEL, OLLAMA_MODEL
 from core.tts import make_audio, VOICE_WORD, VOICE_SENTENCE
 from core.image import fetch_image
 
@@ -36,7 +36,10 @@ def _do_word_audio(word):
 
 
 def note_complete(n):
-    """True if a note has every auto-filled field, including Sentence_CN."""
+    """True if a note has every auto-filled field.
+    Sentence_CN is intentionally NOT checked here — it's filled only by ⌘D and the
+    dedicated paced backfill (backfill_sentence_cn.py), never by this 'fill everything'
+    path, so bulk runs don't trigger un-throttled translation."""
     f = n["fields"]
     sentence = strip_html(f["Sentence"]["value"])
     return (
@@ -44,8 +47,7 @@ def note_complete(n):
         has_image(f["Image_Prompt"]["value"]) and
         bool(f["Audio"]["value"]) and
         bool(f.get("Front_Audio", {}).get("value", "")) and
-        bool(f.get("Translation", {}).get("value", "")) and
-        bool(f.get("Sentence_CN", {}).get("value", ""))
+        bool(f.get("Translation", {}).get("value", ""))
     )
 
 
@@ -59,7 +61,6 @@ def process_note(note):
     current_audio = note["fields"]["Audio"]["value"]
     current_front_audio = note["fields"].get("Front_Audio", {}).get("value", "")
     current_translation = note["fields"].get("Translation", {}).get("value", "")
-    current_sentence_cn = note["fields"].get("Sentence_CN", {}).get("value", "")
     current_assoc = strip_html(note["fields"].get("Association", {}).get("value", ""))
 
     has_sentence = bool(current_sentence) and not is_placeholder(current_sentence)
@@ -67,7 +68,6 @@ def process_note(note):
     has_audio = bool(current_audio)
     has_front_audio = bool(current_front_audio)
     has_translation = bool(current_translation)
-    has_sentence_cn = bool(current_sentence_cn)
 
     if note_complete(note):
         return word, "skipped"
@@ -102,8 +102,6 @@ def process_note(note):
             futures["front_audio"] = pool.submit(_do_word_audio, word)
         if not has_translation:
             futures["translation"] = pool.submit(llm_translate, word, sentence)
-        if not has_sentence_cn or need_sentence:
-            futures["sentence_cn"] = pool.submit(llm_translate_sentence, sentence)
 
         if "image" in futures:
             img_filename, ok, attr = futures["image"].result()
@@ -123,12 +121,6 @@ def process_note(note):
             if trans:
                 fields["Translation"] = trans
                 lines.append(f"  翻譯     : {trans}")
-
-        if "sentence_cn" in futures:
-            cn = futures["sentence_cn"].result()
-            if cn:
-                fields["Sentence_CN"] = cn
-                lines.append(f"  整句譯   : {cn}")
 
     if fields:
         anki("updateNoteFields", note={"id": note_id, "fields": fields})

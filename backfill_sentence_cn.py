@@ -5,6 +5,8 @@ Resume is automatic: each run only picks cards still missing Sentence_CN, so it 
 safe to Ctrl-C any time and re-run to continue. Stops after one batch (rate-limit
 protection) and tells you to re-run after ~60s.
 """
+import time
+
 from core.anki import anki
 from core.llm import llm_translate_sentence
 from core.text import strip_html
@@ -34,8 +36,8 @@ def run_batch(notes, translate, update, limiter):
         sentence = strip_html(n["fields"]["Sentence"]["value"]).strip()
         try:
             cn = translate(sentence)
-        except RateLimitReached:
-            limiter.record_rate_limited()
+        except RateLimitReached as e:
+            limiter.record_rate_limited(e.retry_after)
             break
         if cn:
             update(n["noteId"], cn)
@@ -46,37 +48,51 @@ def run_batch(notes, translate, update, limiter):
     return done, remaining
 
 
-def _print_box(done, remaining, reason, batch_limit):
-    bar = "●" * done
+def _print_box(done, remaining):
     print("┌─ Sentence_CN 回填 ──────────────────┐")
-    print(f"│  {bar}  {done}/{batch_limit}")
-    if reason == "rate_limited":
-        print("│  ⚠ 偵測到速率上限（429），本批提前停止")
-    elif reason == "batch_limit":
-        print("│  ⚠ 已達本批上限（速率保護），請 60 秒後再跑")
+    print(f"│  {'●' * min(done, 30)}  本輪完成 {done} 張")
     if remaining > 0:
-        print(f"│  剩餘 {remaining} 張未處理（下次自動從這裡續）")
+        print(f"│  剩餘 {remaining} 張未處理")
     else:
         print("│  ✓ 全部完成")
     print("└─────────────────────────────────────┘")
 
 
-def main():
-    print("Fetching notes…")
-    ids = anki("findNotes", query=f"deck:{DECK_NAME}")
-    notes = anki("notesInfo", notes=ids)
-    limiter = BatchLimiter(batch_limit=25)
+def _countdown(secs):
+    """讀秒：等 secs 秒後自動續跑。Ctrl-C 中斷 → 結束（exit loop）。"""
+    for left in range(secs, 0, -1):
+        print(f"\r達 Groq 速率上限，{left:>3}s 後自動續跑…（Ctrl-C 結束） ", end="", flush=True)
+        time.sleep(1)
+    print("\r續跑中…                                          ")
 
+
+def main():
     def update(note_id, cn):
         anki("updateNoteFields", note={"id": note_id, "fields": {"Sentence_CN": cn}})
 
-    done, remaining = run_batch(
-        notes,
-        translate=lambda s: llm_translate_sentence(s, strict=True),
-        update=update,
-        limiter=limiter,
-    )
-    _print_box(done, remaining, limiter.stopped_reason, limiter.batch_limit)
+    print("Fetching notes…")
+    while True:
+        ids = anki("findNotes", query=f"deck:{DECK_NAME}")
+        notes = anki("notesInfo", notes=ids)
+        limiter = BatchLimiter(batch_limit=10**9)   # no batch cap: run until 429 or done
+        done, remaining = run_batch(
+            notes,
+            translate=lambda s: llm_translate_sentence(s, strict=True),
+            update=update,
+            limiter=limiter,
+        )
+        _print_box(done, remaining)
+        if limiter.stopped_reason == "rate_limited" and remaining > 0:
+            # wait for the full rate window to reset (~60s) so the next burst is meaningful;
+            # honour a longer Retry-After if the API asks for one (e.g. daily limit)
+            wait_secs = max(60, limiter.retry_after)
+            try:
+                _countdown(wait_secs)
+            except KeyboardInterrupt:
+                print("\n已結束（exit loop）。剩餘的下次再跑即可從這裡續。")
+                break
+            continue
+        break
 
 
 if __name__ == "__main__":

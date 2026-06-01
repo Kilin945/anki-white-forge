@@ -38,9 +38,12 @@ VALIDATE_SCRIPT = os.path.expanduser("~/Workspace/Anki/_validate_helper.py")
 VOICE_WORD     = "en-US-AndrewNeural"
 VOICE_SENTENCE = "en-US-AvaNeural"
 
-# field progress boxes — shared by Add (single row) and Complete (one row per card)
-FIELD_BOXES = [("sentence", "Sentence"), ("image", "Image"),
+# field progress boxes. ⌘D Add shows all five (it generates Sentence_CN too); ⌘S Complete
+# omits Sentence_CN — that field is filled only by ⌘D and the dedicated 批次回填 menu.
+FIELD_BOXES = [("sentence", "Sentence"), ("sentence_cn", "Sentence-CN"), ("image", "Image"),
                ("audio", "Audio"), ("translation", "翻譯")]
+BACKFILL_BOXES = [("sentence", "Sentence"), ("image", "Image"),
+                  ("audio", "Audio"), ("translation", "翻譯")]
 BOX_STYLE = {  # text is just the field label; state shown by colour only (no ✓ / ⚠)
     "working": ("border:1.5px solid #94a3b8; border-radius:6px; padding:6px 12px; color:#64748b;", "{}"),
     "ok":      ("border:1.5px solid #16a34a; border-radius:6px; padding:6px 12px; color:#16a34a; font-weight:600;", "{}"),
@@ -100,6 +103,50 @@ def _groq_chat(prompt, *, temperature, max_tokens, timeout):
         return ""
 
 
+class _AddonRateLimited(Exception):
+    """Raised by _groq_chat_strict on HTTP 429 — used to end a burst in 批次回填.
+    retry_after = seconds to wait before retrying (from Retry-After header, else 60)."""
+    def __init__(self, retry_after=60):
+        super().__init__("rate limited")
+        self.retry_after = retry_after
+
+
+def _parse_retry_after(headers, default=60):
+    """Seconds to wait from a 429 Retry-After header; default if missing/invalid."""
+    raw = headers.get("Retry-After") if headers else None
+    try:
+        secs = int(float(raw))
+        return secs if secs > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _groq_chat_strict(prompt, *, temperature, max_tokens, timeout):
+    """Like _groq_chat but raises _AddonRateLimited on HTTP 429 — for the burst engine."""
+    key = _load_groq_key()
+    if not key:
+        return ""
+    payload = json.dumps({
+        "model": GROQ_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }).encode()
+    req = urllib.request.Request(GROQ_API_URL, data=payload,
+              headers={"Content-Type": "application/json",
+                       "Authorization": f"Bearer {key}",
+                       "User-Agent": "AnkiWordAdder/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode())["choices"][0]["message"]["content"].strip()
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            raise _AddonRateLimited(_parse_retry_after(e.headers))
+        return ""
+    except Exception:
+        return ""
+
+
 def _groq_spellcheck(word):
     """Spell-check a word/phrase via Groq. Returns:
       ("ok", None)          correctly spelled English word/phrase
@@ -153,6 +200,7 @@ class Worker(QThread):
             # Image, Translation and Audio in parallel
             image_result = [None]
             translation_result = [""]
+            sentence_cn_result = [""]
             audio_filename = f"{word}_tts.mp3"
             front_audio_filename = f"{word}_word.mp3"
 
@@ -161,6 +209,7 @@ class Worker(QThread):
 
             def do_translate():
                 translation_result[0] = self._groq_translate(word, sentence)
+                sentence_cn_result[0] = self._groq_translate_sentence(sentence)
 
             img_thread = threading.Thread(target=do_image)
             trans_thread = threading.Thread(target=do_translate)
@@ -180,6 +229,7 @@ class Worker(QThread):
 
             self.step.emit("image", "ok" if image_result[0] else "warn")
             self.step.emit("translation", "ok" if translation_result[0] else "warn")
+            self.step.emit("sentence_cn", "ok" if sentence_cn_result[0] else "warn")
             image_field = image_result[0]
 
             self.finished.emit({
@@ -188,6 +238,7 @@ class Worker(QThread):
                 "sentence":    sentence,
                 "image_field": image_field,
                 "translation": translation_result[0],
+                "sentence_cn": sentence_cn_result[0],
                 "audio_filename": audio_filename,
                 "front_audio_filename": front_audio_filename,
             })
@@ -236,6 +287,22 @@ class Worker(QThread):
         if re.search(r"[A-Za-z]", reply):                    # English preamble / refusal / paren
             return ""
         if len(re.findall(r"[一-鿿]", reply)) > 6:   # >6 漢字 = a sentence, not a word
+            return ""
+        return reply
+
+    def _groq_translate_sentence(self, sentence, *, strict=False):
+        """Traditional Chinese translation of a full sentence. '' on failure.
+        strict=True raises _AddonRateLimited on 429 (for the 批次回填 burst engine)."""
+        if not sentence:
+            return ""
+        prompt = ('Translate this English sentence into natural, complete Traditional '
+                  'Chinese. Output only the translation. No explanation, no quotes, no '
+                  f'English.\n\nSentence: "{sentence}"')
+        chat = _groq_chat_strict if strict else _groq_chat
+        reply = chat(prompt, temperature=0.3, max_tokens=200, timeout=15).strip().strip('"').strip()
+        if not re.search(r"[一-鿿]", reply):     # no Chinese → fail
+            return ""
+        if re.search(r"[A-Za-z]{6,}", reply):            # long English run → preamble
             return ""
         return reply
 
@@ -484,6 +551,8 @@ class AddWordDialog(QDialog):
             note["Front_Audio"] = f'[sound:{data["front_audio_filename"]}]'
             if "Translation" in note:
                 note["Translation"] = data.get("translation", "")
+            if "Sentence_CN" in note:
+                note["Sentence_CN"] = data.get("sentence_cn", "")
 
             deck_id = mw.col.decks.id(DECK_NAME)
             mw.col.add_note(note, deck_id)
@@ -520,7 +589,7 @@ class FieldRow(QWidget):
         wl.setMinimumWidth(120)
         wl.setStyleSheet("font-weight:600; color:#1E293B;")
         lay.addWidget(wl)
-        for key, _label in FIELD_BOXES:
+        for key, _label in BACKFILL_BOXES:    # ⌘S omits Sentence-CN (filled elsewhere)
             box = QLabel()
             box.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._boxes[key] = box
@@ -884,6 +953,214 @@ class FindDuplicatesDialog(QDialog):
         self.status.setText(f"✓ 已刪除 {len(to_delete)} 張。記得同步 Anki！")
 
 
+# ── 批次回填整句翻譯（Sentence_CN）—— burst 引擎 + 時間盒選單 ───────────────────
+
+SENTENCE_CN_RPM = 25          # 約略每分鐘筆數（Groq 12000 token/分 ÷ ~480/句 ≈ 25）；僅用於預估顯示
+# (label, budget_seconds | None=直接完成)
+SENTENCE_CN_MODES = [("1 分鐘", 60), ("2 分鐘", 120), ("5 分鐘", 300),
+                     ("10 分鐘", 600), ("直接完成", None)]
+
+
+class SentenceCNWorker(QThread):
+    """Paced translator: translate continuously; on 429 wait Retry-After (~the token
+    refill, a few seconds) then carry on. Runs until the time budget is spent
+    (None = run until everything is done). Honours the chosen seconds — a 30s job
+    spends ~30s translating as fast as the rate allows."""
+    LONG_BLOCK = 130                            # Retry-After above this = hard block (e.g. daily quota)
+    progress = pyqtSignal(int, int, int)        # (done, total, remaining_secs; -1 = 直接完成)
+    waiting  = pyqtSignal(int, int, int)        # (seconds_left, done, total)
+    finished = pyqtSignal(int, int)             # (done, remaining)
+
+    def __init__(self, notes, budget_seconds):
+        super().__init__()
+        self.notes = notes              # [{"noteId":…, "sentence":…}] pre-fetched, missing Sentence_CN
+        self.budget = budget_seconds    # None = 直接完成
+        self._w = Worker.__new__(Worker)
+        self._stop = False
+        self.blocked_secs = 0           # set if we stop because of a long (daily) block
+
+    def stop(self):
+        self._stop = True
+
+    def _remaining(self, start):
+        import time
+        if self.budget is None:
+            return -1
+        return max(0, int(self.budget - (time.monotonic() - start)))
+
+    def run(self):
+        import time
+        total = len(self.notes)
+        done = 0
+        i = 0
+        start = time.monotonic()
+        try:
+            while i < total and not self._stop:
+                if self.budget is not None and time.monotonic() - start >= self.budget:
+                    break
+                note = self.notes[i]
+                try:
+                    cn = self._w._groq_translate_sentence(note["sentence"], strict=True)
+                except _AddonRateLimited as e:
+                    wait = e.retry_after
+                    elapsed = time.monotonic() - start
+                    if self.budget is not None and elapsed + wait > self.budget:
+                        break                    # no time left to wait out the cooldown
+                    if wait > self.LONG_BLOCK:
+                        self.blocked_secs = wait  # daily / long quota → stop and report
+                        break
+                    target = time.monotonic() + wait
+                    while not self._stop:        # wait out the refill, then retry SAME note
+                        left = target - time.monotonic()
+                        if left <= 0:
+                            break
+                        self.waiting.emit(int(left) + 1, done, total)
+                        time.sleep(0.3)
+                    continue
+                if cn:
+                    self._update(note["noteId"], cn)
+                    done += 1
+                i += 1
+                self.progress.emit(done, total, self._remaining(start))
+        finally:
+            self.finished.emit(done, total - done)
+
+    def _update(self, note_id, cn):
+        payload = json.dumps({
+            "action": "updateNoteFields", "version": 6,
+            "params": {"note": {"id": note_id, "fields": {"Sentence_CN": cn}}}
+        }).encode()
+        with urllib.request.urlopen(
+            urllib.request.Request(ANKI_URL, data=payload,
+                        headers={"Content-Type": "application/json"}),
+            timeout=15,
+        ) as resp:
+            err = json.loads(resp.read().decode()).get("error")
+        if err:
+            raise RuntimeError(f"AnkiConnect: {err}")
+
+
+class SentenceCNDialog(QDialog):
+    """Bulk-fill Sentence_CN with up-front time estimate and a time-box menu.
+    Paced by SentenceCNWorker; resume is automatic (each open re-scans what's missing)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Backfill Sentence Translations")
+        self.setMinimumWidth(600)
+        self._worker = None
+        self._notes = []
+        self._setup_ui()
+        self._scan()
+
+    def _setup_ui(self):
+        root = QVBoxLayout(self)
+        self.info = QLabel()
+        self.info.setWordWrap(True)
+        root.addWidget(self.info)
+
+        note = QLabel(
+            f"Groq 一分鐘約只能翻 {SENTENCE_CN_RPM} 筆；選更長的時間就是延長、邊等額度回補邊繼續翻。\n"
+            "隨時可按「停止」，下次再開會從沒翻的續。")
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#64748b; font-size:12px;")
+        root.addWidget(note)
+
+        self._mode_row = QHBoxLayout()
+        self._mode_btns = []
+        for label, secs in SENTENCE_CN_MODES:
+            b = QPushButton(label)
+            b.clicked.connect(lambda _=False, s=secs: self._start(s))
+            self._mode_row.addWidget(b)
+            self._mode_btns.append((b, secs))
+        root.addLayout(self._mode_row)
+
+        self.status = QLabel("")
+        self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        root.addWidget(self.status)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        root.addWidget(self.progress_bar)
+
+        btns = QHBoxLayout()
+        self.stop_btn = QPushButton("停止")
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.clicked.connect(self._on_stop)
+        close_btn = QPushButton("關閉")
+        close_btn.clicked.connect(self.accept)
+        btns.addWidget(self.stop_btn)
+        btns.addWidget(close_btn)
+        root.addLayout(btns)
+
+    def _scan(self):
+        notes = []
+        for nid in _deck_note_ids():
+            n = mw.col.get_note(nid)
+            if "Sentence_CN" not in n or "Sentence" not in n:
+                continue
+            sentence = _clean_text(n["Sentence"])
+            if not sentence or any(p in n["Sentence"] for p in PLACEHOLDERS):
+                continue                      # no real sentence to translate yet
+            if n["Sentence_CN"].strip():
+                continue                      # already has a translation
+            notes.append({"noteId": nid, "sentence": sentence})
+        self._notes = notes
+        n = len(notes)
+        if n == 0:
+            self.info.setText("全部卡片都有整句翻譯了 🎉")
+            for b, _secs in self._mode_btns:
+                b.setEnabled(False)
+        else:
+            est = -(-n // SENTENCE_CN_RPM)     # ceil(n / rpm) minutes
+            self.info.setText(f"共 {n} 筆缺整句翻譯，速率約 {SENTENCE_CN_RPM}/分 → 全部約 {est} 分鐘。")
+            for b, _secs in self._mode_btns:
+                b.setEnabled(True)
+
+    def _start(self, budget_seconds):
+        if not self._notes:
+            return
+        for b, _secs in self._mode_btns:
+            b.setEnabled(False)
+        self.stop_btn.setEnabled(True)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, len(self._notes))
+        self.progress_bar.setValue(0)
+        self._worker = SentenceCNWorker(self._notes, budget_seconds)
+        self._worker.progress.connect(self._on_progress)
+        self._worker.waiting.connect(self._on_waiting)
+        self._worker.finished.connect(self._on_finished)
+        self._worker.start()
+
+    def _on_progress(self, done, total, remaining_secs):
+        self.progress_bar.setValue(done)
+        tail = "" if remaining_secs < 0 else f"（剩 {remaining_secs}s）"
+        self.status.setText(f"翻譯中… {done} / {total} {tail}")
+
+    def _on_waiting(self, secs, done, total):
+        self.status.setText(f"額度回補中… {secs}s 後自動續（已翻 {done} / {total}）")
+
+    def _on_stop(self):
+        if self._worker:
+            self._worker.stop()
+        self.stop_btn.setEnabled(False)
+        self.status.setText("停止中…")
+
+    def _on_finished(self, done, remaining):
+        mw.col.save()
+        mw.reset()
+        self.progress_bar.setVisible(False)
+        self.stop_btn.setEnabled(False)
+        blocked = getattr(self._worker, "blocked_secs", 0)
+        if blocked:
+            self.status.setText(
+                f"已翻 {done} 筆。達 Groq 較長的速率上限（約需等 {blocked}s，可能是每日額度），"
+                f"請稍後再來；剩 {remaining} 筆。")
+        else:
+            self.status.setText(f"本次完成 {done} 筆，剩 {remaining} 筆。記得同步 Anki！")
+        self._scan()       # refresh count + re-enable mode buttons for another round
+
+
 # ── menu entries ──────────────────────────────────────────────────────────────
 
 def open_dialog():
@@ -894,6 +1171,9 @@ def open_backfill_dialog():
 
 def open_duplicates_dialog():
     FindDuplicatesDialog(mw).exec()
+
+def open_sentence_cn_dialog():
+    SentenceCNDialog(mw).exec()
 
 DEFAULT_SHORTCUTS = {"add": "Ctrl+D", "complete": "Ctrl+S", "find_duplicates": "Ctrl+F"}
 ACTIONS = {}  # key -> QAction, so the settings dialog can re-bind shortcuts live
@@ -987,6 +1267,10 @@ def open_settings_dialog():
 _add_menu_action("Add English Word…", "add", open_dialog)
 _add_menu_action("Complete Missing Cards…", "complete", open_backfill_dialog)
 _add_menu_action("Find Duplicate Words…", "find_duplicates", open_duplicates_dialog)
+
+_backfill_cn_action = QAction("Backfill Sentence Translations…", mw)   # menu only, no shortcut
+_backfill_cn_action.triggered.connect(open_sentence_cn_dialog)
+mw.form.menuTools.addAction(_backfill_cn_action)
 
 _settings_action = QAction("My Word Adder Settings…", mw)
 _settings_action.triggered.connect(open_settings_dialog)

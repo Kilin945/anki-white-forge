@@ -5,7 +5,11 @@ Pure batch accounting — no Anki or field knowledge. Import from any batch job.
 
 
 class RateLimitReached(Exception):
-    """Raised by API helpers when the provider returns HTTP 429."""
+    """Raised by API helpers when the provider returns HTTP 429.
+    retry_after = seconds to wait before retrying (from Retry-After header, else 60)."""
+    def __init__(self, retry_after=60):
+        super().__init__("rate limited")
+        self.retry_after = retry_after
 
 
 def is_rate_limit_error(exc):
@@ -25,6 +29,7 @@ class BatchLimiter:
         self.batch_limit = batch_limit
         self.processed = 0
         self.stopped_reason = None   # None | "batch_limit" | "rate_limited"
+        self.retry_after = 60        # seconds to wait if stopped by rate limit
 
     def should_continue(self):
         if self.stopped_reason:
@@ -37,5 +42,6 @@ class BatchLimiter:
     def record_success(self):
         self.processed += 1
 
-    def record_rate_limited(self):
+    def record_rate_limited(self, retry_after=60):
         self.stopped_reason = "rate_limited"
+        self.retry_after = retry_after
