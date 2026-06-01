@@ -3,6 +3,8 @@ import re
 import requests
 from groq import Groq, RateLimitError
 
+from core.rate_limiter import RateLimitReached
+
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "gemma4:26b"
 GROQ_KEY_PATH = os.path.expanduser("~/Workspace/Anki/.groq_key")
@@ -37,6 +39,25 @@ def groq_generate(prompt):
             max_tokens=200,
         )
         return resp.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"  [groq error] {e}")
+        return ""
+
+
+def groq_generate_strict(prompt):
+    """Like groq_generate but raises RateLimitReached on 429 — for batch jobs."""
+    if not _groq_client:
+        return ""
+    try:
+        resp = _groq_client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=200,
+        )
+        return resp.choices[0].message.content.strip()
+    except RateLimitError:
+        raise RateLimitReached()
     except Exception as e:
         print(f"  [groq error] {e}")
         return ""
