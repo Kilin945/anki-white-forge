@@ -101,16 +101,16 @@
 
 .text-side {
   flex: 1;
-  padding: 48px 48px;
+  padding: 44px 48px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 14px;
   justify-content: center;
 }
 
 .text-side .word-title {
   font-family: "Poppins", "Inter", sans-serif;
-  font-size: clamp(60px, 10vw, 96px);
+  font-size: clamp(44px, 6vw, 58px);
   font-weight: 700;
   color: #1E293B;
   -webkit-hyphens: auto;
@@ -119,31 +119,40 @@
   min-width: 0;
 }
 
-.title-row {
-  display: flex;
-  flex-wrap: wrap;           /* long word → translation drops to its own line below */
-  align-items: baseline;
-  column-gap: 20px;
-  row-gap: 4px;
-}
-
-.cn-hint {
-  font-family: "Poppins", "Inter", sans-serif;
-  font-size: clamp(30px, 5vw, 48px);
-  font-weight: 700;
-  color: #FDFBF7;
+/* word translation & sentence translation — one unified style: transparent fill, a thin
+   OUTLINE marks a tappable 'blank' (visible on touch, no hover needed); tap to fill in. */
+.trans-box {
+  /* real <button> so AnkiMobile's native tap-to-grade gesture skips it (it ignores
+     buttons/links); the stopPropagation handlers are a harmless extra guard. */
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: inherit;
+  text-align: left;
+  white-space: normal;          /* allow the sentence translation to wrap */
+  margin: 0;
+  display: block;
+  align-self: flex-start;       /* hug content → a tidy slot, not a full-width bar */
+  max-width: 100%;
+  min-width: 4.5em;             /* a clearly tappable slot even when hidden / short */
+  padding: 9px 14px;            /* generous tap target */
+  background: transparent;      /* no fill — stays light */
+  border: 1.5px solid #d6cfc4;  /* visible outline = obviously tappable, works on mobile */
+  border-radius: 8px;
+  font-size: clamp(18px, 2.1vw, 22px);
+  font-weight: 500;
+  line-height: 1.5;
+  color: transparent;           /* hidden: answer invisible */
   cursor: pointer;
-  transition: color 0.2s;
   user-select: none;
-  flex: 1;                   /* tap target fills the strip right of the title */
+  transition: color 0.2s, border-color 0.2s;
 }
-
-.cn-hint.revealed {
+.trans-box.revealed {           /* tapped: answer fills the slot; outline fades to quiet */
   color: #1E293B;
+  border-color: #ece7df;
 }
 
-.association {
-  font-size: clamp(26px, 4vw, 36px);
+.association {                 /* same size/weight as the translations — unified Chinese tier */
+  font-size: clamp(18px, 2.1vw, 22px);
   color: #0284C7;
   font-weight: 500;
 }
@@ -156,9 +165,9 @@
 }
 
 .sentence {
-  font-size: clamp(24px, 3.5vw, 32px);
+  font-size: clamp(20px, 2.5vw, 25px);
   color: #64748B;
-  line-height: 1.75;
+  line-height: 1.7;
 }
 
 .sentence .hl {
@@ -182,18 +191,6 @@
   font-size: 14px;
   color: #a8a29e;
   user-select: none;
-}
-
-/* Mac: override to fixed position */
-@media (min-width: 601px) {
-  .play-row {
-    position: fixed;
-    bottom: 60px;
-    left: 605px;
-    margin-top: 0;
-    background: rgba(253,251,247,0.9);
-    z-index: 100;
-  }
 }
 
 .audio-btn .replay-button {
@@ -255,14 +252,19 @@
     gap: 12px;
   }
   .text-side .word-title {
-    font-size: clamp(42px, 11vw, 56px);
+    font-size: clamp(38px, 10vw, 50px);
   }
   .association {
-    font-size: clamp(18px, 5vw, 24px);
+    font-size: clamp(16px, 4vw, 19px);   /* same as .trans-box on mobile */
     text-align: left;
   }
   .sentence {
-    font-size: clamp(17px, 4.5vw, 22px);
+    font-size: clamp(17px, 4.5vw, 20px);
+    text-align: left;
+  }
+  .trans-box {
+    font-size: clamp(16px, 4vw, 19px);
+    padding: 11px 14px;          /* ≥44px tall tap target for touch */
     text-align: left;
   }
   .play-row {

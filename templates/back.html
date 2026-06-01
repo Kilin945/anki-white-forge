@@ -3,10 +3,8 @@
     {{Image_Prompt}}
   </div>
   <div class="text-side">
-    <div class="title-row">
-      <div class="word-title" lang="en">{{Front}}</div>
-      <div class="cn-hint" onclick="this.classList.toggle('revealed')">{{Translation}}</div>
-    </div>
+    <div class="word-title" lang="en">{{Front}}</div>
+    <button type="button" class="cn-hint trans-box" ontouchend="event.stopPropagation()" onclick="event.stopPropagation();this.classList.toggle('revealed')">{{Translation}}</button>
     <div class="association">{{Association}}</div>
     <div class="divider"></div>
     <div class="sentence" id="sent">{{Sentence}}</div>
@@ -14,6 +12,7 @@
       <div class="audio-btn">{{Audio}}</div>
       <span class="audio-label">play sentence</span>
     </div>
+    <button type="button" class="sentence-cn trans-box" ontouchend="event.stopPropagation()" onclick="event.stopPropagation();this.classList.toggle('revealed')">{{Sentence_CN}}</button>
   </div>
 </div>
 <script>
