@@ -27,6 +27,7 @@ Anki 自動化單字系統，牌組 `My_Daily_English`、筆記類型 `English_W
 - `Sentence_CN`（整句中文翻譯）由 **⌘D（即時）、⌘S Complete（日常少量補完，只翻當下缺的幾張 → 不會撞速率）、專用選單「Backfill Sentence Translations」/ `⌘B` / CLI `backfill_sentence_cn.py`（大量、節流）** 填。**CLI `backfill_words.py` 仍刻意不碰**（它是未節流的大量補齊，整句翻譯量大會撞速率上限 → 大量場景一律走 `backfill_sentence_cn.py`）。⌘S 與 backfill_words.py 的差異就在這：GUI ⌘S 補（量小、互動），CLI 大量補齊不補。翻譯：core `llm_translate_sentence` / addon `_groq_translate_sentence` 各寫一份（addon 不能 import core），驗證以「含中文且英文詞 < 3」判定 → 保留嵌入英文詞（concurrency、Microsoft）的合法譯文
 - **卡片模板裡「可點」的元件一律用 `<button>`/`<a>`，不要用 `<div>`** —— AnkiMobile 原生 tap 手勢會略過互動元件；用 `<div>`+JS `stopPropagation` 擋不住原生手勢（點擊會被當成翻牌/評分），且卡片 `<script>` 跑幾張後 AnkiMobile 會停止重跑。見 `templates/back.html` 的 `.trans-box`（翻譯框）
 - 大量翻譯走 pacing（撞 429 就等 `Retry-After` 再續，不猜固定批量）。偵測 429：core `groq_generate_strict` 拋 `RateLimitReached`、addon `_groq_chat_strict` 拋 `_AddonRateLimited`，各帶 `retry_after`
+- 例句與單字翻譯的「語意」由**造句 prompt** 決定，優先序：**Association（提示）→ SWE 領域義 → 常用日常義**；單字翻譯（`_groq_translate` / `llm_translate`）一律「依句中用法」翻、且**禁列近義重複詞**（如「水杯、茶杯」）。造句 prompt 有**兩份且須同步**：addon `_sentence_prompt` 與 core `_sentence_instructions`（addon 不能 import core，改一邊要改另一邊，檔內已標 KEEP-IN-SYNC）。association 已串進 ⌘D / ⌘S / CLI 造句，不要再讓它只餵圖片。
 
 ## Git 規則
 
