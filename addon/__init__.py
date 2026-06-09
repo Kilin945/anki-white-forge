@@ -83,8 +83,9 @@ def _looks_english(word):
 
 def _sentence_prompt(word, association=""):
     """Example-sentence prompt: pick sense (hint > SWE > everyday), short & clear, no
-    definition/circular sentence. Mirror of core.llm._sentence_instructions (addon
-    cannot import core)."""
+    definition/circular sentence.
+    KEEP IN SYNC with core/llm._sentence_instructions — addon cannot import core, so this
+    is a deliberate duplicate. Change one → change both."""
     hint = f'1. If a hint is given, use the sense the hint points to. Hint: "{association}"\n' if association else ""
     swe_n = "2." if association else "1."
     common_n = "3." if association else "2."
@@ -318,7 +319,7 @@ class Worker(QThread):
         # reject implausible output → leave empty so ⌘S re-generates it later
         if re.search(r"[A-Za-z]", reply):                    # English preamble / refusal / paren
             return ""
-        if len(re.findall(r"[一-鿿]", reply)) > 8:   # >8 漢字 = a sentence, not a single term
+        if len(re.findall(r"[一-鿿]", reply)) > 8:   # >8 漢字 = a sentence, not a single term (core llm_translate has no equivalent guard)
             return ""
         return reply
 

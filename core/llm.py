@@ -93,7 +93,9 @@ def llm(prompt):
 
 def _sentence_instructions(word, association=""):
     """Shared meaning-selection + sentence-quality rules for example-sentence prompts.
-    Priority: hint (association) > software-engineering sense > most common everyday sense."""
+    Priority: hint (association) > software-engineering sense > most common everyday sense.
+    KEEP IN SYNC with addon/__init__.py::_sentence_prompt — the addon cannot import core,
+    so it keeps a deliberate duplicate. Change one → change both."""
     hint = f'1. If a hint is given, use the sense the hint points to. Hint: "{association}"\n' if association else ""
     swe_n = "2." if association else "1."
     common_n = "3." if association else "2."
