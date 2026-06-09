@@ -6,3 +6,4 @@ __pycache__/
 *.png
 .pexels_key
 .groq_key
+.idea/
