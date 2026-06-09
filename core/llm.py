@@ -107,10 +107,13 @@ def _sentence_instructions(word, association=""):
         f'{common_n} Otherwise use its most common everyday meaning.\n\n'
         f'Then write ONE example sentence that uses "{word}" naturally and makes its meaning '
         f'obvious — someone who does not know the word should be able to guess it from the '
-        f'sentence alone. Keep it as short and simple as you can WITHOUT losing that clarity: '
-        f'shorter is better, but a clear sentence always beats a short unclear one. '
-        f'Use plain, everyday language; avoid business/corporate phrasing and complex clauses. '
-        f'A software / code-flavoured situation is fine. '
+        f'sentence alone. Keep it SHORT: aim for about 6-12 words, ONE simple clause. Cut every '
+        f'word that does not help show the meaning — no scene-setting, no subordinate '
+        f'"while / which / to avoid / during ..." clauses. Only go longer if the word genuinely '
+        f'cannot be shown clearly in that space. Use plain, everyday language; avoid '
+        f'business/corporate phrasing. If you chose the software-engineering sense, a code/tech '
+        f'situation is natural; if you chose an everyday or hint-driven sense, write a normal '
+        f'everyday sentence and do NOT force in software, teams, or tech. '
         f'Do NOT write a definition or a circular sentence (no "X means ...", "X is when ...", '
         f'"{word} is a kind of ..."); show the meaning through a real, concrete situation.'
     )
@@ -127,8 +130,11 @@ def llm_translate(word, sentence=""):
     result = llm(
         f'Give the Traditional Chinese meaning of "{word}"{ctx}. '
         f'Give ONE concise translation only — do NOT list synonyms or near-duplicate terms '
-        f'(e.g. never "水杯、茶杯"). Keep it short (usually 1-4 characters; a little longer only '
-        f'if a single term genuinely needs it). Output only the Chinese, no explanation.'
+        f'(e.g. never "水杯、茶杯"). If "{word}" is a product / framework / library / tool proper '
+        f'noun (e.g. Spring, React, Docker, Hazelcast), do NOT translate it — output the English '
+        f'name as-is. Keep it short (usually 1-4 characters; a little longer only if a single '
+        f'term genuinely needs it). Output only the Chinese, or for a proper noun the English name, '
+        f'no explanation.'
     )
     return result.strip() if result else ""
 
@@ -157,7 +163,9 @@ def llm_sentence_and_query(word, association="", sentence=""):
 
 SENTENCE_CN_PROMPT = (
     "Translate this English sentence into natural, complete Traditional Chinese. "
-    "Output only the translation. No explanation, no quotes, no English.\n\n"
+    "Keep product / framework / library / tool proper nouns (e.g. Spring, React, Hazelcast) "
+    "in English inside the translation; do not translate such names literally. "
+    "Output only the translation. No explanation, no quotes.\n\n"
     'Sentence: "{sentence}"'
 )
 

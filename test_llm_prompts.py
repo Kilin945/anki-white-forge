@@ -35,6 +35,11 @@ class TestSentencePrompt:
         p = _capture(llm_mod.llm_sentence, "convention")
         assert "Hint:" not in p
 
+    def test_brevity_target_and_no_forced_software(self):
+        p = _capture(llm_mod.llm_sentence, "garden")
+        assert "6-12 words" in p
+        assert "do NOT force in software" in p
+
 
 class TestSentenceAndQueryPrompt:
     def test_uses_shared_instructions_and_two_lines(self):
@@ -58,3 +63,8 @@ class TestTranslatePrompt:
     def test_bans_synonym_lists(self):
         p = _capture(llm_mod.llm_translate, "cup", "She filled the cup with tea.")
         assert "near-duplicate" in p
+
+    def test_keeps_proper_noun_in_english(self):
+        p = _capture(llm_mod.llm_translate, "Spring", "We use the Spring framework.")
+        assert "proper noun" in p
+        assert "output the English name" in p

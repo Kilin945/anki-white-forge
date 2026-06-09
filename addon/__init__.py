@@ -97,10 +97,13 @@ def _sentence_prompt(word, association=""):
         f'{common_n} Otherwise use its most common everyday meaning.\n\n'
         f'Then write ONE example sentence that uses "{word}" naturally and makes its meaning '
         f'obvious — someone who does not know the word should be able to guess it from the '
-        f'sentence alone. Keep it as short and simple as you can WITHOUT losing that clarity: '
-        f'shorter is better, but a clear sentence always beats a short unclear one. '
-        f'Use plain, everyday language; avoid business/corporate phrasing and complex clauses. '
-        f'A software / code-flavoured situation is fine. '
+        f'sentence alone. Keep it SHORT: aim for about 6-12 words, ONE simple clause. Cut every '
+        f'word that does not help show the meaning — no scene-setting, no subordinate '
+        f'"while / which / to avoid / during ..." clauses. Only go longer if the word genuinely '
+        f'cannot be shown clearly in that space. Use plain, everyday language; avoid '
+        f'business/corporate phrasing. If you chose the software-engineering sense, a code/tech '
+        f'situation is natural; if you chose an everyday or hint-driven sense, write a normal '
+        f'everyday sentence and do NOT force in software, teams, or tech. '
         f'Do NOT write a definition or a circular sentence (no "X means ...", "X is when ...", '
         f'"{word} is a kind of ..."); show the meaning through a real, concrete situation.\n\n'
         f'Output only the sentence. No explanation, no quotes.'
@@ -309,15 +312,18 @@ class Worker(QThread):
         return "", "failed"
 
     def _groq_translate(self, word, sentence):
-        """Traditional Chinese meaning of word AS USED IN the sentence. '' on failure."""
+        """Traditional Chinese meaning of word AS USED IN the sentence ('' on failure).
+        Proper nouns (frameworks/products) stay in English."""
         prompt = (f'Give the Traditional Chinese meaning of "{word}" as it is used in this '
                   f'sentence: "{sentence}". Give ONE concise translation only — do NOT list '
-                  f'synonyms or near-duplicate terms (e.g. never "水杯、茶杯"). Keep it short '
-                  f'(usually 1-4 characters; a little longer only if a single term genuinely '
-                  f'needs it). Output only the Chinese, no explanation.')
+                  f'synonyms or near-duplicate terms (e.g. never "水杯、茶杯"). If "{word}" is a '
+                  f'product / framework / library / tool proper noun (e.g. Spring, React, Docker, '
+                  f'Hazelcast), do NOT translate it — output the English name as-is. Keep it short '
+                  f'(usually 1-4 characters; a little longer only if a single term genuinely needs '
+                  f'it). Output only the Chinese, or for a proper noun the English name, no explanation.')
         reply = _groq_chat(prompt, temperature=0.3, max_tokens=20, timeout=10)
-        # reject implausible output → leave empty so ⌘S re-generates it later
-        if re.search(r"[A-Za-z]", reply):                    # English preamble / refusal / paren
+        # reject preamble/refusal: 2+ English words = not a translation (allow a single English proper noun)
+        if len(re.findall(r"[A-Za-z]{2,}", reply)) >= 2:
             return ""
         if len(re.findall(r"[一-鿿]", reply)) > 8:   # >8 漢字 = a sentence, not a single term (core llm_translate has no equivalent guard)
             return ""
@@ -329,8 +335,10 @@ class Worker(QThread):
         if not sentence:
             return ""
         prompt = ('Translate this English sentence into natural, complete Traditional '
-                  'Chinese. Output only the translation. No explanation, no quotes, no '
-                  f'English.\n\nSentence: "{sentence}"')
+                  'Chinese. Keep product / framework / library / tool proper nouns (e.g. '
+                  'Spring, React, Hazelcast) in English inside the translation; do not '
+                  'translate such names literally. Output only the translation. No explanation, '
+                  f'no quotes.\n\nSentence: "{sentence}"')
         chat = _groq_chat_strict if strict else _groq_chat
         reply = chat(prompt, temperature=0.3, max_tokens=200, timeout=15).strip().strip('"').strip()
         if not re.search(r"[一-鿿]", reply):              # no Chinese → fail
