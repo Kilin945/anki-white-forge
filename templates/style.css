@@ -1,5 +1,20 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700&display=swap");
 
+/* =============================================================================
+   This file is ONE stylesheet (Anki allows only one Styling field per note type),
+   but it is split into three fully-independent blocks:
+
+     1. GLOBAL  — the card root only (applies to both sides; not a front/back rule)
+     2. FRONT   — every rule scoped under .front-wrap   (front.html)
+     3. BACK    — every rule scoped under .container    (back.html)
+
+   FRONT and BACK share NO selectors — not even .play-row / .audio-label (each side
+   owns its own copy). So you can tweak one side's layout and it can never touch the
+   other. When editing, stay inside the matching block.
+   ============================================================================= */
+
+
+/* ============================== 1. GLOBAL (card root) ======================= */
 .card {
   font-family: "Inter", -apple-system, "Helvetica Neue", sans-serif;
   color: #1E293B;
@@ -11,8 +26,19 @@
   position: relative;
 }
 
-/* ── Front ── */
-.word {
+
+/* ============================== 2. FRONT (.front-wrap) ====================== */
+.front-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 90vh;
+  gap: 20px;
+  padding: 48px 48px;
+}
+
+.front-wrap .word {
   font-family: "Poppins", "Inter", sans-serif;
   font-size: clamp(96px, 18vw, 160px);
   font-weight: 700;
@@ -27,41 +53,50 @@
   white-space: nowrap;       /* never wrap — JS shrinks font to fit one line */
 }
 
-.front-wrap {
+/* play button — front owns its full style (centred by .front-wrap's align-items) */
+.front-wrap .play-row {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  min-height: 90vh;
-  gap: 20px;
-  padding: 48px 48px;
+  gap: 10px;
+  padding: 12px 16px 12px 12px;
+  cursor: pointer;
+  border-radius: 8px;
+  width: fit-content;
+  margin-top: 16px;
 }
 
-.front-audio {
+.front-wrap .audio-label {
+  font-size: 14px;
+  color: #a8a29e;
+  user-select: none;
+}
+
+.front-wrap .front-audio {
   text-align: center;
 }
 
-.front-audio .replay-button {
+.front-wrap .front-audio .replay-button {
   background: none;
   border: none;
   padding: 0;
 }
 
-.front-audio .replay-button svg {
+.front-wrap .front-audio .replay-button svg {
   width: 28px;
   height: 28px;
 }
 
-.front-audio .replay-button svg circle {
+.front-wrap .front-audio .replay-button svg circle {
   fill: #f0ebe3;
   stroke: #e2ddd5;
 }
 
-.front-audio .replay-button svg path {
+.front-wrap .front-audio .replay-button svg path {
   fill: #a8a29e;
 }
 
-/* ── Back layout ── */
+
+/* ============================== 3. BACK (.container) ======================== */
 .container {
   display: flex;
   flex-direction: row;
@@ -71,7 +106,7 @@
   min-height: 90vh;
 }
 
-.img-side {
+.container .img-side {
   flex: 0 0 40%;
   max-width: 40%;
   overflow: hidden;
@@ -82,14 +117,14 @@
   position: relative;
 }
 
-.img-side img {
+.container .img-side img {
   width: 100%;
   height: 100%;
   object-fit: contain;
   display: block;
 }
 
-.img-side div[style] {
+.container .img-side div[style] {
   position: absolute;
   bottom: 0; left: 0; right: 0;
   padding: 4px 10px;
@@ -99,7 +134,7 @@
   text-align: center;
 }
 
-.text-side {
+.container .text-side {
   flex: 1;
   padding: 44px 48px;
   display: flex;
@@ -108,7 +143,7 @@
   justify-content: flex-start;   /* content tops out; play button pushed to the bottom */
 }
 
-.text-side .word-title {
+.container .word-title {
   font-family: "Poppins", "Inter", sans-serif;
   font-size: clamp(44px, 6vw, 58px);
   font-weight: 700;
@@ -119,11 +154,10 @@
   min-width: 0;
 }
 
-/* word translation & sentence translation — one unified style: transparent fill, a thin
-   OUTLINE marks a tappable 'blank' (visible on touch, no hover needed); tap to fill in. */
-.trans-box {
-  /* real <button> so AnkiMobile's native tap-to-grade gesture skips it (it ignores
-     buttons/links); the stopPropagation handlers are a harmless extra guard. */
+/* word translation & sentence translation — unified style: transparent fill, a thin
+   OUTLINE marks a tappable 'blank'; tap to reveal. Real <button> so AnkiMobile's
+   native tap-to-grade gesture skips it (it ignores buttons/links). */
+.container .trans-box {
   appearance: none;
   -webkit-appearance: none;
   font-family: inherit;
@@ -146,39 +180,38 @@
   user-select: none;
   transition: color 0.2s, border-color 0.2s;
 }
-.trans-box.revealed {           /* tapped: answer fills the slot; outline fades to quiet */
+.container .trans-box.revealed { /* tapped: answer fills the slot; outline fades to quiet */
   color: #1E293B;
   border-color: #ece7df;
 }
 
-.association {                 /* same size/weight as the translations — unified Chinese tier */
+.container .association {        /* same size/weight as the translations — unified Chinese tier */
   font-size: clamp(18px, 2.1vw, 22px);
   color: #0284C7;
   font-weight: 500;
 }
 
-.divider {
+.container .divider {
   width: 40px;
   height: 2px;
   background: #e2ddd5;
   border-radius: 1px;
 }
 
-.sentence {
+.container .sentence {
   font-size: clamp(20px, 2.5vw, 25px);
   color: #64748B;
   line-height: 1.7;
 }
 
-.sentence .hl {
+.container .sentence .hl {
   color: #EA580C;
   font-weight: 600;
 }
 
-/* ── Play button ── */
-/* shared base = APPEARANCE ONLY (front & back). No positioning here, so nothing can
-   leak across sides — each side positions its own play button in a scoped rule below. */
-.play-row {
+/* play button — back owns its full style; pinned to the bottom, left-aligned
+   (the image is on the left column, so centring would look right-shifted) */
+.container .play-row {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -186,96 +219,91 @@
   cursor: pointer;
   border-radius: 8px;
   width: fit-content;
-}
-
-/* FRONT only: small gap under the word (centred by .front-wrap's align-items:center). */
-.front-wrap .play-row {
-  margin-top: 16px;
-}
-
-/* BACK only: pinned to the bottom, aligned with the text's left edge
-   (the image occupies the left column, so centring would look right-shifted). */
-.text-side .play-row {
   align-self: flex-start;
   margin-top: auto;
 }
 
-.play-row .audio-label {
+.container .audio-label {
   font-size: 14px;
   color: #a8a29e;
   user-select: none;
 }
 
-.audio-btn .replay-button {
+.container .audio-btn .replay-button {
   background: none;
   border: none;
   padding: 0;
 }
 
-.audio-btn .replay-button svg {
+.container .audio-btn .replay-button svg {
   width: 28px;
   height: 28px;
 }
 
-.audio-btn .replay-button svg circle {
+.container .audio-btn .replay-button svg circle {
   fill: #f0ebe3;
   stroke: #e2ddd5;
 }
 
-.audio-btn .replay-button svg path {
+.container .audio-btn .replay-button svg path {
   fill: #a8a29e;
 }
 
-/* ── Mobile RWD ── */
+
+/* ============================== Mobile RWD (≤600px) ======================== */
 @media (max-width: 600px) {
-  .word {
-    font-size: clamp(48px, 15vw, 80px);
-    letter-spacing: 0;
-    flex: none;
-  }
+
+  /* ---- FRONT ---- */
   .front-wrap {
     min-height: 67vh;
     gap: 16px;
     padding: 24px 20px;
     justify-content: center;
   }
+  .front-wrap .word {
+    font-size: clamp(48px, 15vw, 80px);
+    letter-spacing: 0;
+    flex: none;
+  }
+
+  /* ---- BACK ---- */
   .container {
     flex-direction: column;
     min-height: auto;
   }
-  .img-side {
+  .container .img-side {
     flex: none;
     max-width: 100%;
     max-height: 180px;
     overflow: visible;
     flex-direction: column;
   }
-  .img-side img {
+  .container .img-side img {
     height: 160px;
   }
-  .img-side div[style] {
+  .container .img-side div[style] {
     position: relative;
     background: transparent;
     font-size: 9px;
     padding: 2px 0;
     text-align: left;
   }
-  .text-side {
+  .container .text-side {
     padding: 24px 20px;
     gap: 12px;
   }
-  .text-side .word-title {
+  .container .word-title {
     font-size: clamp(38px, 10vw, 50px);
   }
-  .association {
+  .container .association {
     font-size: clamp(16px, 4vw, 19px);   /* same as .trans-box on mobile */
     text-align: left;
   }
-  .sentence {
+  .container .sentence {
     font-size: clamp(17px, 4.5vw, 20px);
     text-align: left;
   }
-  .trans-box {
+  .container .trans-box {
     font-size: clamp(16px, 4vw, 19px);
     padding: 11px 14px;          /* ≥44px tall tap target for touch */
     text-align: left;
