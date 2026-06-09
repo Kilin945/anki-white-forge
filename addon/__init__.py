@@ -1199,7 +1199,8 @@ def open_duplicates_dialog():
 def open_sentence_cn_dialog():
     SentenceCNDialog(mw).exec()
 
-DEFAULT_SHORTCUTS = {"add": "Ctrl+D", "complete": "Ctrl+S", "find_duplicates": "Ctrl+F"}
+DEFAULT_SHORTCUTS = {"add": "Ctrl+D", "complete": "Ctrl+S", "find_duplicates": "Ctrl+F",
+                     "backfill_cn": "Ctrl+B"}
 ACTIONS = {}  # key -> QAction, so the settings dialog can re-bind shortcuts live
 
 
@@ -1226,6 +1227,7 @@ class SettingsDialog(QDialog):
         ("add", "Add English Word"),
         ("complete", "Complete Missing Cards"),
         ("find_duplicates", "Find Duplicate Words"),
+        ("backfill_cn", "Backfill Sentence Translations"),
     ]
 
     def __init__(self, parent=None):
@@ -1291,10 +1293,7 @@ def open_settings_dialog():
 _add_menu_action("Add English Word…", "add", open_dialog)
 _add_menu_action("Complete Missing Cards…", "complete", open_backfill_dialog)
 _add_menu_action("Find Duplicate Words…", "find_duplicates", open_duplicates_dialog)
-
-_backfill_cn_action = QAction("Backfill Sentence Translations…", mw)   # menu only, no shortcut
-_backfill_cn_action.triggered.connect(open_sentence_cn_dialog)
-mw.form.menuTools.addAction(_backfill_cn_action)
+_add_menu_action("Backfill Sentence Translations…", "backfill_cn", open_sentence_cn_dialog)
 
 _settings_action = QAction("My Word Adder Settings…", mw)
 _settings_action.triggered.connect(open_settings_dialog)
