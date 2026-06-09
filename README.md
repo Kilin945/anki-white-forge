@@ -29,7 +29,7 @@
 | `Audio` | 句子語音 (Ava) | 自動（edge-tts） |
 | `Front_Audio` | 單字發音 (Andrew) | 自動（edge-tts） |
 | `Translation` | 單字中文翻譯（背面點擊顯示） | 自動（Groq LLM） |
-| `Sentence_CN` | 整句中文翻譯（背面點擊顯示） | ⌘D 即時 / 專用選單批次（Groq LLM） |
+| `Sentence_CN` | 整句中文翻譯（背面點擊顯示） | ⌘D 即時 / ⌘S 補齊 / 專用選單批次（Groq LLM） |
 
 > 背面的 `Translation`（單字）與 `Sentence_CN`（整句）都是**點一下才顯示**的填空框。
 
@@ -66,11 +66,11 @@ uv sync   # 自動安裝所有依賴
 - 驗證：非英文字元直接擋；Groq 拼字檢查，疑似拼錯會建議正確字；重複防呆（正規化比對）
 
 **補齊缺失卡片**：`⌘S`（Ctrl+S）
-- 掃描所有缺少欄位的卡片（例句／圖／音／單字翻譯）
+- 掃描所有缺少欄位的卡片（例句／整句翻譯／圖／音／單字翻譯）
 - 3 張並發處理，左圖右文即時進度顯示
-- 註：不含整句翻譯 `Sentence_CN`（那由下方專用選單負責）
+- 含整句翻譯 `Sentence_CN`（手機／內建新增繞過 ⌘D 的卡片，⌘S 一鍵補完）；大量回填請改走下方專用選單以免撞速率
 
-**批次回填整句翻譯**：**Tools → Backfill Sentence Translations…**
+**批次回填整句翻譯**：`⌘B`（Ctrl+B）或 **Tools → Backfill Sentence Translations…**
 - 專補 `Sentence_CN`，開啟先顯示「共 N 筆、約 X 分鐘」
 - 選時間盒（1/2/5/10 分鐘）或「直接完成」；以不超過 Groq 速率（約 25/分）的節奏持續翻
 - 隨時可「停止」，下次再開從沒翻的續
@@ -79,7 +79,7 @@ uv sync   # 自動安裝所有依賴
 - 正規化後 Front 相同的卡片分組列出（抓得到手機漏進來的 HTML / 大小寫變體）
 - 勾選要刪的（每組至少保留一張）→ 確認刪除
 
-> ⌘D / ⌘S / ⌘F 可在 **Tools → My Word Adder Settings…** 直接按組合鍵設定（免改 JSON、即時生效），或清除以關閉。
+> ⌘D / ⌘S / ⌘F / ⌘B 可在 **Tools → My Word Adder Settings…** 直接按組合鍵設定（免改 JSON、即時生效），或清除以關閉。
 
 ### 方式二：Terminal
 
@@ -105,7 +105,7 @@ uv run python regen_audio.py
 
 1. 手機 AnkiMobile → 新增卡片（只填 Front + Association）→ 同步
 2. Mac Anki → 同步
-3. `⌘S`（Complete Missing Cards）或 `uv run python backfill_words.py`
+3. `⌘S`（Complete Missing Cards）一鍵補完所有欄位（含整句翻譯）。CLI `backfill_words.py` 不含整句翻譯，需另跑 `backfill_sentence_cn.py`
 4. Mac Anki → 同步（選「上傳到 AnkiWeb」）
 5. 手機 → 同步 → 完整卡片出現
 
@@ -209,7 +209,7 @@ Anki/
 
 | 檔案 | 說明 |
 |------|------|
-| `addon/__init__.py` | Anki 插件主程式（symlink 到 `~/Library/.../addons21/my_word_adder/`）。`⌘D` 新增單字（含整句翻譯）、`⌘S` 補齊缺失卡片（例句/圖/音/單字翻譯，不含整句翻譯）、`⌘F` 找重複、選單 **Backfill Sentence Translations…**（節流批次回填整句翻譯）。新增防護用正規化比對（HTML/大小寫變體都擋）。LLM 用 urllib 直呼 Groq，TTS/圖片透過 subprocess，BackfillWorker 3 路並發。改完需重啟 Anki |
+| `addon/__init__.py` | Anki 插件主程式（symlink 到 `~/Library/.../addons21/my_word_adder/`）。`⌘D` 新增單字（含整句翻譯）、`⌘S` 補齊缺失卡片（例句/整句翻譯/圖/音/單字翻譯，少量日常用）、`⌘F` 找重複、`⌘B` / 選單 **Backfill Sentence Translations…**（節流批次回填整句翻譯，大量用）。新增防護用正規化比對（HTML/大小寫變體都擋）。LLM 用 urllib 直呼 Groq，TTS/圖片透過 subprocess，BackfillWorker 3 路並發。改完需重啟 Anki |
 
 ### 設定與測試
 
