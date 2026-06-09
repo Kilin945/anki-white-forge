@@ -38,12 +38,13 @@ VALIDATE_SCRIPT = os.path.expanduser("~/Workspace/Anki/_validate_helper.py")
 VOICE_WORD     = "en-US-AndrewNeural"
 VOICE_SENTENCE = "en-US-AvaNeural"
 
-# field progress boxes. ⌘D Add shows all five (it generates Sentence_CN too); ⌘S Complete
-# omits Sentence_CN — that field is filled only by ⌘D and the dedicated 批次回填 menu.
+# field progress boxes. ⌘D Add and ⌘S Complete both fill all five — ⌘S now fills
+# Sentence_CN too (cards added on mobile / via Anki's built-in Add bypass ⌘D, so ⌘S is
+# where they get completed). Large bulk fills still go through the dedicated 批次回填
+# menu, which is paced against the rate limit.
 FIELD_BOXES = [("sentence", "Sentence"), ("sentence_cn", "Sentence-CN"), ("image", "Image"),
                ("audio", "Audio"), ("translation", "翻譯")]
-BACKFILL_BOXES = [("sentence", "Sentence"), ("image", "Image"),
-                  ("audio", "Audio"), ("translation", "翻譯")]
+BACKFILL_BOXES = FIELD_BOXES
 BOX_STYLE = {  # text is just the field label; state shown by colour only (no ✓ / ⚠)
     "working": ("border:1.5px solid #94a3b8; border-radius:6px; padding:6px 12px; color:#64748b;", "{}"),
     "ok":      ("border:1.5px solid #16a34a; border-radius:6px; padding:6px 12px; color:#16a34a; font-weight:600;", "{}"),
@@ -576,7 +577,7 @@ class AddWordDialog(QDialog):
 
 
 class FieldRow(QWidget):
-    """One card's progress: word + Sentence/Image/Audio/翻譯 boxes + 'added!' badge.
+    """One card's progress: word + Sentence/Sentence-CN/Image/Audio/翻譯 boxes + 'added!' badge.
     Fields already present start green; missing ones start grey and flip on completion."""
 
     def __init__(self, word, present, parent=None):
@@ -589,7 +590,7 @@ class FieldRow(QWidget):
         wl.setMinimumWidth(120)
         wl.setStyleSheet("font-weight:600; color:#1E293B;")
         lay.addWidget(wl)
-        for key, _label in BACKFILL_BOXES:    # ⌘S omits Sentence-CN (filled elsewhere)
+        for key, _label in BACKFILL_BOXES:    # all five fields, incl. the sentence translation
             box = QLabel()
             box.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._boxes[key] = box
@@ -651,14 +652,19 @@ class BackfillWorker(QThread):
         need_audio = not note["fields"]["Audio"]["value"]
         need_front = not note["fields"].get("Front_Audio", {}).get("value", "")
         need_translation = not note["fields"].get("Translation", {}).get("value", "")
+        need_sentence_cn = not note["fields"].get("Sentence_CN", {}).get("value", "")
 
         image_result = [None]
         translation_result = [""]
+        sentence_cn_result = [""]
         img_thread = trans_thread = None
 
-        if need_translation:
-            def do_translate(w=word, s=sentence):
-                translation_result[0] = self._w._groq_translate(w, s)
+        if need_translation or need_sentence_cn:
+            def do_translate(w=word, s=sentence):     # both Groq text calls share one thread
+                if need_translation:
+                    translation_result[0] = self._w._groq_translate(w, s)
+                if need_sentence_cn:
+                    sentence_cn_result[0] = self._w._groq_translate_sentence(s)
             trans_thread = threading.Thread(target=do_translate)
             trans_thread.start()
 
@@ -695,6 +701,10 @@ class BackfillWorker(QThread):
             if translation_result[0]:
                 fields["Translation"] = translation_result[0]
             self.step.emit(note_id, "translation", "ok" if translation_result[0] else "warn")
+        if need_sentence_cn:
+            if sentence_cn_result[0]:
+                fields["Sentence_CN"] = sentence_cn_result[0]
+            self.step.emit(note_id, "sentence_cn", "ok" if sentence_cn_result[0] else "warn")
 
         if fields:
             payload = json.dumps({
@@ -780,10 +790,12 @@ class BackfillDialog(QDialog):
             bad_sentence = any(p in note["Sentence"] for p in PLACEHOLDERS)
             front_audio = note["Front_Audio"] if "Front_Audio" in note else ""
             translation = note["Translation"] if "Translation" in note else ""
+            sentence_cn = note["Sentence_CN"] if "Sentence_CN" in note else ""
             has_img = "<img" in note["Image_Prompt"]
             audio_ok = bool(note["Audio"]) and bool(front_audio)
             incomplete = (not note["Sentence"] or bad_sentence or not note["Audio"]
-                          or not has_img or not front_audio or not translation)
+                          or not has_img or not front_audio or not translation
+                          or not sentence_cn)
             if not incomplete:
                 continue
 
@@ -800,6 +812,7 @@ class BackfillDialog(QDialog):
                 "image": has_img,
                 "audio": audio_ok,
                 "translation": bool(translation),
+                "sentence_cn": bool(sentence_cn),
             }
             row = FieldRow(word, present)
             self._rows_box.addWidget(row)
@@ -814,6 +827,7 @@ class BackfillDialog(QDialog):
                     "Audio":        {"value": note["Audio"]},
                     "Front_Audio":  {"value": front_audio},
                     "Translation":  {"value": translation},
+                    "Sentence_CN":  {"value": sentence_cn},
                 }
             })
         self._rows_box.addStretch()
