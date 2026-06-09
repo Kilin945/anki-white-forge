@@ -30,8 +30,11 @@
 （使用者為 software engineer，全牌組向其專業靠攏，可提升情境相關性與記憶效果。）
 
 ### 3.2 例句
-- **越短越簡單越好**（目標 ~12 字以內），但要**精準表達字義**：不懂這個字的人，光看句子就能猜出意思。
-- 用平實日常語言，**避免企業/商業腔與複雜子句**。
+- **「清楚」優先於「短」**：在不犧牲清楚的前提下，盡可能用最精簡的句子表達字義。寧可長一點也要讓人看懂，不可為了短而句意不明。**不設硬性字數上限**（寫死字數會逼出爛句）。
+- **精準表達字義**：不懂這個字的人，光看句子就能猜出意思。
+- **防呆**：不可寫定義式 / 循環句（如 `"X means ..."`、`"X is when ..."`、`"{word} is a kind of ..."`），必須用真實、具體的情境自然帶出字義。
+- 用平實日常語言，**避免企業 / 商業腔與複雜子句**。
+- 句子情境**可以技術 / 程式碼導向**（使用者為 SWE，看得懂也樂見），不必刻意日常化。
 
 ### 3.3 順序
 - **先 sentence，再依 sentence 生 image 與 audio**，確保三者吻合。
@@ -57,24 +60,34 @@ Pick the meaning to teach, in this priority:
    use that sense.
 3. Else use its most common everyday meaning.
 
-Then write ONE short, simple sentence (aim for 12 words or fewer) that makes that
-meaning obvious — someone who doesn't know the word should be able to guess it from
-the sentence alone. Use plain, everyday language. Avoid business/corporate phrasing
-and complex clauses.
+Then write ONE example sentence that uses "{word}" naturally and makes its meaning
+obvious — someone who doesn't know the word should be able to guess it from the
+sentence alone. Keep it as short and simple as you can WITHOUT losing that clarity:
+shorter is better, but a clear sentence always beats a short unclear one.
+Use plain, everyday language; avoid business/corporate phrasing and complex clauses.
+A software / code-flavoured situation is fine.
+Do NOT write a definition or a circular sentence (no "X means ...", "X is when ...",
+"{word} is a kind of ..."); show the meaning through a real, concrete situation.
 
 Output only the sentence. No explanation, no quotes.
 ```
 - 無 association 時，省略第 1 點（或標明 "no hint given"）。
-- 句長以 prompt 引導為主（「12 字以內」），不做硬性程式截斷（截斷會破壞語法）。
+- **不做硬性字數上限**：以 prompt 引導「清楚優先、盡量精簡」，不程式截斷（截斷會破壞語法），也不寫死字數（會逼出爛句）。
+- 防呆禁止定義句 / 循環句，強制用具體情境自然帶出字義。
 
 ### 4.3 新的「單字翻譯」prompt（跟著句子語意，確保一致）
 
 ```
 Give the Traditional Chinese meaning of "{word}" as it is used in this sentence:
-"{sentence}". Output only the Chinese, 1-4 characters, no explanation.
+"{sentence}". Give ONE concise translation only — do NOT list synonyms or
+near-duplicate terms (e.g. never "水杯、茶杯"). Keep it short (usually 1-4 characters;
+a little longer only if a single term genuinely needs it). Output only the Chinese,
+no explanation.
 ```
-- 由於句子已鎖定（SWE / 提示 / 日常）語意，依「句中用法」翻譯即與例句一致。
-- 既有的輸出驗證（拒英文前言、>6 漢字判定為句子）保留。
+- 由於句子已鎖定（提示 / SWE / 日常）語意，依「句中用法」翻譯即與例句一致。
+- **鬆綁字數**：從硬性「1-4 字」改為「通常 1-4、單一詞真的需要才略長」。
+- **去重**：只給一個精簡譯法，禁止列近義 / 重複詞（如「水杯、茶杯」）。
+- 既有輸出驗證（拒英文前言）保留；「>6 漢字＝句子」的門檻因單一詞極少超過、且鬆綁後仍需擋整句，**改為 >8 漢字**才判定為句子。
 
 ### 4.4 整句翻譯與圖片
 - 整句翻譯 `*_translate_sentence` prompt **不需改**（本來就是翻當下那句）。
@@ -117,5 +130,5 @@ Give the Traditional Chinese meaning of "{word}" as it is used in this sentence:
 
 ## 7. 待確認 / 風險
 - **既有卡不自動修好**：⌘S 只補空欄位，已有例句/翻譯的舊卡不會重生。若要套用到既有卡，需另外決定「批次重生例句」機制（本次不做，可列後續）。
-- **句長以 prompt 引導**：不保證每句都 ≤12 字；若實測仍偏長，再加強 prompt 或設軟性上限。
+- **句長靠「清楚優先、盡量精簡」原則 + 防呆**：不設硬上限。若實測仍偏長或出現定義式句子，再加強 prompt（不走程式截斷）。
 - **SWE 判斷靠模型 inline**：若實測語意判斷不穩，再評估 4.1 的「獨立分類步驟」替代方案。
