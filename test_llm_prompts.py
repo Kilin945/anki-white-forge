@@ -43,6 +43,11 @@ class TestSentenceAndQueryPrompt:
         assert "execution unit" in p
         assert "Line 1" in p and "Line 2" in p
 
+    def test_existing_sentence_keeps_same_meaning(self):
+        p = _capture(llm_mod.llm_sentence_and_query, "thread", "", "A thread can run concurrently.")
+        assert "SAME meaning" in p
+        assert "A thread can run concurrently." in p
+
 
 class TestTranslatePrompt:
     def test_follows_sentence_sense(self):
