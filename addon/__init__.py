@@ -354,7 +354,7 @@ class AddWordDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Add English Word")
-        self.setMinimumWidth(440)
+        self.setMinimumWidth(580)        # wider than the 5-box row so the stretches centre it (side margins)
         self._worker = None
         self._setup_ui()
 
@@ -373,6 +373,8 @@ class AddWordDialog(QDialog):
         # per-field progress boxes — shown when adding, each flips to ✓ when done
         self._boxes = {}
         boxes_row = QHBoxLayout()
+        boxes_row.setSpacing(8)           # gap between boxes
+        boxes_row.addStretch()            # stretches centre the fixed-width group (no word col here)
         for key, label in FIELD_BOXES:
             box = QLabel(label)
             box.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -380,6 +382,7 @@ class AddWordDialog(QDialog):
             box.setVisible(False)
             self._boxes[key] = box
             boxes_row.addWidget(box)
+        boxes_row.addStretch()
         root.addLayout(boxes_row)
 
         self.status = QLabel("")
