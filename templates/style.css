@@ -105,7 +105,7 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  justify-content: center;
+  justify-content: flex-start;   /* content tops out; play button pushed to the bottom */
 }
 
 .text-side .word-title {
@@ -176,6 +176,8 @@
 }
 
 /* ── Play button ── */
+/* shared base = APPEARANCE ONLY (front & back). No positioning here, so nothing can
+   leak across sides — each side positions its own play button in a scoped rule below. */
 .play-row {
   display: flex;
   align-items: center;
@@ -184,7 +186,18 @@
   cursor: pointer;
   border-radius: 8px;
   width: fit-content;
+}
+
+/* FRONT only: small gap under the word (centred by .front-wrap's align-items:center). */
+.front-wrap .play-row {
   margin-top: 16px;
+}
+
+/* BACK only: pinned to the bottom, aligned with the text's left edge
+   (the image occupies the left column, so centring would look right-shifted). */
+.text-side .play-row {
+  align-self: flex-start;
+  margin-top: auto;
 }
 
 .play-row .audio-label {
@@ -266,9 +279,5 @@
     font-size: clamp(16px, 4vw, 19px);
     padding: 11px 14px;          /* ≥44px tall tap target for touch */
     text-align: left;
-  }
-  .play-row {
-    background: rgba(253,251,247,0.9);
-    z-index: 10;
   }
 }

@@ -8,11 +8,11 @@
     <div class="association">{{Association}}</div>
     <div class="divider"></div>
     <div class="sentence" id="sent">{{Sentence}}</div>
+    <button type="button" class="sentence-cn trans-box" ontouchend="event.stopPropagation()" onclick="event.stopPropagation();this.classList.toggle('revealed')">{{Sentence_CN}}</button>
     <div class="play-row" id="play2" onclick="var b=this.querySelector('.replay-button');if(b)b.click();">
       <div class="audio-btn">{{Audio}}</div>
       <span class="audio-label">play sentence</span>
     </div>
-    <button type="button" class="sentence-cn trans-box" ontouchend="event.stopPropagation()" onclick="event.stopPropagation();this.classList.toggle('revealed')">{{Sentence_CN}}</button>
   </div>
 </div>
 <script>
@@ -25,19 +25,5 @@
     var re = new RegExp("(" + word + "[a-z]*)", "gi");
     el.innerHTML = html.replace(re, "<span class=hl>$1</span>");
   }
-  if(window.innerWidth>600)return;
-  var btn=document.getElementById("play2");
-  if(!btn)return;
-  btn.style.position="absolute";
-  btn.style.left="50%";
-  btn.style.transform="translateX(-50%)";
-  btn.style.margin="0";
-  function reposition(){
-    var y=window.scrollY||window.pageYOffset||0;
-    btn.style.top=(y+window.innerHeight*0.55)+"px";
-  }
-  reposition();
-  window.addEventListener("scroll",reposition,{passive:true});
-  window.addEventListener("resize",reposition);
 })();
 </script>
