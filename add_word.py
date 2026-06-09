@@ -104,7 +104,7 @@ def main():
         sys.exit(0)
 
     print(f"\n[1] Sentence…")
-    sentence = llm_sentence(word) or f"Please add an example sentence for '{word}'."
+    sentence = llm_sentence(word, association) or f"Please add an example sentence for '{word}'."
     print(f"  {sentence[:80]}")
 
     print("[2] Image + Audio + Translation (parallel)…")

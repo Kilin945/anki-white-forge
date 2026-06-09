@@ -91,43 +91,66 @@ def llm(prompt):
     return ollama_generate(prompt)
 
 
-def llm_sentence(word):
-    result = llm(f'Write one short, natural English example sentence using "{word}" in context. Output only the sentence, no explanation.')
+def _sentence_instructions(word, association=""):
+    """Shared meaning-selection + sentence-quality rules for example-sentence prompts.
+    Priority: hint (association) > software-engineering sense > most common everyday sense."""
+    hint = f'1. If a hint is given, use the sense the hint points to. Hint: "{association}"\n' if association else ""
+    swe_n = "2." if association else "1."
+    common_n = "3." if association else "2."
+    return (
+        f'You are helping a software engineer learn the English word "{word}".\n\n'
+        f'Pick the meaning to teach, in this priority:\n'
+        f'{hint}'
+        f'{swe_n} If "{word}" has a common usage in software engineering / programming / tech, use that sense.\n'
+        f'{common_n} Otherwise use its most common everyday meaning.\n\n'
+        f'Then write ONE example sentence that uses "{word}" naturally and makes its meaning '
+        f'obvious — someone who does not know the word should be able to guess it from the '
+        f'sentence alone. Keep it as short and simple as you can WITHOUT losing that clarity: '
+        f'shorter is better, but a clear sentence always beats a short unclear one. '
+        f'Use plain, everyday language; avoid business/corporate phrasing and complex clauses. '
+        f'A software / code-flavoured situation is fine. '
+        f'Do NOT write a definition or a circular sentence (no "X means ...", "X is when ...", '
+        f'"{word} is a kind of ..."); show the meaning through a real, concrete situation.'
+    )
+
+
+def llm_sentence(word, association=""):
+    prompt = _sentence_instructions(word, association) + "\n\nOutput only the sentence. No explanation, no quotes."
+    result = llm(prompt)
     return result if len(result) > 10 else ""
 
 
 def llm_translate(word, sentence=""):
-    context = f' (used in: "{sentence}")' if sentence else ""
-    result = llm(f'Translate the English word "{word}"{context} into Traditional Chinese. Output only the Chinese translation, 1-4 characters, no explanation.')
+    ctx = f' as it is used in this sentence: "{sentence}"' if sentence else ""
+    result = llm(
+        f'Give the Traditional Chinese meaning of "{word}"{ctx}. '
+        f'Give ONE concise translation only — do NOT list synonyms or near-duplicate terms '
+        f'(e.g. never "水杯、茶杯"). Keep it short (usually 1-4 characters; a little longer only '
+        f'if a single term genuinely needs it). Output only the Chinese, no explanation.'
+    )
     return result.strip() if result else ""
 
 
-def llm_sentence_and_query(word, definition="", sentence=""):
-    context_parts = []
-    if definition:
-        context_parts.append(f'It means "{definition}".')
-    if sentence:
-        context_parts.append(f'Example context: "{sentence}"')
-    context = " ".join(context_parts)
-
+def llm_sentence_and_query(word, association="", sentence=""):
+    extra = f'\n(There is already an example sentence; keep the SAME meaning: "{sentence}")' if sentence else ""
     prompt = (
-        f'For the English word "{word}". {context}\n\n'
-        f"Provide exactly two lines:\n"
-        f"Line 1: A short, natural English example sentence using \"{word}\" in context.\n"
-        f"Line 2: A 5-8 word Google image search query to find a photo that visually represents this word's meaning.\n\n"
-        f"Output only the two lines, nothing else. No labels, no numbering."
+        _sentence_instructions(word, association) + extra +
+        "\n\nProvide exactly two lines:\n"
+        "Line 1: the example sentence.\n"
+        "Line 2: a 5-8 word Google image search query for a photo that visually represents "
+        "the meaning you used.\n\n"
+        "Output only the two lines, nothing else. No labels, no numbering."
     )
     result = llm(prompt)
     lines = [l.strip() for l in result.strip().splitlines() if l.strip()]
-
     if len(lines) >= 2:
         sent = lines[0].strip('"\'')
         query = lines[1].strip('"\'')
         if len(sent) > 10:
             return sent, query
     if len(lines) == 1 and len(lines[0]) > 10:
-        return lines[0].strip('"\''), f"{word} {definition} photo" if definition else f"{word} illustration"
-    return "", f"{word} {definition} photo" if definition else f"{word} illustration"
+        return lines[0].strip('"\''), f"{word} {association} photo" if association else f"{word} illustration"
+    return "", f"{word} {association} photo" if association else f"{word} illustration"
 
 
 SENTENCE_CN_PROMPT = (

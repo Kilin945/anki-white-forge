@@ -79,7 +79,7 @@ def process_note(note):
     img_query = ""
 
     if need_sentence or need_img:
-        sentence, img_query = llm_sentence_and_query(word, definition=current_assoc, sentence=current_sentence)
+        sentence, img_query = llm_sentence_and_query(word, association=current_assoc, sentence=current_sentence)
         if need_sentence:
             if sentence:
                 lines.append(f"  Sentence : {sentence[:80]}")
