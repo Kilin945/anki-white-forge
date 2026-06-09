@@ -38,17 +38,22 @@ VALIDATE_SCRIPT = os.path.expanduser("~/Workspace/Anki/_validate_helper.py")
 VOICE_WORD     = "en-US-AndrewNeural"
 VOICE_SENTENCE = "en-US-AvaNeural"
 
-# field progress boxes. ⌘D Add and ⌘S Complete both fill all five — ⌘S now fills
-# Sentence_CN too (cards added on mobile / via Anki's built-in Add bypass ⌘D, so ⌘S is
-# where they get completed). Large bulk fills still go through the dedicated 批次回填
-# menu, which is paced against the rate limit.
-FIELD_BOXES = [("sentence", "Sentence"), ("sentence_cn", "Sentence-CN"), ("image", "Image"),
-               ("audio", "Audio"), ("translation", "翻譯")]
+# field progress boxes. Both ⌘D Add and ⌘S Complete show all five — ⌘S now fills
+# Sentence_CN too (the everyday small case: cards added on mobile / via Anki's built-in
+# Add bypass ⌘D, so ⌘S is where they get completed). Large bulk fills still go through
+# the dedicated 批次回填 menu, which is paced against the rate limit.
+# Order matches the processing/completion order: Sentence is generated first (everything
+# else depends on it), Audio second (TTS needs the finished sentence), then Image / Meaning /
+# Translation run in parallel and relay in as they finish. Two Chinese fields are
+# distinguished by word-vs-sentence, not by a "CN" tag: Meaning = the word's meaning
+# (Translation field), Translation = the sentence's translation (Sentence_CN field).
+FIELD_BOXES = [("sentence", "Sentence"), ("audio", "Audio"), ("image", "Image"),
+               ("translation", "Meaning"), ("sentence_cn", "Translation")]
 BACKFILL_BOXES = FIELD_BOXES
 BOX_STYLE = {  # text is just the field label; state shown by colour only (no ✓ / ⚠)
-    "working": ("border:1.5px solid #94a3b8; border-radius:6px; padding:6px 12px; color:#64748b;", "{}"),
-    "ok":      ("border:1.5px solid #16a34a; border-radius:6px; padding:6px 12px; color:#16a34a; font-weight:600;", "{}"),
-    "warn":    ("border:1.5px solid #ea580c; border-radius:6px; padding:6px 12px; color:#ea580c; font-weight:600;", "{}"),
+    "working": ("border:1.5px solid #94a3b8; border-radius:6px; padding:6px 8px; color:#64748b;", "{}"),
+    "ok":      ("border:1.5px solid #16a34a; border-radius:6px; padding:6px 8px; color:#16a34a; font-weight:600;", "{}"),
+    "warn":    ("border:1.5px solid #ea580c; border-radius:6px; padding:6px 8px; color:#ea580c; font-weight:600;", "{}"),
 }
 _FIELD_LABEL = dict(FIELD_BOXES)
 
@@ -371,6 +376,7 @@ class AddWordDialog(QDialog):
         for key, label in FIELD_BOXES:
             box = QLabel(label)
             box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            box.setFixedWidth(90)         # uniform box width regardless of label length
             box.setVisible(False)
             self._boxes[key] = box
             boxes_row.addWidget(box)
@@ -523,7 +529,7 @@ class AddWordDialog(QDialog):
         target = _clean_text(word, lower=True)
         if any(_clean_text(mw.col.get_note(nid)["Front"], lower=True) == target
                for nid in _deck_note_ids()):
-            self._set_status(f"⚠ '{word}' already exists in the deck.", "warn")
+            self._set_status(f"'{word}' already exists in the deck.", "warn")
             return
 
         self.add_btn.setEnabled(False)
@@ -577,7 +583,7 @@ class AddWordDialog(QDialog):
 
 
 class FieldRow(QWidget):
-    """One card's progress: word + Sentence/Sentence-CN/Image/Audio/翻譯 boxes + 'added!' badge.
+    """One card's progress: word + Sentence/Audio/Image/Meaning/Translation boxes + 'added!' badge.
     Fields already present start green; missing ones start grey and flip on completion."""
 
     def __init__(self, word, present, parent=None):
@@ -593,6 +599,7 @@ class FieldRow(QWidget):
         for key, _label in BACKFILL_BOXES:    # all five fields, incl. the sentence translation
             box = QLabel()
             box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            box.setFixedWidth(90)         # uniform box width regardless of label length
             self._boxes[key] = box
             lay.addWidget(box)
             self.set_box(key, "ok" if present.get(key) else "working")
@@ -744,7 +751,7 @@ class BackfillDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Complete Missing Cards")
-        self.setMinimumWidth(720)
+        self.setMinimumWidth(820)        # room for word col + 5 boxes + the '…added!' badge
         self.setMinimumHeight(380)
         self._worker = None
         self._rows = {}
@@ -753,7 +760,7 @@ class BackfillDialog(QDialog):
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
-        root.addWidget(QLabel("Cards missing Sentence / Image / Audio / Translation:"))
+        root.addWidget(QLabel("Cards missing Sentence / Audio / Image / Meaning / Translation:"))
 
         self._rows_host = QWidget()
         self._rows_box = QVBoxLayout(self._rows_host)
@@ -933,7 +940,7 @@ class FindDuplicatesDialog(QDialog):
             self.status.setText(f"找到 {len(dup_groups)} 組重複，共 {total} 張卡片。")
             self.del_btn.setEnabled(True)
         else:
-            self.status.setText("沒有重複卡片 ✓")
+            self.status.setText("沒有重複卡片")
             self.del_btn.setEnabled(False)
 
     def _on_delete(self):
@@ -944,7 +951,7 @@ class FindDuplicatesDialog(QDialog):
                        for j in range(parent.childCount())
                        if parent.child(j).checkState(0) == Qt.CheckState.Checked]
             if checked and len(checked) == parent.childCount():
-                self.status.setText(f"⚠ 「{parent.text(0)}」整組都勾選了，每組至少要留一張。")
+                self.status.setText(f"「{parent.text(0)}」整組都勾選了，每組至少要留一張。")
                 return
             to_delete.extend(checked)
 
@@ -964,7 +971,7 @@ class FindDuplicatesDialog(QDialog):
         mw.col.save()
         mw.reset()
         self._scan()
-        self.status.setText(f"✓ 已刪除 {len(to_delete)} 張。記得同步 Anki！")
+        self.status.setText(f"已刪除 {len(to_delete)} 張。記得同步 Anki！")
 
 
 # ── 批次回填整句翻譯（Sentence_CN）—— burst 引擎 + 時間盒選單 ───────────────────
@@ -1125,7 +1132,7 @@ class SentenceCNDialog(QDialog):
         self._notes = notes
         n = len(notes)
         if n == 0:
-            self.info.setText("全部卡片都有整句翻譯了 🎉")
+            self.info.setText("全部卡片都有整句翻譯了")
             for b, _secs in self._mode_btns:
                 b.setEnabled(False)
         else:
