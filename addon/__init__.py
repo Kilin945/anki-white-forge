@@ -81,6 +81,31 @@ def _looks_english(word):
     return bool(ENGLISH_WORD_RE.fullmatch((word or "").strip()))
 
 
+def _sentence_prompt(word, association=""):
+    """Example-sentence prompt: pick sense (hint > SWE > everyday), short & clear, no
+    definition/circular sentence. Mirror of core.llm._sentence_instructions (addon
+    cannot import core)."""
+    hint = f'1. If a hint is given, use the sense the hint points to. Hint: "{association}"\n' if association else ""
+    swe_n = "2." if association else "1."
+    common_n = "3." if association else "2."
+    return (
+        f'You are helping a software engineer learn the English word "{word}".\n\n'
+        f'Pick the meaning to teach, in this priority:\n'
+        f'{hint}'
+        f'{swe_n} If "{word}" has a common usage in software engineering / programming / tech, use that sense.\n'
+        f'{common_n} Otherwise use its most common everyday meaning.\n\n'
+        f'Then write ONE example sentence that uses "{word}" naturally and makes its meaning '
+        f'obvious — someone who does not know the word should be able to guess it from the '
+        f'sentence alone. Keep it as short and simple as you can WITHOUT losing that clarity: '
+        f'shorter is better, but a clear sentence always beats a short unclear one. '
+        f'Use plain, everyday language; avoid business/corporate phrasing and complex clauses. '
+        f'A software / code-flavoured situation is fine. '
+        f'Do NOT write a definition or a circular sentence (no "X means ...", "X is when ...", '
+        f'"{word} is a kind of ..."); show the meaning through a real, concrete situation.\n\n'
+        f'Output only the sentence. No explanation, no quotes.'
+    )
+
+
 def _deck_note_ids():
     """Note ids in the deck restricted to our note type, so deck scans never touch a
     stray note type (e.g. a Cloze card) that lacks our fields and would KeyError."""
@@ -198,7 +223,7 @@ class Worker(QThread):
             word = self.word
             import threading
 
-            sentence, engine = self._llm_sentence(word)
+            sentence, engine = self._llm_sentence(word, self.association)
             if not sentence:
                 sentence = f"Please add an example sentence for '{word}'."
             self.step.emit("sentence", "ok" if not any(p in sentence for p in PLACEHOLDERS) else "warn")
@@ -253,14 +278,13 @@ class Worker(QThread):
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
-    def _groq_sentence(self, word):
-        prompt = f'Write one short, natural English example sentence using "{word}" in context. Output only the sentence, no explanation.'
-        return _groq_chat(prompt, temperature=0.7, max_tokens=200, timeout=15)
+    def _groq_sentence(self, word, association=""):
+        return _groq_chat(_sentence_prompt(word, association), temperature=0.7, max_tokens=200, timeout=15)
 
-    def _ollama_sentence(self, word):
+    def _ollama_sentence(self, word, association=""):
         payload = json.dumps({
             "model": OLLAMA_MODEL,
-            "prompt": f'Write one short, natural English example sentence using "{word}" in context. Output only the sentence, no explanation.',
+            "prompt": _sentence_prompt(word, association),
             "stream": False,
         }).encode()
         try:
@@ -274,25 +298,27 @@ class Worker(QThread):
         except Exception:
             return ""
 
-    def _llm_sentence(self, word):
-        result = self._groq_sentence(word)
+    def _llm_sentence(self, word, association=""):
+        result = self._groq_sentence(word, association)
         if result and len(result) > 10:
             return result, "Groq"
-        result = self._ollama_sentence(word)
+        result = self._ollama_sentence(word, association)
         if result and len(result) > 10:
             return result, "Ollama"
         return "", "failed"
 
     def _groq_translate(self, word, sentence):
-        """Traditional Chinese translation of word in context. Returns '' on failure."""
-        prompt = (f'Translate the English word "{word}" (used in: "{sentence}") into '
-                  f'Traditional Chinese. Output only the Chinese translation, '
-                  f'1-4 characters, no explanation.')
+        """Traditional Chinese meaning of word AS USED IN the sentence. '' on failure."""
+        prompt = (f'Give the Traditional Chinese meaning of "{word}" as it is used in this '
+                  f'sentence: "{sentence}". Give ONE concise translation only — do NOT list '
+                  f'synonyms or near-duplicate terms (e.g. never "水杯、茶杯"). Keep it short '
+                  f'(usually 1-4 characters; a little longer only if a single term genuinely '
+                  f'needs it). Output only the Chinese, no explanation.')
         reply = _groq_chat(prompt, temperature=0.3, max_tokens=20, timeout=10)
         # reject implausible output → leave empty so ⌘S re-generates it later
         if re.search(r"[A-Za-z]", reply):                    # English preamble / refusal / paren
             return ""
-        if len(re.findall(r"[一-鿿]", reply)) > 6:   # >6 漢字 = a sentence, not a word
+        if len(re.findall(r"[一-鿿]", reply)) > 8:   # >8 漢字 = a sentence, not a single term
             return ""
         return reply
 
@@ -648,7 +674,8 @@ class BackfillWorker(QThread):
 
         current = note["fields"]["Sentence"]["value"]
         if not current or any(p in current for p in PLACEHOLDERS):
-            sentence, _ = self._w._llm_sentence(word)
+            assoc = _clean_text(note["fields"].get("Association", {}).get("value", ""))
+            sentence, _ = self._w._llm_sentence(word, assoc)
             if not sentence:
                 sentence = f"Please add an example sentence for '{word}'."
             fields["Sentence"] = sentence
