@@ -53,16 +53,22 @@
   white-space: nowrap;       /* never wrap — JS shrinks font to fit one line */
 }
 
-/* play button — front owns its full style (centred by .front-wrap's align-items) */
+/* play button — front owns its full style. Pinned by `fixed` to a distance from the
+   VIEWPORT bottom (not the card — front/back cards differ in height, so card-relative
+   anchoring lands at different screen heights). Same `bottom` value as back → both
+   sides sit at the exact same screen position. Reset to static on mobile. */
 .front-wrap .play-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 16px 12px 12px;
+  padding: 12px 14px;
   cursor: pointer;
   border-radius: 8px;
   width: fit-content;
-  margin-top: 16px;
+  position: fixed;
+  bottom: 13vh;              /* shared with .container .play-row — keep the two in sync */
+  left: 50%;
+  transform: translateX(-50%);  /* centred horizontally on the front */
 }
 
 .front-wrap .audio-label {
@@ -209,18 +215,22 @@
   font-weight: 600;
 }
 
-/* play button — back owns its full style; pinned to the bottom, left-aligned
-   (the image is on the left column, so centring would look right-shifted) */
+/* play button — back owns its full style. Pinned by `fixed` to a distance from the
+   VIEWPORT bottom (same `bottom` value as front → both sides sit at the exact same
+   screen position, regardless of card height). Left edge aligns with the text column
+   (40% image col + 48px padding), not centred (the left image column would make
+   centring look right-shifted). Reset to static on mobile. */
 .container .play-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 16px 12px 12px;
+  padding: 12px 14px;
   cursor: pointer;
   border-radius: 8px;
   width: fit-content;
-  align-self: flex-start;
-  margin-top: auto;
+  position: fixed;
+  bottom: 13vh;              /* shared with .front-wrap .play-row — keep the two in sync */
+  left: calc(40% + 54px);    /* img-side 40% + 54px (text-side pad is 48px, so ~6px right of text edge) */
 }
 
 .container .audio-label {
@@ -265,6 +275,10 @@
     letter-spacing: 0;
     flex: none;
   }
+  .front-wrap .play-row {        /* mobile: back to normal flow (centred under the word) */
+    position: static;
+    transform: none;
+  }
 
   /* ---- BACK ---- */
   .container {
@@ -307,5 +321,10 @@
     font-size: clamp(16px, 4vw, 19px);
     padding: 11px 14px;          /* ≥44px tall tap target for touch */
     text-align: left;
+  }
+  .container .play-row {         /* mobile: back to normal flow (single column) */
+    position: static;
+    left: auto;
+    bottom: auto;
   }
 }
