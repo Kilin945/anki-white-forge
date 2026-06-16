@@ -81,6 +81,28 @@ def _looks_english(word):
     return bool(ENGLISH_WORD_RE.fullmatch((word or "").strip()))
 
 
+def _accept_word_translation(word, reply):
+    """Validate a word-translation reply. Accept: a Chinese gloss (<=8 漢字, not a sentence,
+    not buried in English preamble), OR a short English proper-noun NAME that echoes the
+    input word (e.g. word 'spring' -> 'Spring Boot', 'kafka' -> 'Apache Kafka'). Reject
+    refusals / preambles / junk that do not echo the word (e.g. 'None', 'I cannot translate').
+    Returns the accepted reply, or '' to reject.
+    KEEP IN SYNC with core/llm.py::_accept_word_translation (addon cannot import core)."""
+    reply = (reply or "").strip()
+    if not reply:
+        return ""
+    if re.search(r"[一-鿿]", reply):                       # Chinese gloss
+        if len(re.findall(r"[一-鿿]", reply)) > 8:          # too long -> a sentence, not a term
+            return ""
+        if len(re.findall(r"[A-Za-z]{2,}", reply)) >= 3:    # Chinese + lots of English -> preamble
+            return ""
+        return reply
+    # no Chinese -> only valid as a short proper-noun name that echoes the word
+    if len(re.findall(r"[A-Za-z]+", reply)) <= 3 and word.lower() in reply.lower():
+        return reply
+    return ""
+
+
 def _sentence_prompt(word, association=""):
     """Example-sentence prompt: pick sense (hint > SWE > everyday), short & clear, no
     definition/circular sentence.
@@ -321,13 +343,8 @@ class Worker(QThread):
                   f'Hazelcast), do NOT translate it — output the English name as-is. Keep it short '
                   f'(usually 1-4 characters; a little longer only if a single term genuinely needs '
                   f'it). Output only the Chinese, or for a proper noun the English name, no explanation.')
-        reply = _groq_chat(prompt, temperature=0.3, max_tokens=20, timeout=10)
-        # reject preamble/refusal: 2+ English words = not a translation (allow a single English proper noun)
-        if len(re.findall(r"[A-Za-z]{2,}", reply)) >= 2:
-            return ""
-        if len(re.findall(r"[一-鿿]", reply)) > 8:   # >8 漢字 = a sentence, not a single term (core llm_translate has no equivalent guard)
-            return ""
-        return reply
+        reply = _groq_chat(prompt, temperature=0.3, max_tokens=32, timeout=10)
+        return _accept_word_translation(word, reply)
 
     def _groq_translate_sentence(self, sentence, *, strict=False):
         """Traditional Chinese translation of a full sentence. '' on failure.

@@ -136,7 +136,7 @@ def llm_translate(word, sentence=""):
         f'term genuinely needs it). Output only the Chinese, or for a proper noun the English name, '
         f'no explanation.'
     )
-    return result.strip() if result else ""
+    return _accept_word_translation(word, result)
 
 
 def llm_sentence_and_query(word, association="", sentence=""):
@@ -168,6 +168,28 @@ SENTENCE_CN_PROMPT = (
     "Output only the translation. No explanation, no quotes.\n\n"
     'Sentence: "{sentence}"'
 )
+
+
+def _accept_word_translation(word, reply):
+    """Validate a word-translation reply. Accept: a Chinese gloss (<=8 漢字, not a sentence,
+    not buried in English preamble), OR a short English proper-noun NAME that echoes the
+    input word (e.g. word 'spring' -> 'Spring Boot', 'kafka' -> 'Apache Kafka'). Reject
+    refusals / preambles / junk that do not echo the word (e.g. 'None', 'I cannot translate').
+    Returns the accepted reply, or '' to reject.
+    KEEP IN SYNC with addon/__init__.py::_accept_word_translation (addon cannot import core)."""
+    reply = (reply or "").strip()
+    if not reply:
+        return ""
+    if re.search(r"[一-鿿]", reply):                       # Chinese gloss
+        if len(re.findall(r"[一-鿿]", reply)) > 8:          # too long -> a sentence, not a term
+            return ""
+        if len(re.findall(r"[A-Za-z]{2,}", reply)) >= 3:    # Chinese + lots of English -> preamble
+            return ""
+        return reply
+    # no Chinese -> only valid as a short proper-noun name that echoes the word
+    if len(re.findall(r"[A-Za-z]+", reply)) <= 3 and word.lower() in reply.lower():
+        return reply
+    return ""
 
 
 def _looks_like_chinese_translation(text):

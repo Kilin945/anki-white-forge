@@ -68,3 +68,22 @@ class TestTranslatePrompt:
         p = _capture(llm_mod.llm_translate, "Spring", "We use the Spring framework.")
         assert "proper noun" in p
         assert "output the English name" in p
+
+
+class TestAcceptWordTranslation:
+    def test_accepts_chinese_gloss(self):
+        assert llm_mod._accept_word_translation("convention", "慣例") == "慣例"
+
+    def test_accepts_multiword_proper_noun_that_echoes_word(self):
+        assert llm_mod._accept_word_translation("spring", "Spring Boot") == "Spring Boot"
+        assert llm_mod._accept_word_translation("kafka", "Apache Kafka") == "Apache Kafka"
+
+    def test_rejects_english_junk_not_echoing_word(self):
+        assert llm_mod._accept_word_translation("reliable", "None") == ""
+        assert llm_mod._accept_word_translation("convention", "I cannot translate this") == ""
+
+    def test_rejects_chinese_sentence_too_long(self):
+        assert llm_mod._accept_word_translation("x", "這是一個非常長的句子翻譯超過了八個字元") == ""
+
+    def test_rejects_chinese_with_english_preamble(self):
+        assert llm_mod._accept_word_translation("x", "翻譯是 the convention here") == ""
