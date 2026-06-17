@@ -9,8 +9,10 @@ import sys
 import json
 import asyncio
 import edge_tts
+from edge_tts.exceptions import NoAudioReceived
 
 VOICE = "en-US-AvaNeural"
+RETRIES = 4  # edge-tts 並發時偶發 NoAudioReceived（微軟服務回空音訊）→ 退避重試
 
 def normalize(text):
     return (text
@@ -21,7 +23,15 @@ def normalize(text):
     )
 
 async def generate(text, filepath, voice=VOICE):
-    await edge_tts.Communicate(normalize(text), voice).save(filepath)
+    last_err = None
+    for attempt in range(RETRIES):
+        try:
+            await edge_tts.Communicate(normalize(text), voice).save(filepath)
+            return
+        except NoAudioReceived as e:
+            last_err = e
+            await asyncio.sleep(0.6 * (attempt + 1))  # 線性退避，錯開並發重打
+    raise last_err
 
 async def batch(items):
     tasks = [generate(i["text"], i["filepath"], i.get("voice", VOICE)) for i in items]
