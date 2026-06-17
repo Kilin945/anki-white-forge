@@ -1027,14 +1027,24 @@ class RefillFlaggedDialog(QDialog):
             nid = mw.col.get_card(cid).nid
             by_note.setdefault(nid, []).append(cid)
         words = []
+        skipped = 0
         for nid, cardids in by_note.items():
             note = mw.col.get_note(nid)
             word = _clean_text(note["Front"])
+            if not _looks_english(word):
+                skipped += 1
+                continue
             self._flagged.append({"nid": nid, "cids": cardids, "word": word})
             words.append(word)
         if self._flagged:
-            self.word_list.setText(" · ".join(words))
+            word_text = " · ".join(words)
+            if skipped > 0:
+                word_text += f"  ({skipped} non-English card(s) skipped)"
+            self.word_list.setText(word_text)
             self.start_btn.setEnabled(True)
+        elif skipped > 0:
+            self.word_list.setText(f"No English flagged cards ({skipped} skipped — not English).")
+            self.start_btn.setEnabled(False)
         else:
             self.word_list.setText("No flagged cards.")
             self.start_btn.setEnabled(False)
