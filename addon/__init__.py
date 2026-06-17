@@ -801,6 +801,40 @@ class BackfillWorker(QThread):
         self.finished.emit(results)
 
 
+REFILL_CLEAR_FIELDS = ["Sentence", "Sentence_CN", "Image_Prompt",
+                       "Audio", "Front_Audio", "Translation"]
+
+
+class RefillWorker(BackfillWorker):
+    """Reset-and-refill flagged cards. Reuses BackfillWorker._process_one (full
+    regeneration of every blank field) but processes one card at a time so the
+    Stop button is responsive. Notes are passed in already blanked, so every
+    field regenerates."""
+
+    progress = pyqtSignal(str, int, int)   # word, current_index (1-based), total
+
+    def __init__(self, notes, media_dir):
+        super().__init__(notes, media_dir)
+        self._stop = False
+
+    def stop(self):
+        self._stop = True
+
+    def run(self):
+        results = []
+        total = len(self.notes)
+        for i, note in enumerate(self.notes, 1):
+            if self._stop:
+                break
+            word = _clean_text(note["fields"]["Front"]["value"], lower=True)
+            self.progress.emit(word, i, total)
+            try:
+                results.append(self._process_one(note))
+            except Exception as e:
+                results.append(f"✗ {word}: {e}")
+        self.finished.emit(results)
+
+
 # ── backfill dialog ───────────────────────────────────────────────────────────
 
 class BackfillDialog(QDialog):
