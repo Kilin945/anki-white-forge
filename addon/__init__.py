@@ -1425,8 +1425,11 @@ def open_duplicates_dialog():
 def open_sentence_cn_dialog():
     SentenceCNDialog(mw).exec()
 
+def open_refill_flagged_dialog():
+    RefillFlaggedDialog(mw).exec()
+
 DEFAULT_SHORTCUTS = {"add": "Ctrl+D", "complete": "Ctrl+S", "find_duplicates": "Ctrl+F",
-                     "backfill_cn": "Ctrl+B"}
+                     "backfill_cn": "Ctrl+B", "refill_flagged": "Ctrl+G"}
 ACTIONS = {}  # key -> QAction, so the settings dialog can re-bind shortcuts live
 
 
@@ -1454,6 +1457,7 @@ class SettingsDialog(QDialog):
         ("complete", "Complete Missing Cards"),
         ("find_duplicates", "Find Duplicate Words"),
         ("backfill_cn", "Backfill Sentence Translations"),
+        ("refill_flagged", "Refill Flagged Cards"),
     ]
 
     def __init__(self, parent=None):
@@ -1518,6 +1522,7 @@ def open_settings_dialog():
 
 _add_menu_action("Add English Word…", "add", open_dialog)
 _add_menu_action("Complete Missing Cards…", "complete", open_backfill_dialog)
+_add_menu_action("Refill Flagged Cards…", "refill_flagged", open_refill_flagged_dialog)
 _add_menu_action("Find Duplicate Words…", "find_duplicates", open_duplicates_dialog)
 _add_menu_action("Backfill Sentence Translations…", "backfill_cn", open_sentence_cn_dialog)
 
