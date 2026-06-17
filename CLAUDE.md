@@ -28,12 +28,14 @@ Anki 自動化單字系統，牌組 `My_Daily_English`、筆記類型 `English_W
 - **卡片模板裡「可點」的元件一律用 `<button>`/`<a>`，不要用 `<div>`** —— AnkiMobile 原生 tap 手勢會略過互動元件；用 `<div>`+JS `stopPropagation` 擋不住原生手勢（點擊會被當成翻牌/評分），且卡片 `<script>` 跑幾張後 AnkiMobile 會停止重跑。見 `templates/back.html` 的 `.trans-box`（翻譯框）
 - 大量翻譯走 pacing（撞 429 就等 `Retry-After` 再續，不猜固定批量）。偵測 429：core `groq_generate_strict` 拋 `RateLimitReached`、addon `_groq_chat_strict` 拋 `_AddonRateLimited`，各帶 `retry_after`
 - 例句與單字翻譯的「語意」由**造句 prompt** 決定，優先序：**Association（提示）→ SWE 領域義 → 常用日常義**；單字翻譯（`_groq_translate` / `llm_translate`）一律「依句中用法」翻、且**禁列近義重複詞**（如「水杯、茶杯」）。造句 prompt 有**兩份且須同步**：addon `_sentence_prompt` 與 core `_sentence_instructions`（addon 不能 import core，改一邊要改另一邊，檔內已標 KEEP-IN-SYNC）。association 已串進 ⌘D / ⌘S / CLI 造句，不要再讓它只餵圖片。
+- **Refill Flagged Cards（⌘G / 選單 Refill Flagged Cards…）= 手機標紅旗 → Mac 清空重補**。手機端**做不到**清/改欄位：AnkiMobile 無外掛、卡片模板 JS 不能寫欄位、連 flag/mark 都不行（Anki 開發者明言）→ 手機只用 **Anki 內建紅旗**標記，清空+重生全在 Mac。`RefillWorker` **繼承 `BackfillWorker` 並複用 `_process_one`**（零重複生成邏輯），但 `run()` 改成**逐張依序**跑讓 Stop 可即時（批次小、不在意吞吐）。重補機制：**先 `mw.col.update_note` 把 6 欄清空、再丟「全空」note dict 給 worker** → `_process_one` 的 `need_*` 全為真而全欄位重生。**先清空是刻意的**（生成失敗也不留舊內容）。掃紅旗卡比照 `BackfillDialog` 用 `_looks_english` 略過非英文/空 Front；保留欄位只有 `Front` + `Association`；只認紅旗 `flag:1`，補完每張 `set_user_flag_for_cards(0, cids)` 清旗。
+- **對話框 UI 文字一律英文**（最後訂版語言規則，求一致）；但**程式註解 / docstring / LLM prompt 範例 / 中文偵測 regex 保持中文**。改 addon 對話框新增字串用英文。
 
 ## Git 規則
 
-- 每完成一個功能或修復就立即 commit，不累積多個功能到同一 commit
-- 一個 commit 只做一件事：一個 bug fix / feature / refactor
-- commit type 用 conventional 風格：`feat` / `fix` / `docs` / `style` / `refactor` / `perf` / `chore` 等
+- 以**一段完整功能**為單位 commit，不要每改幾行小東西就 commit（例如只改幾行中文、調個字串，不需單獨 commit）。把相關的程式、**文件（README / CLAUDE.md）**、測試**併進同一個功能 commit**——README 不要單獨拆成一個 commit。
+- 一個 commit = 一段有意義的功能 / 修復 / 重構（連同它的文件與測試）；不同功能仍分開 commit，不要把多個不相關功能塞進同一個。
+- commit type 用 conventional 風格：`feat` / `fix` / `docs` / `style` / `refactor` / `perf` / `chore` 等。commit 描述用**中文**（type 用英文）
 - commit 前先跑 Pre-push Checklist
 - 不確定要不要 commit 時，問使用者
 

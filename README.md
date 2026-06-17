@@ -79,7 +79,14 @@ uv sync   # 自動安裝所有依賴
 - 正規化後 Front 相同的卡片分組列出（抓得到手機漏進來的 HTML / 大小寫變體）
 - 勾選要刪的（每組至少保留一張）→ 確認刪除
 
-> ⌘D / ⌘S / ⌘F / ⌘B 可在 **Tools → My Word Adder Settings…** 直接按組合鍵設定（免改 JSON、即時生效），或清除以關閉。
+**重做標記的卡（清空後重補）**：`⌘G`（Ctrl+G）或 **Tools → Refill Flagged Cards…**
+- 手機複習時看到內容不理想、想重做的卡（例句不貼切、翻譯有誤…），用 Anki 內建**紅旗**標起來（手機卡片模板無法寫欄位，只能靠內建旗標標記）
+- 回 Mac 按 ⌘G → 列出紅旗卡 → **Start**：保留 Word + Association，其餘欄位（例句／兩個翻譯／圖／字音／句音）清空後用與 ⌘S 相同的引擎重新生成 → 每補完一張自動清掉紅旗
+- 只認紅旗（flag:1）；非英文卡會略過；隨時可 **Stop**（已補的保留、沒補的維持紅旗，下次再開接著做）
+
+> ⌘D / ⌘S / ⌘F / ⌘B / ⌘G 可在 **Tools → My Word Adder Settings…** 直接按組合鍵設定（免改 JSON、即時生效），或清除以關閉。
+>
+> 對話框 UI 文字一律英文（統一語言）。
 
 ### 方式二：Terminal
 
@@ -209,7 +216,7 @@ Anki/
 
 | 檔案 | 說明 |
 |------|------|
-| `addon/__init__.py` | Anki 插件主程式（symlink 到 `~/Library/.../addons21/my_word_adder/`）。`⌘D` 新增單字（含整句翻譯）、`⌘S` 補齊缺失卡片（例句/整句翻譯/圖/音/單字翻譯，少量日常用）、`⌘F` 找重複、`⌘B` / 選單 **Backfill Sentence Translations…**（節流批次回填整句翻譯，大量用）。新增防護用正規化比對（HTML/大小寫變體都擋）。LLM 用 urllib 直呼 Groq，TTS/圖片透過 subprocess，BackfillWorker 3 路並發。改完需重啟 Anki |
+| `addon/__init__.py` | Anki 插件主程式（symlink 到 `~/Library/.../addons21/my_word_adder/`）。`⌘D` 新增單字（含整句翻譯）、`⌘S` 補齊缺失卡片（例句/整句翻譯/圖/音/單字翻譯，少量日常用）、`⌘F` 找重複、`⌘B` / 選單 **Backfill Sentence Translations…**（節流批次回填整句翻譯，大量用）、`⌘G` / 選單 **Refill Flagged Cards…**（重置紅旗卡：保留 Word+Association、其餘清空重生，RefillWorker 複用 BackfillWorker 引擎）。新增防護用正規化比對（HTML/大小寫變體都擋）。對話框 UI 一律英文。LLM 用 urllib 直呼 Groq，TTS/圖片透過 subprocess，BackfillWorker 3 路並發。改完需重啟 Anki |
 
 ### 設定與測試
 
