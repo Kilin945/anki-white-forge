@@ -48,7 +48,7 @@ def run_backfill():
     result = subprocess.run(
         ["uv", "run", "python", "backfill_words.py"],
         capture_output=True, text=True, timeout=120,
-        cwd="/Users/yeqilin/Workspace/Anki",
+        cwd="/Users/yeqilin/Workspace/anki",
     )
     return result.stdout, result.stderr, result.returncode
 

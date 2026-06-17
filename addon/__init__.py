@@ -29,12 +29,12 @@ OLLAMA_URL   = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "gemma4:26b"
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL   = "llama-3.3-70b-versatile"
-GROQ_KEY_PATH = os.path.expanduser("~/Workspace/Anki/.groq_key")
+GROQ_KEY_PATH = os.path.expanduser("~/Workspace/anki/.groq_key")
 PLACEHOLDERS = ["No example found", "please add manually", "is used in English", "Please add an example"]
-VENV_PYTHON     = os.path.expanduser("~/Workspace/Anki/.venv/bin/python")
-GTTS_SCRIPT     = os.path.expanduser("~/Workspace/Anki/_gtts_helper.py")
-IMAGE_SCRIPT    = os.path.expanduser("~/Workspace/Anki/_image_helper.py")
-VALIDATE_SCRIPT = os.path.expanduser("~/Workspace/Anki/_validate_helper.py")
+VENV_PYTHON     = os.path.expanduser("~/Workspace/anki/.venv/bin/python")
+GTTS_SCRIPT     = os.path.expanduser("~/Workspace/anki/_gtts_helper.py")
+IMAGE_SCRIPT    = os.path.expanduser("~/Workspace/anki/_image_helper.py")
+VALIDATE_SCRIPT = os.path.expanduser("~/Workspace/anki/_validate_helper.py")
 VOICE_WORD     = "en-US-AndrewNeural"
 VOICE_SENTENCE = "en-US-AvaNeural"
 

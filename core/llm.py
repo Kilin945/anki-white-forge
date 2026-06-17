@@ -7,7 +7,7 @@ from core.rate_limiter import RateLimitReached
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "gemma4:26b"
-GROQ_KEY_PATH = os.path.expanduser("~/Workspace/Anki/.groq_key")
+GROQ_KEY_PATH = os.path.expanduser("~/Workspace/anki/.groq_key")
 GROQ_MODEL = "llama-3.3-70b-versatile"
 
 

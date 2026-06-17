@@ -43,15 +43,15 @@
 ### API Keys
 ```bash
 # Groq（免費，https://console.groq.com）
-echo "gsk_your_key_here" > ~/Workspace/Anki/.groq_key
+echo "gsk_your_key_here" > ~/Workspace/anki/.groq_key
 
 # Pexels（免費，https://www.pexels.com/api）
-echo "your_key_here" > ~/Workspace/Anki/.pexels_key
+echo "your_key_here" > ~/Workspace/anki/.pexels_key
 ```
 
 ### Python 環境
 ```bash
-cd ~/Workspace/Anki
+cd ~/Workspace/anki
 uv sync   # 自動安裝所有依賴
 ```
 
@@ -84,7 +84,7 @@ uv sync   # 自動安裝所有依賴
 ### 方式二：Terminal
 
 ```bash
-cd ~/Workspace/Anki
+cd ~/Workspace/anki
 
 # 新增單字
 uv run python add_word.py "glimpse" "a brief look"

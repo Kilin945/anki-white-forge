@@ -165,7 +165,7 @@ class TestGttsHelper:
         import subprocess
         fp = str(tmp_path / "test.mp3")
         r = subprocess.run(["uv", "run", "python", "_gtts_helper.py", "hello", fp],
-                           capture_output=True, text=True, timeout=20, cwd="/Users/yeqilin/Workspace/Anki")
+                           capture_output=True, text=True, timeout=20, cwd="/Users/yeqilin/Workspace/anki")
         assert r.returncode == 0 and os.path.exists(fp)
 
     def test_batch_mode(self, tmp_path):
@@ -173,7 +173,7 @@ class TestGttsHelper:
         f1, f2 = str(tmp_path / "a.mp3"), str(tmp_path / "b.mp3")
         items = json.dumps([{"text": "hello", "filepath": f1}, {"text": "world", "filepath": f2}])
         r = subprocess.run(["uv", "run", "python", "_gtts_helper.py", "--batch", items],
-                           capture_output=True, text=True, timeout=30, cwd="/Users/yeqilin/Workspace/Anki")
+                           capture_output=True, text=True, timeout=30, cwd="/Users/yeqilin/Workspace/anki")
         assert r.returncode == 0 and os.path.exists(f1) and os.path.exists(f2)
 
 
