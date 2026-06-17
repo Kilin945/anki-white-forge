@@ -17,7 +17,7 @@
 - Default shortcut: `Ctrl+G` (⌘G on macOS), configurable via existing `SettingsDialog`.
 - Addon code imports `aqt` at module top → **cannot be imported under pytest**. No addon unit tests exist; the automated gate per task is `python -m py_compile addon/__init__.py`, and functional verification is **manual in Anki after restart** (project norm: "改完 addon 需重啟 Anki 驗證"). Symlink `addons21/my_word_adder/__init__.py → addon/__init__.py` means editing `addon/__init__.py` is what Anki loads after restart.
 - Edit the real file at repo `addon/__init__.py` (never the symlink target directly).
-- Commit after each task.
+- Commit after each task. **Commit messages: English conventional type + Chinese description** (code identifiers like `RefillWorker` stay English).
 
 ---
 
@@ -81,7 +81,7 @@ Expected: prints `OK`, no traceback.
 ```bash
 cd /Users/yeqilin/Workspace/anki
 git add addon/__init__.py
-git commit -m "feat: RefillWorker — sequential cancellable refill (reuses BackfillWorker)"
+git commit -m "feat: 新增 RefillWorker — 依序、可中斷的紅旗卡重補（複用 BackfillWorker._process_one）"
 ```
 
 ---
@@ -246,7 +246,7 @@ Expected: prints `OK`, no traceback.
 ```bash
 cd /Users/yeqilin/Workspace/anki
 git add addon/__init__.py
-git commit -m "feat: RefillFlaggedDialog — scan red-flagged cards, clear & refill, unflag"
+git commit -m "feat: 新增 RefillFlaggedDialog — 掃紅旗卡、清空重補、補完清旗標"
 ```
 
 ---
@@ -331,7 +331,7 @@ Anki must be running with AnkiConnect enabled (the backfill engine writes via An
 ```bash
 cd /Users/yeqilin/Workspace/anki
 git add addon/__init__.py
-git commit -m "feat: wire Refill Flagged Cards menu entry + ⌘G shortcut + settings label"
+git commit -m "feat: 接線 Refill Flagged Cards 選單項目 + ⌘G 快捷鍵 + 設定項目"
 ```
 
 ---
