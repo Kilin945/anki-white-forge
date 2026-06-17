@@ -502,7 +502,7 @@ class AddWordDialog(QDialog):
         """Returns the word to add (possibly corrected), or None to abort."""
         # Layer 1 — charset hard block: any non-English letter / digit is definitely wrong
         if not _looks_english(word):
-            showWarning(f"'{word}' 包含非英文字元，無法建立。")
+            showWarning(f"'{word}' contains non-English characters and cannot be added.")
             return None
 
         # Layer 2 — spelling (Groq, offline fallback)
@@ -512,11 +512,11 @@ class AddWordDialog(QDialog):
 
         if status == "typo" and suggestion and suggestion != word:
             box = QMessageBox(self)
-            box.setWindowTitle("拼字檢查")
-            box.setText(f"'{word}' 可能拼錯了，您是不是想用 '{suggestion}'？")
-            use_btn  = box.addButton(f"改用 '{suggestion}'", QMessageBox.ButtonRole.AcceptRole)
-            keep_btn = box.addButton(f"仍用 '{word}'", QMessageBox.ButtonRole.DestructiveRole)
-            box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+            box.setWindowTitle("Spell Check")
+            box.setText(f"'{word}' may be misspelled. Did you mean '{suggestion}'?")
+            use_btn  = box.addButton(f"Use '{suggestion}'", QMessageBox.ButtonRole.AcceptRole)
+            keep_btn = box.addButton(f"Keep '{word}'", QMessageBox.ButtonRole.DestructiveRole)
+            box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
             box.setDefaultButton(use_btn)
             box.exec()
             clicked = box.clickedButton()
@@ -528,8 +528,8 @@ class AddWordDialog(QDialog):
 
         # unknown / no usable suggestion → let the user decide
         reply = QMessageBox.question(
-            self, "查不到這個字",
-            f"'{word}' 查不到、可能拼錯，確定要建立嗎？",
+            self, "Word Not Found",
+            f"'{word}' was not found and may be misspelled. Add it anyway?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         return word if reply == QMessageBox.StandardButton.Yes else None
@@ -567,7 +567,7 @@ class AddWordDialog(QDialog):
             showWarning("Please enter a word.")
             return
 
-        self._set_status("檢查拼字中…")
+        self._set_status("Checking spelling…")
         word = self._validate_word_ui(word)
         if word is None:
             self.status.setText("")
@@ -589,7 +589,7 @@ class AddWordDialog(QDialog):
 
         self.add_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
-        self._set_status(f"生成中：{word}")
+        self._set_status(f"Generating: {word}")
         self._start_boxes()
 
         self._worker = Worker(word, assoc, mw.col.media.dir())
@@ -899,7 +899,7 @@ class BackfillDialog(QDialog):
             word = _clean_text(note["Front"])
             if not _looks_english(word):       # not English → don't fill, just flag it
                 invalid += 1
-                lbl = QLabel(f"{word or note['Front']}（包含非英文字元，無法建立）")
+                lbl = QLabel(f"{word or note['Front']} (contains non-English characters, cannot be created)")
                 lbl.setStyleSheet("color:#ea580c; padding:4px;")
                 self._rows_box.addWidget(lbl)
                 continue
@@ -933,7 +933,7 @@ class BackfillDialog(QDialog):
         if notes:
             parts.append(f"{len(notes)} card(s) need filling.")
         if invalid:
-            parts.append(f"{invalid} 張包含非英文字元、無法建立（請修正或刪除）。")
+            parts.append(f"{invalid} card(s) contain non-English characters and cannot be created (please fix or delete).")
         self.status.setText(" ".join(parts) if parts else "All cards are complete!")
         self.run_btn.setEnabled(bool(notes))
 
@@ -1128,9 +1128,9 @@ class FindDuplicatesDialog(QDialog):
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
-        root.addWidget(QLabel("正規化後 Front 相同的重複卡片。勾選要刪除的（每組至少保留一張）："))
+        root.addWidget(QLabel("Duplicate cards with the same Front after normalization. Check the ones to delete (keep at least one per group):"))
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["單字 / 卡片", "例句"])
+        self.tree.setHeaderLabels(["Word / Card", "Sentence"])
         self.tree.setColumnWidth(0, 220)
         root.addWidget(self.tree)
 
@@ -1138,7 +1138,7 @@ class FindDuplicatesDialog(QDialog):
         root.addWidget(self.status)
 
         btns = QHBoxLayout()
-        self.del_btn = QPushButton("刪除勾選的卡片")
+        self.del_btn = QPushButton("Delete Selected")
         self.del_btn.setEnabled(False)
         self.del_btn.clicked.connect(self._on_delete)
         close_btn = QPushButton("Close")
@@ -1161,7 +1161,7 @@ class FindDuplicatesDialog(QDialog):
 
         total = 0
         for key, items in sorted(dup_groups.items()):
-            parent = QTreeWidgetItem(self.tree, [f"{key}  ({len(items)} 張)", ""])
+            parent = QTreeWidgetItem(self.tree, [f"{key}  ({len(items)} cards)", ""])
             parent.setFlags(parent.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
             parent.setExpanded(True)
             for nid, note in items:
@@ -1173,10 +1173,10 @@ class FindDuplicatesDialog(QDialog):
                 total += 1
 
         if dup_groups:
-            self.status.setText(f"找到 {len(dup_groups)} 組重複，共 {total} 張卡片。")
+            self.status.setText(f"Found {len(dup_groups)} duplicate group(s), {total} card(s) total.")
             self.del_btn.setEnabled(True)
         else:
-            self.status.setText("沒有重複卡片")
+            self.status.setText("No duplicate cards.")
             self.del_btn.setEnabled(False)
 
     def _on_delete(self):
@@ -1187,17 +1187,17 @@ class FindDuplicatesDialog(QDialog):
                        for j in range(parent.childCount())
                        if parent.child(j).checkState(0) == Qt.CheckState.Checked]
             if checked and len(checked) == parent.childCount():
-                self.status.setText(f"「{parent.text(0)}」整組都勾選了，每組至少要留一張。")
+                self.status.setText(f"All cards in '{parent.text(0)}' are checked; keep at least one per group.")
                 return
             to_delete.extend(checked)
 
         if not to_delete:
-            self.status.setText("沒有勾選任何卡片。")
+            self.status.setText("No cards selected.")
             return
 
         reply = QMessageBox.question(
-            self, "確認刪除",
-            f"確定刪除勾選的 {len(to_delete)} 張卡片？此動作無法復原。",
+            self, "Confirm Deletion",
+            f"Delete the {len(to_delete)} selected card(s)? This cannot be undone.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
@@ -1207,15 +1207,15 @@ class FindDuplicatesDialog(QDialog):
         mw.col.save()
         mw.reset()
         self._scan()
-        self.status.setText(f"已刪除 {len(to_delete)} 張。記得同步 Anki！")
+        self.status.setText(f"Deleted {len(to_delete)} card(s). Remember to sync Anki!")
 
 
 # ── 批次回填整句翻譯（Sentence_CN）—— burst 引擎 + 時間盒選單 ───────────────────
 
 SENTENCE_CN_RPM = 25          # 約略每分鐘筆數（Groq 12000 token/分 ÷ ~480/句 ≈ 25）；僅用於預估顯示
 # (label, budget_seconds | None=直接完成)
-SENTENCE_CN_MODES = [("1 分鐘", 60), ("2 分鐘", 120), ("5 分鐘", 300),
-                     ("10 分鐘", 600), ("直接完成", None)]
+SENTENCE_CN_MODES = [("1 min", 60), ("2 min", 120), ("5 min", 300),
+                     ("10 min", 600), ("Run to completion", None)]
 
 
 class SentenceCNWorker(QThread):
@@ -1320,8 +1320,8 @@ class SentenceCNDialog(QDialog):
         root.addWidget(self.info)
 
         note = QLabel(
-            f"Groq 一分鐘約只能翻 {SENTENCE_CN_RPM} 筆；選更長的時間就是延長、邊等額度回補邊繼續翻。\n"
-            "隨時可按「停止」，下次再開會從沒翻的續。")
+            f"Groq translates only about {SENTENCE_CN_RPM} per minute; a longer time just extends the run, waiting for quota to refill and continuing.\n"
+            "You can press Stop any time; reopening resumes from what's left.")
         note.setWordWrap(True)
         note.setStyleSheet("color:#64748b; font-size:12px;")
         root.addWidget(note)
@@ -1344,10 +1344,10 @@ class SentenceCNDialog(QDialog):
         root.addWidget(self.progress_bar)
 
         btns = QHBoxLayout()
-        self.stop_btn = QPushButton("停止")
+        self.stop_btn = QPushButton("Stop")
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self._on_stop)
-        close_btn = QPushButton("關閉")
+        close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
         btns.addWidget(self.stop_btn)
         btns.addWidget(close_btn)
@@ -1368,12 +1368,12 @@ class SentenceCNDialog(QDialog):
         self._notes = notes
         n = len(notes)
         if n == 0:
-            self.info.setText("全部卡片都有整句翻譯了")
+            self.info.setText("All cards already have sentence translations.")
             for b, _secs in self._mode_btns:
                 b.setEnabled(False)
         else:
             est = -(-n // SENTENCE_CN_RPM)     # ceil(n / rpm) minutes
-            self.info.setText(f"共 {n} 筆缺整句翻譯，速率約 {SENTENCE_CN_RPM}/分 → 全部約 {est} 分鐘。")
+            self.info.setText(f"{n} card(s) missing a sentence translation, ~{SENTENCE_CN_RPM}/min → about {est} min total.")
             for b, _secs in self._mode_btns:
                 b.setEnabled(True)
 
@@ -1394,17 +1394,17 @@ class SentenceCNDialog(QDialog):
 
     def _on_progress(self, done, total, remaining_secs):
         self.progress_bar.setValue(done)
-        tail = "" if remaining_secs < 0 else f"（剩 {remaining_secs}s）"
-        self.status.setText(f"翻譯中… {done} / {total} {tail}")
+        tail = "" if remaining_secs < 0 else f"({remaining_secs}s left)"
+        self.status.setText(f"Translating… {done} / {total} {tail}")
 
     def _on_waiting(self, secs, done, total):
-        self.status.setText(f"額度回補中… {secs}s 後自動續（已翻 {done} / {total}）")
+        self.status.setText(f"Waiting for quota… auto-resume in {secs}s (translated {done} / {total})")
 
     def _on_stop(self):
         if self._worker:
             self._worker.stop()
         self.stop_btn.setEnabled(False)
-        self.status.setText("停止中…")
+        self.status.setText("Stopping…")
 
     def _on_finished(self, done, remaining):
         mw.col.save()
@@ -1414,10 +1414,10 @@ class SentenceCNDialog(QDialog):
         blocked = getattr(self._worker, "blocked_secs", 0)
         if blocked:
             self.status.setText(
-                f"已翻 {done} 筆。達 Groq 較長的速率上限（約需等 {blocked}s，可能是每日額度），"
-                f"請稍後再來；剩 {remaining} 筆。")
+                f"Translated {done}. Hit Groq's longer rate limit (need to wait ~{blocked}s, "
+                f"possibly the daily quota); please come back later. {remaining} left.")
         else:
-            self.status.setText(f"本次完成 {done} 筆，剩 {remaining} 筆。記得同步 Anki！")
+            self.status.setText(f"Translated {done} this run, {remaining} left. Remember to sync Anki!")
         self._scan()       # refresh count + re-enable mode buttons for another round
 
 
@@ -1472,14 +1472,14 @@ class SettingsDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("My Word Adder — 快捷鍵設定")
+        self.setWindowTitle("My Word Adder — Shortcuts")
         self.setMinimumWidth(440)
         self._edits = {}
         self._setup_ui()
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
-        root.addWidget(QLabel("點欄位後直接按你要的組合鍵；按「清除」＝不綁，只走選單。"))
+        root.addWidget(QLabel("Click a field and press your key combo; press Clear to unbind (menu only)."))
 
         form = QFormLayout()
         for key, title in self.LABELS:
@@ -1488,21 +1488,21 @@ class SettingsDialog(QDialog):
             edit.setFocusPolicy(Qt.FocusPolicy.ClickFocus)  # only arm when clicked, not on open
             self._edits[key] = edit
 
-            clear = QPushButton("清除")
+            clear = QPushButton("Clear")
             clear.clicked.connect(lambda _, e=edit: e.clear())
             row = QHBoxLayout()
             row.addWidget(edit)
             row.addWidget(clear)
             wrap = QWidget()
             wrap.setLayout(row)
-            form.addRow(f"{title}：", wrap)
+            form.addRow(f"{title}: ", wrap)
         root.addLayout(form)
 
         btns = QHBoxLayout()
-        save = QPushButton("儲存")
+        save = QPushButton("Save")
         save.setDefault(True)
         save.clicked.connect(self._on_save)
-        cancel = QPushButton("取消")
+        cancel = QPushButton("Cancel")
         cancel.clicked.connect(self.reject)
         btns.addWidget(save)
         btns.addWidget(cancel)
@@ -1514,7 +1514,7 @@ class SettingsDialog(QDialog):
         new = {key: edit.keySequence().toString() for key, edit in self._edits.items()}
         used = [s for s in new.values() if s]
         if len(used) != len(set(used)):       # same combo on two actions = ambiguous, neither fires
-            showWarning("兩個功能設了相同的快捷鍵，請改成不同的。")
+            showWarning("Two actions share the same shortcut; please make them different.")
             return
         cfg = mw.addonManager.getConfig(__name__) or {}
         sc = cfg.setdefault("shortcuts", {})
@@ -1522,7 +1522,7 @@ class SettingsDialog(QDialog):
         mw.addonManager.writeConfig(__name__, cfg)
         for key, act in ACTIONS.items():          # apply live — no restart needed
             act.setShortcut(QKeySequence(sc.get(key, DEFAULT_SHORTCUTS[key])))
-        tooltip("快捷鍵已更新", period=2000)
+        tooltip("Shortcuts updated", period=2000)
         self.accept()
 
 
