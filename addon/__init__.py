@@ -966,6 +966,142 @@ class BackfillDialog(QDialog):
         self.run_btn.setEnabled(False)
 
 
+# ── refill flagged dialog ──────────────────────────────────────────────────────
+
+class RefillFlaggedDialog(QDialog):
+    """Reset every red-flagged card (keep Word + Association, clear & regenerate the
+    rest) and clear the flag as each finishes. Flagging is done on the phone with
+    Anki's built-in red flag; this is the Mac-side processor."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Refill Flagged Cards")
+        self.setMinimumWidth(600)
+        self._worker = None
+        self._flagged = []      # [{"nid", "cids", "word"}]
+        self._card_ids = {}     # note_id -> [card_id, ...] for unflagging
+        self._setup_ui()
+        self._scan()
+
+    def _setup_ui(self):
+        root = QVBoxLayout(self)
+        desc = QLabel("Word and Association are kept. All other fields (sentence, "
+                      "both translations, image, word audio, sentence audio) are "
+                      "cleared and regenerated.")
+        desc.setWordWrap(True)
+        root.addWidget(desc)
+
+        self.word_list = QLabel("")
+        self.word_list.setWordWrap(True)
+        self.word_list.setStyleSheet("color:#475569; padding:4px;")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self.word_list)
+        scroll.setMinimumHeight(80)
+        root.addWidget(scroll)
+
+        self.status = QLabel("")
+        self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        root.addWidget(self.status)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        root.addWidget(self.progress_bar)
+
+        btns = QHBoxLayout()
+        self.stop_btn = QPushButton("Stop")
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.clicked.connect(self._on_stop)
+        self.start_btn = QPushButton("Start")
+        self.start_btn.setEnabled(False)
+        self.start_btn.clicked.connect(self._on_start)
+        btns.addWidget(self.stop_btn)
+        btns.addWidget(self.start_btn)
+        root.addLayout(btns)
+
+    def _scan(self):
+        self._flagged = []
+        cids = mw.col.find_cards(f'deck:"{DECK_NAME}" note:"{MODEL_NAME}" flag:1')
+        by_note = {}
+        for cid in cids:
+            nid = mw.col.get_card(cid).nid
+            by_note.setdefault(nid, []).append(cid)
+        words = []
+        for nid, cardids in by_note.items():
+            note = mw.col.get_note(nid)
+            word = _clean_text(note["Front"])
+            self._flagged.append({"nid": nid, "cids": cardids, "word": word})
+            words.append(word)
+        if self._flagged:
+            self.word_list.setText(" · ".join(words))
+            self.start_btn.setEnabled(True)
+        else:
+            self.word_list.setText("No flagged cards.")
+            self.start_btn.setEnabled(False)
+
+    def _on_start(self):
+        if not self._flagged:
+            return
+        notes = []
+        self._card_ids = {}
+        for item in self._flagged:
+            nid = item["nid"]
+            self._card_ids[nid] = item["cids"]
+            note = mw.col.get_note(nid)
+            for f in REFILL_CLEAR_FIELDS:
+                if f in note:
+                    note[f] = ""
+            mw.col.update_note(note)
+            notes.append({
+                "noteId": nid,
+                "fields": {
+                    "Front":        {"value": note["Front"]},
+                    "Association":  {"value": note["Association"]},
+                    "Sentence":     {"value": ""},
+                    "Image_Prompt": {"value": ""},
+                    "Audio":        {"value": ""},
+                    "Front_Audio":  {"value": ""},
+                    "Translation":  {"value": ""},
+                    "Sentence_CN":  {"value": ""},
+                },
+            })
+        self.start_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, len(notes))
+        self.progress_bar.setValue(0)
+        self._worker = RefillWorker(notes, mw.col.media.dir())
+        self._worker.progress.connect(self._on_progress)
+        self._worker.card_done.connect(self._on_card_done)
+        self._worker.finished.connect(self._on_finished)
+        self._worker.error.connect(lambda e: self.status.setText(f"Error: {e}"))
+        self._worker.start()
+
+    def _on_progress(self, word, i, total):
+        self.progress_bar.setValue(i)
+        self.status.setText(f"Refilling: {word} ({i}/{total})")
+
+    def _on_card_done(self, note_id):
+        cids = self._card_ids.get(note_id)
+        if cids:
+            mw.col.set_user_flag_for_cards(0, cids)
+
+    def _on_stop(self):
+        if self._worker:
+            self._worker.stop()
+        self.stop_btn.setEnabled(False)
+        self.status.setText("Stopping…")
+
+    def _on_finished(self, results):
+        mw.col.save()
+        mw.reset()
+        self.progress_bar.setVisible(False)
+        self.stop_btn.setEnabled(False)
+        ok = sum(1 for r in results if r.startswith("✓"))
+        self.status.setText(f"Refilled {ok} card(s). Remember to sync Anki!")
+        self._scan()   # refilled cards are unflagged now → list shrinks / empties
+
+
 # ── find duplicates dialog ─────────────────────────────────────────────────────
 
 class FindDuplicatesDialog(QDialog):
