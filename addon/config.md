@@ -4,11 +4,12 @@
 
 ---
 
-下面的 JSON 是給進階使用者直接編輯用的。`shortcuts` 是三個功能的快捷鍵（Anki 格式；Mac 上 `Ctrl` 對應 `⌘`）：
+下面的 JSON 是給進階使用者直接編輯用的。`shortcuts` 是各功能的快捷鍵（Anki 格式；Mac 上 `Ctrl` 對應 `⌘`）：
 
-- `add` — Add English Word（預設 `Ctrl+D` = ⌘D）
+- `add` — Add English Word（預設 `Ctrl+A` = ⌘A）
 - `complete` — Complete Missing Cards（預設 `Ctrl+S` = ⌘S）
-- `find_duplicates` — Find Duplicate Words（預設 `Ctrl+F` = ⌘F）
+- `find_duplicates` — Find Duplicate Words（預設 `Ctrl+D` = ⌘D）
+- `backfill_cn` — Batch Operations 面板（批次翻譯 + 清空紅旗）（預設 `Ctrl+F` = ⌘F）
 
 空字串 `""` = 不綁快捷鍵，只能從 Tools 選單開。
 

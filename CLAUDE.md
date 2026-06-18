@@ -21,14 +21,16 @@ Anki 自動化單字系統，牌組 `My_Daily_English`、筆記類型 `English_W
 - Addon 用 urllib 直呼 Groq（非 groq SDK）→ 一定要帶 `User-Agent: AnkiWordAdder/1.0` header
 - 圖片偵測用 `"<img" in value`（不是 `bool(value)`），以處理殘留 HTML
 - `backfill_words.py` 在句子變動時會重生音檔（`need_sentence` flag）
-- ⌘D（Add）和 ⌘S（Complete）都會生成全部欄位含 `Translation`，共用 `Worker._groq_translate()`
-- 非英文字元用共用 `_looks_english()` 擋：⌘D 建立前擋、⌘S 掃描時略過非英文卡片（手機/Anki 內建新增繞過 ⌘D，故 ⌘S 是最後關卡 → 驗證要兩邊都做、邏輯共用）
-- ⌘D 拼字另用 Groq `_groq_spellcheck()`（回 OK／更正字／NONWORD），斷網退 `_validate_helper.py` 離線拼字
-- `Sentence_CN`（整句中文翻譯）由 **⌘D（即時）、⌘S Complete（日常少量補完，只翻當下缺的幾張 → 不會撞速率）、專用選單「Backfill Sentence Translations」/ `⌘B` / CLI `backfill_sentence_cn.py`（大量、節流）** 填。**CLI `backfill_words.py` 仍刻意不碰**（它是未節流的大量補齊，整句翻譯量大會撞速率上限 → 大量場景一律走 `backfill_sentence_cn.py`）。⌘S 與 backfill_words.py 的差異就在這：GUI ⌘S 補（量小、互動），CLI 大量補齊不補。翻譯：core `llm_translate_sentence` / addon `_groq_translate_sentence` 各寫一份（addon 不能 import core），驗證以「含中文且英文詞 < 3」判定 → 保留嵌入英文詞（concurrency、Microsoft）的合法譯文
+- ⌘A（Add）和 ⌘S（Complete）都會生成全部欄位含 `Translation`，共用 `Worker._groq_translate()`
+- 非英文字元用共用 `_looks_english()` 擋：⌘A 建立前擋、⌘S 掃描時略過非英文卡片（手機/Anki 內建新增繞過 ⌘A，故 ⌘S 是最後關卡 → 驗證要兩邊都做、邏輯共用）
+- ⌘A 拼字另用 Groq `_groq_spellcheck()`（回 OK／更正字／NONWORD），斷網退 `_validate_helper.py` 離線拼字
+- `Sentence_CN`（整句中文翻譯）由 **⌘A（即時）、⌘S Complete（日常少量補完，只翻當下缺的幾張 → 不會撞速率）、Batch Operations 面板的「Backfill Sentence Translations」區塊 / `⌘F` / CLI `backfill_sentence_cn.py`（大量、節流）** 填。**CLI `backfill_words.py` 仍刻意不碰**（它是未節流的大量補齊，整句翻譯量大會撞速率上限 → 大量場景一律走 `backfill_sentence_cn.py`）。⌘S 與 backfill_words.py 的差異就在這：GUI ⌘S 補（量小、互動），CLI 大量補齊不補。翻譯：core `llm_translate_sentence` / addon `_groq_translate_sentence` 各寫一份（addon 不能 import core），驗證以「含中文且英文詞 < 3」判定 → 保留嵌入英文詞（concurrency、Microsoft）的合法譯文
 - **卡片模板裡「可點」的元件一律用 `<button>`/`<a>`，不要用 `<div>`** —— AnkiMobile 原生 tap 手勢會略過互動元件；用 `<div>`+JS `stopPropagation` 擋不住原生手勢（點擊會被當成翻牌/評分），且卡片 `<script>` 跑幾張後 AnkiMobile 會停止重跑。見 `templates/back.html` 的 `.trans-box`（翻譯框）
 - 大量翻譯走 pacing（撞 429 就等 `Retry-After` 再續，不猜固定批量）。偵測 429：core `groq_generate_strict` 拋 `RateLimitReached`、addon `_groq_chat_strict` 拋 `_AddonRateLimited`，各帶 `retry_after`
-- 例句與單字翻譯的「語意」由**造句 prompt** 決定，優先序：**Association（提示）→ SWE 領域義 → 常用日常義**；單字翻譯（`_groq_translate` / `llm_translate`）一律「依句中用法」翻、且**禁列近義重複詞**（如「水杯、茶杯」）。造句 prompt 有**兩份且須同步**：addon `_sentence_prompt` 與 core `_sentence_instructions`（addon 不能 import core，改一邊要改另一邊，檔內已標 KEEP-IN-SYNC）。association 已串進 ⌘D / ⌘S / CLI 造句，不要再讓它只餵圖片。
-- **Refill Flagged Cards（⌘G / 選單 Refill Flagged Cards…）= 手機標紅旗 → Mac 清空重補**。手機端**做不到**清/改欄位：AnkiMobile 無外掛、卡片模板 JS 不能寫欄位、連 flag/mark 都不行（Anki 開發者明言）→ 手機只用 **Anki 內建紅旗**標記，清空+重生全在 Mac。`RefillWorker` **繼承 `BackfillWorker` 並複用 `_process_one`**（零重複生成邏輯），但 `run()` 改成**逐張依序**跑讓 Stop 可即時（批次小、不在意吞吐）。重補機制：**先 `mw.col.update_note` 把 6 欄清空、再丟「全空」note dict 給 worker** → `_process_one` 的 `need_*` 全為真而全欄位重生。**先清空是刻意的**（生成失敗也不留舊內容）。掃紅旗卡比照 `BackfillDialog` 用 `_looks_english` 略過非英文/空 Front；保留欄位只有 `Front` + `Association`；只認紅旗 `flag:1`，補完每張 `set_user_flag_for_cards(0, cids)` 清旗。
+- 例句與單字翻譯的「語意」由**造句 prompt** 決定，優先序：**Association（提示）→ SWE 領域義 → 常用日常義**；單字翻譯（`_groq_translate` / `llm_translate`）一律「依句中用法」翻、且**禁列近義重複詞**（如「水杯、茶杯」）。造句 prompt 有**兩份且須同步**：addon `_sentence_prompt` 與 core `_sentence_instructions`（addon 不能 import core，改一邊要改另一邊，檔內已標 KEEP-IN-SYNC）。association 已串進 ⌘A / ⌘S / CLI 造句，不要再讓它只餵圖片。
+- **Batch Operations 面板（⌘F / 選單 Batch Operations…）= 統一批量面板**，兩個堆疊式 section：上 `TranslateSection`（批次補整句翻譯，沿用 `SentenceCNWorker`）、下 `ClearFlaggedSection`（清空紅旗卡）。`BatchOperationsDialog` 用 `QFrame` 分隔線（`_hline()`）組裝，section 各自 `QWidget` 自帶 scan/state，未來加新批量功能就再加一個 section widget。section 要關面板就呼叫傳入的 `panel.accept()`。
+- **ClearFlaggedSection = 手機標紅旗 → Mac 清空+拔旗（刻意不生成）**。手機端**做不到**清/改欄位（AnkiMobile 無外掛、卡片模板 JS 不能寫欄位、連 flag/mark 都不行，Anki 開發者明言）→ 手機只用 **Anki 內建紅旗**標記。清空：對每張 `update_note` 清 6 欄（`REFILL_CLEAR_FIELDS`，保留 `Front`+`Association`）+ `set_user_flag_for_cards(0, cids)` 拔旗 → `save`+`reset`。**同步、瞬間、無 worker/進度條/Stop**。重生交給 ⌘S（清完顯示「Open Complete Missing Cards」一鍵跳 ⌘S，或 Done）。掃卡比照 `BackfillDialog` 用 `_looks_english` 略過非英文/空 Front；只認 `flag:1`；**列出清單 + 按 Clear 就是閘門，不做二次確認 dialog**。
+- **為何 ClearFlaggedSection 不再「清空後重新生成」（舊 Refill 的坑，已廢）**：舊設計把「重置」和「重生成」綁成一個動作，清旗綁在 `card_done`（語意是「處理完」非「填好」），而各 generation helper 失敗都**靜默回 `""` 不 raise** → 部分成功的卡照樣 emit `card_done` 被清旗 → 半成品/空卡被當完成、Refill 下次掃不到。拆開後：清空只清空（不會失敗），生成一律走 ⌘S（掃欄位內容、不靠旗子，會自動認出被清空的卡）。`RefillWorker`／`RefillFlaggedDialog` 已刪除。
 - **對話框 UI 文字一律英文**（最後訂版語言規則，求一致）；但**程式註解 / docstring / LLM prompt 範例 / 中文偵測 regex 保持中文**。改 addon 對話框新增字串用英文。
 
 ## Git 規則

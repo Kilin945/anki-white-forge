@@ -1,6 +1,6 @@
 """
 My Word Adder — add English words to My_Daily_English with auto-fill.
-Tools > Add English Word… (⌘D / Ctrl+D)  ·  Complete Missing Cards (⌘S / Ctrl+S)
+Tools > Add English Word… (⌘A / Ctrl+A)  ·  Complete Missing Cards (⌘S / Ctrl+S)
 """
 
 import os
@@ -15,7 +15,7 @@ from aqt import mw
 from aqt.qt import (
     QAction, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QPushButton, QProgressBar, QScrollArea,
-    QTreeWidget, QTreeWidgetItem, QWidget,
+    QTreeWidget, QTreeWidgetItem, QWidget, QFrame,
     QKeySequenceEdit, QKeySequence,
     QMessageBox,
     Qt, QThread, pyqtSignal,
@@ -26,7 +26,7 @@ DECK_NAME    = "My_Daily_English"
 MODEL_NAME   = "English_White_Method"
 ANKI_URL     = "http://127.0.0.1:8765"
 OLLAMA_URL   = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "gemma4:26b"
+OLLAMA_MODEL = "qwen2.5-coder:7b"
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL   = "llama-3.3-70b-versatile"
 GROQ_KEY_PATH = os.path.expanduser("~/Workspace/anki/.groq_key")
@@ -373,9 +373,12 @@ class Worker(QThread):
         if sentence:
             cmd.extend(["--sentence", sentence])
         cmd.extend(["--", word, filepath])
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=60,
-        )
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=60,
+            )
+        except Exception:               # timeout / spawn failure → no image; leave blank for ⌘S to retry
+            return ""                   # runs in do_image thread; must not raise or it crashes the thread
         if result.returncode == 0:
             html = f'<img src="{filename}">'
             for line in result.stdout.splitlines():
@@ -805,36 +808,6 @@ REFILL_CLEAR_FIELDS = ["Sentence", "Sentence_CN", "Image_Prompt",
                        "Audio", "Front_Audio", "Translation"]
 
 
-class RefillWorker(BackfillWorker):
-    """Reset-and-refill flagged cards. Reuses BackfillWorker._process_one (full
-    regeneration of every blank field) but processes one card at a time so the
-    Stop button is responsive. Notes are passed in already blanked, so every
-    field regenerates."""
-
-    progress = pyqtSignal(str, int, int)   # word, current_index (1-based), total
-
-    def __init__(self, notes, media_dir):
-        super().__init__(notes, media_dir)
-        self._stop = False
-
-    def stop(self):
-        self._stop = True
-
-    def run(self):
-        results = []
-        total = len(self.notes)
-        for i, note in enumerate(self.notes, 1):
-            if self._stop:
-                break
-            word = _clean_text(note["fields"]["Front"]["value"], lower=True)
-            self.progress.emit(word, i, total)
-            try:
-                results.append(self._process_one(note))
-            except Exception as e:
-                results.append(f"✗ {word}: {e}")
-        self.finished.emit(results)
-
-
 # ── backfill dialog ───────────────────────────────────────────────────────────
 
 class BackfillDialog(QDialog):
@@ -964,152 +937,6 @@ class BackfillDialog(QDialog):
         ok = sum(1 for r in results if r.startswith("✓"))
         self.status.setText(f"Done — {ok} card(s) updated. Remember to sync Anki!")
         self.run_btn.setEnabled(False)
-
-
-# ── refill flagged dialog ──────────────────────────────────────────────────────
-
-class RefillFlaggedDialog(QDialog):
-    """Reset every red-flagged card (keep Word + Association, clear & regenerate the
-    rest) and clear the flag as each finishes. Flagging is done on the phone with
-    Anki's built-in red flag; this is the Mac-side processor."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Refill Flagged Cards")
-        self.setMinimumWidth(600)
-        self._worker = None
-        self._flagged = []      # [{"nid", "cids", "word"}]
-        self._card_ids = {}     # note_id -> [card_id, ...] for unflagging
-        self._setup_ui()
-        self._scan()
-
-    def _setup_ui(self):
-        root = QVBoxLayout(self)
-        desc = QLabel("Word and Association are kept. All other fields (sentence, "
-                      "both translations, image, word audio, sentence audio) are "
-                      "cleared and regenerated.")
-        desc.setWordWrap(True)
-        root.addWidget(desc)
-
-        self.word_list = QLabel("")
-        self.word_list.setWordWrap(True)
-        self.word_list.setStyleSheet("color:#475569; padding:4px;")
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(self.word_list)
-        scroll.setMinimumHeight(80)
-        root.addWidget(scroll)
-
-        self.status = QLabel("")
-        self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        root.addWidget(self.status)
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        root.addWidget(self.progress_bar)
-
-        btns = QHBoxLayout()
-        self.stop_btn = QPushButton("Stop")
-        self.stop_btn.setEnabled(False)
-        self.stop_btn.clicked.connect(self._on_stop)
-        self.start_btn = QPushButton("Start")
-        self.start_btn.setEnabled(False)
-        self.start_btn.clicked.connect(self._on_start)
-        btns.addWidget(self.stop_btn)
-        btns.addWidget(self.start_btn)
-        root.addLayout(btns)
-
-    def _scan(self):
-        self._flagged = []
-        cids = mw.col.find_cards(f'deck:"{DECK_NAME}" note:"{MODEL_NAME}" flag:1')
-        by_note = {}
-        for cid in cids:
-            nid = mw.col.get_card(cid).nid
-            by_note.setdefault(nid, []).append(cid)
-        words = []
-        skipped = 0
-        for nid, cardids in by_note.items():
-            note = mw.col.get_note(nid)
-            word = _clean_text(note["Front"])
-            if not _looks_english(word):
-                skipped += 1
-                continue
-            self._flagged.append({"nid": nid, "cids": cardids, "word": word})
-            words.append(word)
-        if self._flagged:
-            word_text = " · ".join(words)
-            if skipped > 0:
-                word_text += f"  ({skipped} non-English card(s) skipped)"
-            self.word_list.setText(word_text)
-            self.start_btn.setEnabled(True)
-        elif skipped > 0:
-            self.word_list.setText(f"No English flagged cards ({skipped} skipped — not English).")
-            self.start_btn.setEnabled(False)
-        else:
-            self.word_list.setText("No flagged cards.")
-            self.start_btn.setEnabled(False)
-
-    def _on_start(self):
-        if not self._flagged:
-            return
-        notes = []
-        self._card_ids = {}
-        for item in self._flagged:
-            nid = item["nid"]
-            self._card_ids[nid] = item["cids"]
-            note = mw.col.get_note(nid)
-            for f in REFILL_CLEAR_FIELDS:
-                if f in note:
-                    note[f] = ""
-            mw.col.update_note(note)
-            notes.append({
-                "noteId": nid,
-                "fields": {
-                    "Front":        {"value": note["Front"]},
-                    "Association":  {"value": note["Association"]},
-                    "Sentence":     {"value": ""},
-                    "Image_Prompt": {"value": ""},
-                    "Audio":        {"value": ""},
-                    "Front_Audio":  {"value": ""},
-                    "Translation":  {"value": ""},
-                    "Sentence_CN":  {"value": ""},
-                },
-            })
-        self.start_btn.setEnabled(False)
-        self.stop_btn.setEnabled(True)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, len(notes))
-        self.progress_bar.setValue(0)
-        self._worker = RefillWorker(notes, mw.col.media.dir())
-        self._worker.progress.connect(self._on_progress)
-        self._worker.card_done.connect(self._on_card_done)
-        self._worker.finished.connect(self._on_finished)
-        self._worker.error.connect(lambda e: self.status.setText(f"Error: {e}"))
-        self._worker.start()
-
-    def _on_progress(self, word, i, total):
-        self.progress_bar.setValue(i)
-        self.status.setText(f"Refilling: {word} ({i}/{total})")
-
-    def _on_card_done(self, note_id):
-        cids = self._card_ids.get(note_id)
-        if cids:
-            mw.col.set_user_flag_for_cards(0, cids)
-
-    def _on_stop(self):
-        if self._worker:
-            self._worker.stop()
-        self.stop_btn.setEnabled(False)
-        self.status.setText("Stopping…")
-
-    def _on_finished(self, results):
-        mw.col.save()
-        mw.reset()
-        self.progress_bar.setVisible(False)
-        self.stop_btn.setEnabled(False)
-        ok = sum(1 for r in results if r.startswith("✓"))
-        self.status.setText(f"Refilled {ok} card(s). Remember to sync Anki!")
-        self._scan()   # refilled cards are unflagged now → list shrinks / empties
 
 
 # ── find duplicates dialog ─────────────────────────────────────────────────────
@@ -1300,14 +1127,27 @@ class SentenceCNWorker(QThread):
             raise RuntimeError(f"AnkiConnect: {err}")
 
 
-class SentenceCNDialog(QDialog):
-    """Bulk-fill Sentence_CN with up-front time estimate and a time-box menu.
-    Paced by SentenceCNWorker; resume is automatic (each open re-scans what's missing)."""
+def _hline():
+    """Horizontal separator line between panel sections."""
+    line = QFrame()
+    line.setFrameShape(QFrame.Shape.HLine)
+    line.setFrameShadow(QFrame.Shadow.Sunken)
+    return line
+
+
+def _section_title(text):
+    lbl = QLabel(f"▸ {text}")
+    lbl.setStyleSheet("font-weight:700; font-size:14px; color:#1E293B; padding-top:4px;")
+    return lbl
+
+
+class TranslateSection(QWidget):
+    """Top section of Batch Operations: bulk-fill Sentence_CN with an up-front time
+    estimate and a time-box menu. Paced by SentenceCNWorker; resume is automatic
+    (each scan re-checks what's missing)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Backfill Sentence Translations")
-        self.setMinimumWidth(600)
         self._worker = None
         self._notes = []
         self._setup_ui()
@@ -1315,6 +1155,9 @@ class SentenceCNDialog(QDialog):
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(_section_title("Backfill Sentence Translations"))
+
         self.info = QLabel()
         self.info.setWordWrap(True)
         root.addWidget(self.info)
@@ -1343,15 +1186,13 @@ class SentenceCNDialog(QDialog):
         self.progress_bar.setVisible(False)
         root.addWidget(self.progress_bar)
 
-        btns = QHBoxLayout()
+        stop_row = QHBoxLayout()
+        stop_row.addStretch()
         self.stop_btn = QPushButton("Stop")
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self._on_stop)
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
-        btns.addWidget(self.stop_btn)
-        btns.addWidget(close_btn)
-        root.addLayout(btns)
+        stop_row.addWidget(self.stop_btn)
+        root.addLayout(stop_row)
 
     def _scan(self):
         notes = []
@@ -1421,6 +1262,153 @@ class SentenceCNDialog(QDialog):
         self._scan()       # refresh count + re-enable mode buttons for another round
 
 
+class ClearFlaggedSection(QWidget):
+    """Bottom section of Batch Operations: reset red-flagged cards. Clears every field
+    except Word + Association and removes the flag — NO generation (that is Complete
+    Missing Cards' job; this section offers a one-click jump). Clearing is synchronous
+    and instant, so there is no worker / progress bar / Stop here."""
+
+    def __init__(self, panel, parent=None):
+        super().__init__(parent)
+        self._panel = panel          # the Batch Operations dialog, so buttons can close it
+        self._flagged = []           # [{"nid", "cids", "word"}]
+        self._setup_ui()
+        self._scan()
+
+    def _setup_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(_section_title("Clear Flagged Cards"))
+
+        desc = QLabel("Clears every field except Word + Association and removes the red "
+                      "flag. Regenerate them afterwards with Complete Missing Cards.")
+        desc.setWordWrap(True)
+        root.addWidget(desc)
+
+        self.word_list = QLabel("")
+        self.word_list.setWordWrap(True)
+        self.word_list.setStyleSheet("color:#475569; padding:4px;")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self.word_list)
+        scroll.setMinimumHeight(70)
+        root.addWidget(scroll)
+
+        self.status = QLabel("")
+        self.status.setWordWrap(True)
+        self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status.setStyleSheet("color:#16a34a; font-weight:600;")
+        self.status.setVisible(False)
+        root.addWidget(self.status)
+
+        # before clearing: a single Clear button (right-aligned). The list above + this
+        # press is the only gate — no secondary confirm dialog (matches the old Refill).
+        clear_row = QHBoxLayout()
+        clear_row.addStretch()
+        self.clear_btn = QPushButton("Clear")
+        self.clear_btn.setEnabled(False)
+        self.clear_btn.clicked.connect(self._on_clear)
+        clear_row.addWidget(self.clear_btn)
+        self.clear_row_w = QWidget()
+        self.clear_row_w.setLayout(clear_row)
+        root.addWidget(self.clear_row_w)
+
+        # after clearing: optional jump to Complete Missing Cards (left), or just finish (right)
+        post_row = QHBoxLayout()
+        self.open_complete_btn = QPushButton("Open Complete Missing Cards")
+        self.open_complete_btn.clicked.connect(self._open_complete)
+        post_row.addWidget(self.open_complete_btn)
+        post_row.addStretch()
+        self.done_btn = QPushButton("Done")
+        self.done_btn.clicked.connect(self._done)
+        post_row.addWidget(self.done_btn)
+        self.post_row_w = QWidget()
+        self.post_row_w.setLayout(post_row)
+        self.post_row_w.setVisible(False)
+        root.addWidget(self.post_row_w)
+
+    def _scan(self):
+        self._flagged = []
+        cids = mw.col.find_cards(f'deck:"{DECK_NAME}" note:"{MODEL_NAME}" flag:1')
+        by_note = {}
+        for cid in cids:
+            nid = mw.col.get_card(cid).nid
+            by_note.setdefault(nid, []).append(cid)
+        words = []
+        skipped = 0
+        for nid, cardids in by_note.items():
+            note = mw.col.get_note(nid)
+            word = _clean_text(note["Front"])
+            if not _looks_english(word):       # not English → don't touch, leave it flagged
+                skipped += 1
+                continue
+            self._flagged.append({"nid": nid, "cids": cardids, "word": word})
+            words.append(word)
+        if self._flagged:
+            word_text = " · ".join(words)
+            if skipped > 0:
+                word_text += f"  ({skipped} non-English card(s) skipped)"
+            self.word_list.setText(word_text)
+            self.clear_btn.setText(f"Clear {len(self._flagged)} Cards")
+            self.clear_btn.setEnabled(True)
+        elif skipped > 0:
+            self.word_list.setText(f"No English flagged cards ({skipped} skipped — not English).")
+            self.clear_btn.setEnabled(False)
+        else:
+            self.word_list.setText("No flagged cards.")
+            self.clear_btn.setEnabled(False)
+
+    def _on_clear(self):
+        if not self._flagged:
+            return
+        for item in self._flagged:
+            note = mw.col.get_note(item["nid"])
+            for f in REFILL_CLEAR_FIELDS:        # keep Front + Association, blank the rest
+                if f in note:
+                    note[f] = ""
+            mw.col.update_note(note)
+            mw.col.set_user_flag_for_cards(0, item["cids"])
+        mw.col.save()
+        mw.reset()
+        n = len(self._flagged)
+        self.word_list.setText("")
+        self.clear_row_w.setVisible(False)
+        self.status.setText(f"✓ Cleared {n} card(s) and removed their flags. "
+                            "Word + Association kept. Regenerate them now?")
+        self.status.setVisible(True)
+        self.post_row_w.setVisible(True)
+
+    def _open_complete(self):
+        self._panel.accept()         # close the panel, then jump to Complete Missing Cards
+        open_backfill_dialog()
+
+    def _done(self):
+        self._panel.accept()
+
+
+class BatchOperationsDialog(QDialog):
+    """Unified batch panel: sentence-translation backfill on top, clear-flagged below,
+    separated by a divider. Built from stacked self-contained section widgets so more
+    batch operations can be added later as new blocks."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Batch Operations")
+        self.setMinimumWidth(640)
+        root = QVBoxLayout(self)
+        root.addWidget(TranslateSection(self))
+        root.addWidget(_hline())
+        root.addWidget(ClearFlaggedSection(self, parent=self))
+        root.addWidget(_hline())
+
+        close_row = QHBoxLayout()
+        close_row.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        close_row.addWidget(close_btn)
+        root.addLayout(close_row)
+
+
 # ── menu entries ──────────────────────────────────────────────────────────────
 
 def open_dialog():
@@ -1432,14 +1420,11 @@ def open_backfill_dialog():
 def open_duplicates_dialog():
     FindDuplicatesDialog(mw).exec()
 
-def open_sentence_cn_dialog():
-    SentenceCNDialog(mw).exec()
+def open_batch_operations_dialog():
+    BatchOperationsDialog(mw).exec()
 
-def open_refill_flagged_dialog():
-    RefillFlaggedDialog(mw).exec()
-
-DEFAULT_SHORTCUTS = {"add": "Ctrl+D", "complete": "Ctrl+S", "find_duplicates": "Ctrl+F",
-                     "backfill_cn": "Ctrl+B", "refill_flagged": "Ctrl+G"}
+DEFAULT_SHORTCUTS = {"add": "Ctrl+A", "complete": "Ctrl+S", "find_duplicates": "Ctrl+D",
+                     "backfill_cn": "Ctrl+F"}
 ACTIONS = {}  # key -> QAction, so the settings dialog can re-bind shortcuts live
 
 
@@ -1466,8 +1451,7 @@ class SettingsDialog(QDialog):
         ("add", "Add English Word"),
         ("complete", "Complete Missing Cards"),
         ("find_duplicates", "Find Duplicate Words"),
-        ("backfill_cn", "Backfill Sentence Translations"),
-        ("refill_flagged", "Refill Flagged Cards"),
+        ("backfill_cn", "Batch Operations"),
     ]
 
     def __init__(self, parent=None):
@@ -1532,9 +1516,8 @@ def open_settings_dialog():
 
 _add_menu_action("Add English Word…", "add", open_dialog)
 _add_menu_action("Complete Missing Cards…", "complete", open_backfill_dialog)
-_add_menu_action("Refill Flagged Cards…", "refill_flagged", open_refill_flagged_dialog)
 _add_menu_action("Find Duplicate Words…", "find_duplicates", open_duplicates_dialog)
-_add_menu_action("Backfill Sentence Translations…", "backfill_cn", open_sentence_cn_dialog)
+_add_menu_action("Batch Operations…", "backfill_cn", open_batch_operations_dialog)
 
 _settings_action = QAction("My Word Adder Settings…", mw)
 _settings_action.triggered.connect(open_settings_dialog)

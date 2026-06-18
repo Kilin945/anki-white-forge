@@ -29,7 +29,7 @@
 | `Audio` | 句子語音 (Ava) | 自動（edge-tts） |
 | `Front_Audio` | 單字發音 (Andrew) | 自動（edge-tts） |
 | `Translation` | 單字中文翻譯（背面點擊顯示） | 自動（Groq LLM） |
-| `Sentence_CN` | 整句中文翻譯（背面點擊顯示） | ⌘D 即時 / ⌘S 補齊 / 專用選單批次（Groq LLM） |
+| `Sentence_CN` | 整句中文翻譯（背面點擊顯示） | ⌘A 即時 / ⌘S 補齊 / Batch Operations 面板批次（Groq LLM） |
 
 > 背面的 `Translation`（單字）與 `Sentence_CN`（整句）都是**點一下才顯示**的填空框。
 
@@ -61,30 +61,24 @@ uv sync   # 自動安裝所有依賴
 
 ### 方式一：Anki UI（推薦）
 
-**新增單字**：`⌘D`（Ctrl+D）→ 輸入單字 → Enter
+**新增單字**：`⌘A`（Ctrl+A）→ 輸入單字 → Enter
 - 自動生成例句、圖片、雙語音、單字翻譯、整句翻譯
 - 驗證：非英文字元直接擋；Groq 拼字檢查，疑似拼錯會建議正確字；重複防呆（正規化比對）
 
 **補齊缺失卡片**：`⌘S`（Ctrl+S）
 - 掃描所有缺少欄位的卡片（例句／整句翻譯／圖／音／單字翻譯）
 - 3 張並發處理，左圖右文即時進度顯示
-- 含整句翻譯 `Sentence_CN`（手機／內建新增繞過 ⌘D 的卡片，⌘S 一鍵補完）；大量回填請改走下方專用選單以免撞速率
+- 含整句翻譯 `Sentence_CN`（手機／內建新增繞過 ⌘A 的卡片，⌘S 一鍵補完）；大量回填請改走下方專用選單以免撞速率
 
-**批次回填整句翻譯**：`⌘B`（Ctrl+B）或 **Tools → Backfill Sentence Translations…**
-- 專補 `Sentence_CN`，開啟先顯示「共 N 筆、約 X 分鐘」
-- 選時間盒（1/2/5/10 分鐘）或「直接完成」；以不超過 Groq 速率（約 25/分）的節奏持續翻
-- 隨時可「停止」，下次再開從沒翻的續
+**批量操作（Batch Operations）**：`⌘F`（Ctrl+F）或 **Tools → Batch Operations…** —— 一個面板、上下兩塊，可擴充：
+- **上｜Backfill Sentence Translations（批次補整句翻譯）**：專補 `Sentence_CN`，開啟先顯示「共 N 筆、約 X 分鐘」；選時間盒（1/2/5/10 分鐘）或「直接完成」，以不超過 Groq 速率（約 25/分）的節奏持續翻；隨時可 **Stop**，下次再開從沒翻的續
+- **下｜Clear Flagged Cards（清空紅旗卡）**：手機複習看到不理想的卡（例句不貼切、翻譯有誤…）用 Anki 內建**紅旗**標起來（手機卡片模板無法寫欄位，只能靠旗標）→ 回 Mac 開面板列出紅旗英文卡 → 按 **Clear N Cards**：保留 Word + Association，其餘 6 欄（例句／兩個翻譯／圖／字音／句音）**清空並拔旗**（瞬間完成、**不重新生成**）。清完可按 **Open Complete Missing Cards** 一鍵跳去 ⌘S 重生，或 **Done** 之後再自己補。只認紅旗（flag:1）、非英文卡略過
 
-**找重複單字**：`⌘F`（Ctrl+F）
+**找重複單字**：`⌘D`（Ctrl+D）
 - 正規化後 Front 相同的卡片分組列出（抓得到手機漏進來的 HTML / 大小寫變體）
 - 勾選要刪的（每組至少保留一張）→ 確認刪除
 
-**重做標記的卡（清空後重補）**：`⌘G`（Ctrl+G）或 **Tools → Refill Flagged Cards…**
-- 手機複習時看到內容不理想、想重做的卡（例句不貼切、翻譯有誤…），用 Anki 內建**紅旗**標起來（手機卡片模板無法寫欄位，只能靠內建旗標標記）
-- 回 Mac 按 ⌘G → 列出紅旗卡 → **Start**：保留 Word + Association，其餘欄位（例句／兩個翻譯／圖／字音／句音）清空後用與 ⌘S 相同的引擎重新生成 → 每補完一張自動清掉紅旗
-- 只認紅旗（flag:1）；非英文卡會略過；隨時可 **Stop**（已補的保留、沒補的維持紅旗，下次再開接著做）
-
-> ⌘D / ⌘S / ⌘F / ⌘B / ⌘G 可在 **Tools → My Word Adder Settings…** 直接按組合鍵設定（免改 JSON、即時生效），或清除以關閉。
+> ⌘A / ⌘S / ⌘D / ⌘F 可在 **Tools → My Word Adder Settings…** 直接按組合鍵設定（免改 JSON、即時生效），或清除以關閉。
 >
 > 對話框 UI 文字一律英文（統一語言）。
 
@@ -216,7 +210,7 @@ Anki/
 
 | 檔案 | 說明 |
 |------|------|
-| `addon/__init__.py` | Anki 插件主程式（symlink 到 `~/Library/.../addons21/my_word_adder/`）。`⌘D` 新增單字（含整句翻譯）、`⌘S` 補齊缺失卡片（例句/整句翻譯/圖/音/單字翻譯，少量日常用）、`⌘F` 找重複、`⌘B` / 選單 **Backfill Sentence Translations…**（節流批次回填整句翻譯，大量用）、`⌘G` / 選單 **Refill Flagged Cards…**（重置紅旗卡：保留 Word+Association、其餘清空重生，RefillWorker 複用 BackfillWorker 引擎）。新增防護用正規化比對（HTML/大小寫變體都擋）。對話框 UI 一律英文。LLM 用 urllib 直呼 Groq，TTS/圖片透過 subprocess，BackfillWorker 3 路並發。改完需重啟 Anki |
+| `addon/__init__.py` | Anki 插件主程式（symlink 到 `~/Library/.../addons21/my_word_adder/`）。`⌘A` 新增單字（含整句翻譯）、`⌘S` 補齊缺失卡片（例句/整句翻譯/圖/音/單字翻譯，少量日常用）、`⌘D` 找重複、`⌘F` / 選單 **Batch Operations…**（批量操作面板，堆疊式 section：上 `TranslateSection` 節流批次補整句翻譯、下 `ClearFlaggedSection` 清空紅旗卡內容+拔旗不生成；`BatchOperationsDialog` 組裝）。新增防護用正規化比對（HTML/大小寫變體都擋）。對話框 UI 一律英文。LLM 用 urllib 直呼 Groq，TTS/圖片透過 subprocess，BackfillWorker 3 路並發。改完需重啟 Anki |
 
 ### 設定與測試
 
