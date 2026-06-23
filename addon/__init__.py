@@ -458,8 +458,9 @@ class AddWordDialog(QDialog):
         btns.addWidget(self.add_btn)
         btns.addWidget(close_btn)
         root.addLayout(btns)
-
-        self.word_input.returnPressed.connect(self._on_add)
+        # NOTE: don't also wire word_input.returnPressed → _on_add. add_btn is the
+        # dialog's default button, so Enter already triggers it; connecting returnPressed
+        # as well fires _on_add twice → the spell-check/confirm dialog pops up twice.
 
     def _set_box(self, key, state):
         box = self._boxes.get(key)
