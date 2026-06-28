@@ -7,6 +7,8 @@ import os
 import re
 import json
 import html
+import time
+import threading
 import subprocess
 import urllib.request
 import urllib.error
@@ -136,48 +138,66 @@ def _deck_note_ids():
     return mw.col.find_notes(f'deck:"{DECK_NAME}" note:"{MODEL_NAME}"')
 
 
-def _groq_chat(prompt, *, temperature, max_tokens, timeout):
-    """POST one user prompt to Groq; return the stripped reply, or '' on no key / any failure."""
-    key = _load_groq_key()
-    if not key:
-        return ""
-    payload = json.dumps({
-        "model": GROQ_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }).encode()
+def _parse_int(v):
     try:
-        req = urllib.request.Request(GROQ_API_URL, data=payload,
-                  headers={"Content-Type": "application/json",
-                           "Authorization": f"Bearer {key}",
-                           "User-Agent": "AnkiWordAdder/1.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode())["choices"][0]["message"]["content"].strip()
-    except Exception:
-        return ""
-
-
-class _AddonRateLimited(Exception):
-    """Raised by _groq_chat_strict on HTTP 429 — used to end a burst in 批次回填.
-    retry_after = seconds to wait before retrying (from Retry-After header, else 60)."""
-    def __init__(self, retry_after=60):
-        super().__init__("rate limited")
-        self.retry_after = retry_after
-
-
-def _parse_retry_after(headers, default=60):
-    """Seconds to wait from a 429 Retry-After header; default if missing/invalid."""
-    raw = headers.get("Retry-After") if headers else None
-    try:
-        secs = int(float(raw))
-        return secs if secs > 0 else default
+        return int(v)
     except (TypeError, ValueError):
-        return default
+        return None
 
 
-def _groq_chat_strict(prompt, *, temperature, max_tokens, timeout):
-    """Like _groq_chat but raises _AddonRateLimited on HTTP 429 — for the burst engine."""
+def _parse_reset_secs(s):
+    """Groq reset header → seconds. Handles '1m26.4s' / '185ms' / '2.5s' / '1h2m'."""
+    if not s:
+        return 0.0
+    return sum(float(num) * {"ms": 0.001, "s": 1, "m": 60, "h": 3600}[unit]
+               for num, unit in re.findall(r"([\d.]+)(ms|s|m|h)", s))
+
+
+class _GroqLimiter:
+    """Adaptive rate-limit guard. Every Groq response carries the live limit + remaining
+    quota (x-ratelimit-* headers); we read them and, when the per-minute token budget runs
+    low, briefly wait for the bucket to refill — so bursts (⌘S) stay under the limit instead
+    of crashing into 429. Self-tuning: if Groq changes the limit (or we switch providers),
+    the headers reflect it, no hard-coded number. Thread-safe (⌘S calls Groq concurrently)."""
+
+    _TOKEN_FLOOR = 1500      # keep this many tokens in reserve before the next call
+    _MAX_WAIT    = 65        # never block longer than this (a stale value can't hang us)
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._remaining_tokens = None
+        self._reset_at = 0.0
+
+    def before(self):
+        """Pause briefly if we're near the token limit, so the next call won't 429."""
+        with self._lock:
+            if self._remaining_tokens is None or self._remaining_tokens >= self._TOKEN_FLOOR:
+                return
+            wait = self._reset_at - time.monotonic()
+        if 0 < wait <= self._MAX_WAIT:
+            time.sleep(wait + 0.1)
+        with self._lock:
+            self._remaining_tokens = None        # assume refilled; the next response re-syncs
+
+    def update(self, headers):
+        """Record live remaining tokens + reset time from a response's headers."""
+        if not headers:
+            return
+        rt = _parse_int(headers.get("x-ratelimit-remaining-tokens"))
+        if rt is None:
+            return
+        with self._lock:
+            self._remaining_tokens = rt
+            self._reset_at = time.monotonic() + _parse_reset_secs(headers.get("x-ratelimit-reset-tokens"))
+
+
+_groq_limiter = _GroqLimiter()
+
+
+def _groq_chat(prompt, *, temperature, max_tokens, timeout, strict=False):
+    """POST one user prompt to Groq; return the stripped reply, or '' on no key / any
+    failure. strict=True re-raises HTTP 429 as _AddonRateLimited (so the burst engine can
+    pace/stop) instead of swallowing it as ''."""
     key = _load_groq_key()
     if not key:
         return ""
@@ -192,14 +212,34 @@ def _groq_chat_strict(prompt, *, temperature, max_tokens, timeout):
                        "Authorization": f"Bearer {key}",
                        "User-Agent": "AnkiWordAdder/1.0"})
     try:
+        _groq_limiter.before()
         with urllib.request.urlopen(req, timeout=timeout) as r:
+            _groq_limiter.update(r.headers)
             return json.loads(r.read().decode())["choices"][0]["message"]["content"].strip()
     except urllib.error.HTTPError as e:
-        if e.code == 429:
+        if strict and e.code == 429:
             raise _AddonRateLimited(_parse_retry_after(e.headers))
         return ""
     except Exception:
         return ""
+
+
+class _AddonRateLimited(Exception):
+    """Raised by _groq_chat(strict=True) on HTTP 429 — used to end a burst in 批次回填.
+    retry_after = seconds to wait before retrying (from Retry-After header, else 60)."""
+    def __init__(self, retry_after=60):
+        super().__init__("rate limited")
+        self.retry_after = retry_after
+
+
+def _parse_retry_after(headers, default=60):
+    """Seconds to wait from a 429 Retry-After header; default if missing/invalid."""
+    raw = headers.get("Retry-After") if headers else None
+    try:
+        secs = int(float(raw))
+        return secs if secs > 0 else default
+    except (TypeError, ValueError):
+        return default
 
 
 def _groq_spellcheck(word):
@@ -334,8 +374,8 @@ class Worker(QThread):
                   'Spring, React, Hazelcast) in English inside the translation; do not '
                   'translate such names literally. Output only the translation. No explanation, '
                   f'no quotes.\n\nSentence: "{sentence}"')
-        chat = _groq_chat_strict if strict else _groq_chat
-        reply = chat(prompt, temperature=0.3, max_tokens=200, timeout=15).strip().strip('"').strip()
+        reply = _groq_chat(prompt, temperature=0.3, max_tokens=200, timeout=15,
+                           strict=strict).strip().strip('"').strip()
         if not re.search(r"[一-鿿]", reply):              # no Chinese → fail
             return ""
         if len(re.findall(r"[A-Za-z]{2,}", reply)) >= 3:  # 3+ English words = preamble; keep a single embedded term
