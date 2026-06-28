@@ -74,111 +74,78 @@ class TestParsers:
         assert addon._parse_int("nope") is None
 
 
-# ── pacing logic ─────────────────────────────────────────────────────────────
-class TestPacing:
-    def test_no_wait_before_any_response(self):
-        lim = Limiter()
-        with patch.object(addon.time, "sleep") as sleep:
-            lim.before()
-            sleep.assert_not_called()        # quota unknown → never block
+# ── wall detection (no waiting — caller stops immediately when near the limit) ──
+class TestWallDetection:
+    def test_clear_before_any_response(self):
+        assert Limiter().wall_secs() == 0.0          # quota unknown → clear to call
 
-    def test_no_wait_when_plenty(self):
+    def test_clear_when_plenty(self):
         lim = Limiter()
         lim.update(_headers(11963))
-        with patch.object(addon.time, "sleep") as sleep:
-            lim.before()
-            sleep.assert_not_called()        # remaining >= floor → go straight through
+        assert lim.wall_secs() == 0.0                 # remaining >= floor → clear
 
-    def test_waits_when_low(self):
+    def test_wall_when_low(self):
         lim = Limiter()
         with patch.object(addon.time, "monotonic", return_value=1000.0):
-            lim.update(_headers(500, reset="30s"))   # below floor, reset 30s away
-            with patch.object(addon.time, "sleep") as sleep:
-                lim.before()
-                sleep.assert_called_once()
-                assert sleep.call_args[0][0] == pytest.approx(30.1, abs=0.2)
+            lim.update(_headers(500, reset="30s"))    # below floor → wall, 30s away
+            assert lim.wall_secs() == pytest.approx(30.0, abs=0.2)
 
-    def test_skips_overlong_wait(self):
+    def test_clear_once_reset_window_passed(self):
         lim = Limiter()
-        with patch.object(addon.time, "monotonic", return_value=1000.0):
-            lim.update(_headers(500, reset="200s"))   # > _MAX_WAIT(65) → don't block forever
-            with patch.object(addon.time, "sleep") as sleep:
-                lim.before()
-                sleep.assert_not_called()
-
-    def test_clears_remaining_after_waiting(self):
-        lim = Limiter()
-        with patch.object(addon.time, "monotonic", return_value=1000.0):
+        clock = {"t": 1000.0}
+        with patch.object(addon.time, "monotonic", side_effect=lambda: clock["t"]):
             lim.update(_headers(500, reset="10s"))
-            with patch.object(addon.time, "sleep"):
-                lim.before()
-        with patch.object(addon.time, "sleep") as sleep:   # post-wait: assume refilled
-            lim.before()
-            sleep.assert_not_called()
+            clock["t"] = 1030.0                       # reset window already elapsed
+            assert lim.wall_secs() == 0.0
+
+    def test_never_sleeps(self):
+        lim = Limiter()
+        with patch.object(addon.time, "monotonic", return_value=1000.0), \
+             patch.object(addon.time, "sleep") as sleep:
+            lim.update(_headers(10, reset="50s"))
+            lim.wall_secs()
+            sleep.assert_not_called()                 # 限速器絕不自己等
 
 
 # ── concurrency stress ─────────────────────────────────────────────────────────
 class TestConcurrencyStress:
     def test_no_crash_or_deadlock_under_load(self):
-        """64 執行緒 × 200 次同時 update()/before()（模擬 ⌘S 並發猛打）→ 不崩、不死鎖。"""
+        """64 執行緒 × 500 次同時 update()/wall_secs()（模擬 ⌘S 並發猛打）→ 不崩、不死鎖。"""
         lim = Limiter()
         errors = []
 
         def worker(wid):
             try:
-                for j in range(200):
+                for j in range(500):
                     lim.update(_headers((wid * 37 + j * 11) % 13000, reset="20ms"))
-                    lim.before()
+                    lim.wall_secs()
             except Exception as e:        # noqa: BLE001 — 任何例外都算測試失敗
                 errors.append(e)
 
-        with patch.object(addon.time, "sleep"):   # 不真的睡，純壓邏輯/鎖
-            threads = [threading.Thread(target=worker, args=(i,)) for i in range(64)]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join(timeout=15)
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(64)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=15)
 
         assert not errors, f"執行緒丟出例外:{errors[:3]}"
         assert all(not t.is_alive() for t in threads), "有執行緒卡住（疑似死鎖）"
 
-    def test_burst_stays_under_budget(self):
-        """模擬一分鐘 12000 token 預算、並發補卡。限速器應讓總用量不超過預算（不撞 429）。"""
-        budget = 12000
-        per_call = 600
-        state = {"used": 0, "over": 0}        # over = 模擬撞 429 的次數
-        glock = threading.Lock()
+    def test_stops_before_429(self):
+        """一分鐘 12000 token 預算、每次 600。限速器應在『真的超量(429)』前就讓呼叫端停下。"""
+        budget, per_call = 12000, 600
+        used = {"v": 0, "over": 0, "stopped": False}
         lim = Limiter()
+        with patch.object(addon.time, "monotonic", return_value=1000.0):
+            for _ in range(40):                  # 40×600=24000 遠超預算 → 一定得中途停
+                if lim.wall_secs() > 0:          # 接近上限 → 立刻停,不再打
+                    used["stopped"] = True
+                    break
+                used["v"] += per_call
+                remaining = budget - used["v"]
+                if remaining < 0:
+                    used["over"] += 1            # 真的超量(撞 429)
+                lim.update(_headers(max(remaining, 0), reset="40s"))
 
-        # 假時鐘:睡覺 = 視窗重置、預算回滿
-        clock = {"t": 1000.0}
-
-        def fake_sleep(secs):
-            with glock:
-                state["used"] = 0             # 視窗重置
-            clock["t"] += secs
-
-        def fake_monotonic():
-            return clock["t"]
-
-        def worker():
-            for _ in range(20):
-                lim.before()
-                with glock:
-                    state["used"] += per_call
-                    remaining = budget - state["used"]
-                    if remaining < 0:
-                        state["over"] += 1    # 沒擋住 → 撞牆
-                        remaining = 0
-                lim.update(_headers(remaining, reset="40s"))
-
-        with patch.object(addon.time, "sleep", side_effect=fake_sleep), \
-             patch.object(addon.time, "monotonic", side_effect=fake_monotonic):
-            threads = [threading.Thread(target=worker) for _ in range(8)]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join(timeout=15)
-
-        # 8×20=160 次呼叫、每次 600 token，遠超 12000 → 沒限速器一定爆；有限速器應該 0 次撞牆
-        assert state["over"] == 0, f"撞牆 {state['over']} 次，限速器沒擋住"
+        assert used["stopped"], "限速器沒讓它停下"
+        assert used["over"] == 0, f"超量 {used['over']} 次 — 應該在撞牆前一步就停"
