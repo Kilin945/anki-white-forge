@@ -1,12 +1,9 @@
 import os
 import re
-import requests
 from groq import Groq, RateLimitError
 
 from core.rate_limiter import RateLimitReached
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "gemma4:26b"
 GROQ_KEY_PATH = os.path.expanduser("~/Workspace/anki/.groq_key")
 GROQ_MODEL = "llama-3.3-70b-versatile"
 
@@ -73,22 +70,8 @@ def _retry_after_from(exc, default=60):
         return default
 
 
-def ollama_generate(prompt):
-    try:
-        r = requests.post(OLLAMA_URL, json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False}, timeout=60)
-        return r.json().get("response", "").strip()
-    except requests.ConnectionError:
-        return ""
-    except Exception as e:
-        print(f"  [ollama error] {e}")
-        return ""
-
-
 def llm(prompt):
-    result = groq_generate(prompt)
-    if result:
-        return result
-    return ollama_generate(prompt)
+    return groq_generate(prompt)        # Groq only（已移除地端 ollama fallback：太吃記憶體）
 
 
 def _sentence_instructions(word, association=""):

@@ -19,7 +19,7 @@ def main():
     args = parser.parse_args()
 
     query = llm_image_query(args.word, args.definition, args.sentence)
-    engine = "Groq" if _groq_client else "Ollama"
+    engine = "Groq" if _groq_client else "none"
     print(f"QUERY: {query} [{engine}]", file=sys.stderr)
 
     api_key = _load_pexels_key()

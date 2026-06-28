@@ -8,7 +8,7 @@ import threading
 from spellchecker import SpellChecker
 
 from core.anki import anki, DECK_NAME, MODEL_NAME
-from core.llm import llm_sentence, llm_image_query, llm_translate, llm_translate_sentence, _groq_client, GROQ_MODEL, OLLAMA_MODEL
+from core.llm import llm_sentence, llm_image_query, llm_translate, llm_translate_sentence, _groq_client, GROQ_MODEL
 from core.tts import make_audio, VOICE_WORD, VOICE_SENTENCE
 from core.image import fetch_image
 
@@ -98,7 +98,7 @@ def main():
             if not confirm("  Continue?"):
                 association = input("  Corrected association: ").strip() or association
 
-    engine = f"Groq ({GROQ_MODEL})" if _groq_client else f"Ollama ({OLLAMA_MODEL})"
+    engine = f"Groq ({GROQ_MODEL})" if _groq_client else "no LLM (set .groq_key)"
     print(f"\n  LLM: {engine}")
     if not confirm("  Proceed?"):
         sys.exit(0)

@@ -8,7 +8,7 @@
 
 | 組件 | 技術 | 用途 |
 |------|------|------|
-| LLM | **Groq API**（Ollama fallback） | 生成例句 + 圖片搜尋關鍵字 |
+| LLM | **Groq API** | 生成例句 + 圖片搜尋關鍵字 |
 | TTS | **edge-tts** | 正面 Andrew 男聲唸單字、背面 Ava 女聲唸句子 |
 | 圖片 | **Pexels API**（DuckDuckGo fallback） | 下載單字插圖 |
 | Anki | AnkiConnect addon | 程式與 Anki 溝通 |
@@ -136,7 +136,7 @@ Anki/
 ├── core/                    # 共用模組
 │   ├── anki.py              # AnkiConnect API
 │   ├── image.py             # Pexels + DuckDuckGo 圖片
-│   ├── llm.py               # Groq + Ollama LLM
+│   ├── llm.py               # Groq LLM
 │   ├── rate_limiter.py      # 通用 429 偵測 / 批次節流
 │   ├── text.py              # strip_html, normalize, is_placeholder
 │   └── tts.py               # edge-tts (Andrew + Ava)
@@ -172,7 +172,7 @@ Anki/
 
 | 檔案 | 說明 |
 |------|------|
-| `core/llm.py` | LLM 統一入口。Groq API 優先，Ollama fallback。句子生成、圖片查詢、合併呼叫都在這裡 |
+| `core/llm.py` | LLM 統一入口。Groq API（無地端 fallback）。句子生成、圖片查詢、合併呼叫都在這裡 |
 | `core/tts.py` | TTS 語音生成。edge-tts wrapper，定義 Andrew（正面）和 Ava（背面）語音 |
 | `core/image.py` | 圖片搜尋下載。Pexels API 優先，DuckDuckGo fallback |
 | `core/text.py` | 文字處理。strip_html、normalize、is_placeholder、has_image |
@@ -239,7 +239,7 @@ A：在 Anki 瀏覽器刪除 `Image_Prompt` 欄位內容，再跑 `Ctrl+Shift+C`
 A：跑 `uv run python regen_audio.py` 重新生成所有音檔
 
 **Q：Complete Missing Cards 跑太慢？**
-A：確認 Groq 有在用（進度顯示 `Groq`），如果顯示 `Ollama` 代表 Groq 失敗了，檢查 `.groq_key`
+A：確認 Groq 有在用（進度顯示 `Groq`）；造句失敗時不再退地端，會留 placeholder 等下次補，檢查 `.groq_key` 與網路
 
 **Q：同步時出現衝突對話框？**
 A：選「上傳到 AnkiWeb」— 電腦端是最新的

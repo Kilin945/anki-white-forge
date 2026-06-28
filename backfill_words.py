@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from core.anki import anki, DECK_NAME
 from core.text import strip_html, is_placeholder, has_image
-from core.llm import llm_sentence_and_query, llm_translate, _groq_client, GROQ_MODEL, OLLAMA_MODEL
+from core.llm import llm_sentence_and_query, llm_translate, _groq_client, GROQ_MODEL
 from core.tts import make_audio, VOICE_WORD, VOICE_SENTENCE
 from core.image import fetch_image
 
@@ -138,7 +138,7 @@ def main():
 
     pending = [n for n in notes if not note_complete(n)]
     print(f"Found {len(notes)} total, {len(pending)} need backfill.\n")
-    engine = f"Groq ({GROQ_MODEL})" if _groq_client else f"Ollama ({OLLAMA_MODEL})"
+    engine = f"Groq ({GROQ_MODEL})" if _groq_client else "no LLM (set .groq_key)"
     print(f"LLM: {engine} | TTS: edge-tts ({VOICE_WORD}, {VOICE_SENTENCE})\n")
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:

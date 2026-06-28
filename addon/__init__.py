@@ -25,8 +25,6 @@ from aqt.utils import showWarning, tooltip
 DECK_NAME    = "My_Daily_English"
 MODEL_NAME   = "English_White_Method"
 ANKI_URL     = "http://127.0.0.1:8765"
-OLLAMA_URL   = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "qwen2.5-coder:7b"
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL   = "llama-3.3-70b-versatile"
 GROQ_KEY_PATH = os.path.expanduser("~/Workspace/anki/.groq_key")
@@ -307,31 +305,11 @@ class Worker(QThread):
     def _groq_sentence(self, word, association=""):
         return _groq_chat(_sentence_prompt(word, association), temperature=0.7, max_tokens=200, timeout=15)
 
-    def _ollama_sentence(self, word, association=""):
-        payload = json.dumps({
-            "model": OLLAMA_MODEL,
-            "prompt": _sentence_prompt(word, association),
-            "stream": False,
-        }).encode()
-        try:
-            req = urllib.request.Request(OLLAMA_URL, data=payload,
-                              headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=60) as r:
-                result = json.loads(r.read().decode()).get("response", "").strip()
-                return result if len(result) > 10 else ""
-        except urllib.error.URLError:
-            return ""
-        except Exception:
-            return ""
-
     def _llm_sentence(self, word, association=""):
         result = self._groq_sentence(word, association)
         if result and len(result) > 10:
             return result, "Groq"
-        result = self._ollama_sentence(word, association)
-        if result and len(result) > 10:
-            return result, "Ollama"
-        return "", "failed"
+        return "", "failed"        # Groq 失敗就回空 → 上層退 placeholder，等下次補（不再走地端）
 
     def _groq_translate(self, word, sentence):
         """Traditional Chinese meaning of word AS USED IN the sentence ('' on failure).

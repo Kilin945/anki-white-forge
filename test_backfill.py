@@ -97,26 +97,15 @@ class TestLlmSentenceAndQuery:
         assert not query.startswith('"')
 
 
-class TestLlmFallback:
-    @patch.object(llm_mod, 'ollama_generate')
+class TestLlm:
     @patch.object(llm_mod, 'groq_generate')
-    def test_groq_primary(self, mock_groq, mock_ollama):
+    def test_groq_result(self, mock_groq):
         mock_groq.return_value = "groq result"
         assert llm_mod.llm("test") == "groq result"
-        mock_ollama.assert_not_called()
 
-    @patch.object(llm_mod, 'ollama_generate')
     @patch.object(llm_mod, 'groq_generate')
-    def test_ollama_fallback(self, mock_groq, mock_ollama):
-        mock_groq.return_value = ""
-        mock_ollama.return_value = "ollama result"
-        assert llm_mod.llm("test") == "ollama result"
-
-    @patch.object(llm_mod, 'ollama_generate')
-    @patch.object(llm_mod, 'groq_generate')
-    def test_both_fail(self, mock_groq, mock_ollama):
-        mock_groq.return_value = ""
-        mock_ollama.return_value = ""
+    def test_groq_empty_no_fallback(self, mock_groq):
+        mock_groq.return_value = ""          # 地端 ollama fallback 已移除 → Groq 回空就回空
         assert llm_mod.llm("test") == ""
 
 
