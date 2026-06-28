@@ -838,6 +838,20 @@ REFILL_CLEAR_FIELDS = ["Sentence", "Sentence_CN", "Image_Prompt",
                        "Audio", "Front_Audio", "Translation"]
 
 
+def _note_incomplete(note):
+    """True if the note is still missing ANY auto-filled field (Sentence / Audio /
+    Image / Meaning / Translation). Single source of 'is this card done' — used both by
+    the scan and the post-run count, so a card still missing only the translation
+    correctly counts as not done (not 'done because we wrote something')."""
+    bad_sentence = any(p in note["Sentence"] for p in PLACEHOLDERS)
+    front_audio = note["Front_Audio"] if "Front_Audio" in note else ""
+    translation = note["Translation"] if "Translation" in note else ""
+    sentence_cn = note["Sentence_CN"] if "Sentence_CN" in note else ""
+    return (not note["Sentence"] or bad_sentence or not note["Audio"]
+            or "<img" not in note["Image_Prompt"] or not front_audio
+            or not translation or not sentence_cn)
+
+
 # ── backfill dialog ───────────────────────────────────────────────────────────
 
 class BackfillDialog(QDialog):
@@ -897,10 +911,7 @@ class BackfillDialog(QDialog):
             sentence_cn = note["Sentence_CN"] if "Sentence_CN" in note else ""
             has_img = "<img" in note["Image_Prompt"]
             audio_ok = bool(note["Audio"]) and bool(front_audio)
-            incomplete = (not note["Sentence"] or bad_sentence or not note["Audio"]
-                          or not has_img or not front_audio or not translation
-                          or not sentence_cn)
-            if not incomplete:
+            if not _note_incomplete(note):
                 continue
 
             word = _clean_text(note["Front"])
@@ -985,14 +996,18 @@ class BackfillDialog(QDialog):
         self.progress_bar.setVisible(False)
         mw.col.save()
         mw.reset()
-        ok = sum(1 for r in results if r.startswith("✓"))
+        total = len(self._worker.notes)
+        left = sum(1 for n in self._worker.notes if _note_incomplete(mw.col.get_note(n["noteId"])))
+        done = total - left
         if getattr(self._worker, "_hit_limit", False):
-            left = len(self._worker.notes) - ok
             secs = int(self._worker.retry_after)
-            self.status.setText(f"Hit the cloud rate limit — completed {ok}, {left} still need "
+            self.status.setText(f"Hit the cloud rate limit — completed {done}, {left} still need "
                                 f"filling. Try again in ~{secs}s, then reselect.")
+        elif left:
+            self.status.setText(f"Completed {done}, {left} still need filling — some fields "
+                                f"didn't come back, try those again. Remember to sync Anki!")
         else:
-            self.status.setText(f"Done — {ok} card(s) updated. Remember to sync Anki!")
+            self.status.setText(f"Done — {done} card(s) completed. Remember to sync Anki!")
         for row in self._rows.values():        # reset selection so the next batch starts clean
             row.checkbox.setChecked(False)
         self.select_all.setChecked(False)
