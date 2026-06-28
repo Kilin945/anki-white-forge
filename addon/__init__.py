@@ -160,24 +160,20 @@ class _GroqLimiter:
     of crashing into 429. Self-tuning: if Groq changes the limit (or we switch providers),
     the headers reflect it, no hard-coded number. Thread-safe (⌘S calls Groq concurrently)."""
 
-    _TOKEN_FLOOR = 1500      # keep this many tokens in reserve before the next call
-    _MAX_WAIT    = 65        # never block longer than this (a stale value can't hang us)
+    _TOKEN_FLOOR = 1500      # stop one call short of empty → never actually 429, no waiting
 
     def __init__(self):
         self._lock = threading.Lock()
         self._remaining_tokens = None
         self._reset_at = 0.0
 
-    def before(self):
-        """Pause briefly if we're near the token limit, so the next call won't 429."""
+    def wall_secs(self):
+        """How long until there's quota again (secs). 0 = clear to call now. The caller
+        stops immediately when this is > 0 — we never silently wait."""
         with self._lock:
             if self._remaining_tokens is None or self._remaining_tokens >= self._TOKEN_FLOOR:
-                return
-            wait = self._reset_at - time.monotonic()
-        if 0 < wait <= self._MAX_WAIT:
-            time.sleep(wait + 0.1)
-        with self._lock:
-            self._remaining_tokens = None        # assume refilled; the next response re-syncs
+                return 0.0
+            return max(0.0, self._reset_at - time.monotonic())
 
     def update(self, headers):
         """Record live remaining tokens + reset time from a response's headers."""
@@ -212,7 +208,6 @@ def _groq_chat(prompt, *, temperature, max_tokens, timeout, strict=False):
                        "Authorization": f"Bearer {key}",
                        "User-Agent": "AnkiWordAdder/1.0"})
     try:
-        _groq_limiter.before()
         with urllib.request.urlopen(req, timeout=timeout) as r:
             _groq_limiter.update(r.headers)
             return json.loads(r.read().decode())["choices"][0]["message"]["content"].strip()
@@ -719,10 +714,21 @@ class BackfillWorker(QThread):
         self.media_dir = media_dir
         self._w = Worker.__new__(Worker)
         self._w.media_dir = media_dir
+        self._hit_limit = False        # hit a real rate-limit wall → stop the rest, dialog notifies
+        self.retry_after = 0
 
     def _process_one(self, note):
         note_id = note["noteId"]
         word = _clean_text(note["fields"]["Front"]["value"], lower=True)
+        # Deterministic rate-limit gate: near the cloud limit → stop here and skip the rest
+        # immediately (the dialog says how many are left). No waiting.
+        if self._hit_limit:
+            return f"skip {word}"
+        wall = _groq_limiter.wall_secs()
+        if wall > 0:
+            self._hit_limit = True
+            self.retry_after = max(self.retry_after, int(wall) + 1)
+            return f"skip {word}"
         fields = {}
 
         current = note["fields"]["Sentence"]["value"]
@@ -980,7 +986,13 @@ class BackfillDialog(QDialog):
         mw.col.save()
         mw.reset()
         ok = sum(1 for r in results if r.startswith("✓"))
-        self.status.setText(f"Done — {ok} card(s) updated. Remember to sync Anki!")
+        if getattr(self._worker, "_hit_limit", False):
+            left = len(self._worker.notes) - ok
+            secs = int(self._worker.retry_after)
+            self.status.setText(f"Hit the cloud rate limit — completed {ok}, {left} still need "
+                                f"filling. Try again in ~{secs}s, then reselect.")
+        else:
+            self.status.setText(f"Done — {ok} card(s) updated. Remember to sync Anki!")
         for row in self._rows.values():        # reset selection so the next batch starts clean
             row.checkbox.setChecked(False)
         self.select_all.setChecked(False)
