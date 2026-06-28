@@ -141,6 +141,7 @@ class TestProcessNote:
             "Front": {"value": word}, "Association": {"value": ""},
             "Sentence": {"value": sentence}, "Image_Prompt": {"value": image},
             "Audio": {"value": audio}, "Front_Audio": {"value": front_audio},
+            "Translation": {"value": "x" if sentence else ""},   # note_complete 要求此欄
         }}
 
     def test_skips_complete(self):
