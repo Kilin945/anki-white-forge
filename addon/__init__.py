@@ -15,7 +15,7 @@ from aqt import mw
 from aqt.qt import (
     QAction, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QPushButton, QProgressBar, QScrollArea,
-    QTreeWidget, QTreeWidgetItem, QWidget, QFrame,
+    QTreeWidget, QTreeWidgetItem, QWidget, QFrame, QCheckBox,
     QKeySequenceEdit, QKeySequence,
     QMessageBox,
     Qt, QThread, pyqtSignal,
@@ -629,6 +629,8 @@ class FieldRow(QWidget):
         self._boxes = {}
         lay = QHBoxLayout(self)
         lay.setContentsMargins(4, 2, 4, 2)
+        self.checkbox = QCheckBox()       # left-most: pick which cards to complete (default unchecked)
+        lay.addWidget(self.checkbox)
         wl = QLabel(word)
         wl.setMinimumWidth(120)
         wl.setStyleSheet("font-weight:600; color:#1E293B;")
@@ -655,6 +657,9 @@ class FieldRow(QWidget):
 
     def set_done(self):
         self.badge.setText(f"'{self.word}' added!")
+
+    def is_checked(self):
+        return self.checkbox.isChecked()
 
 
 # ── backfill worker ───────────────────────────────────────────────────────────
@@ -804,6 +809,10 @@ class BackfillDialog(QDialog):
         root = QVBoxLayout(self)
         root.addWidget(QLabel("Cards missing Sentence / Audio / Image / Meaning / Translation:"))
 
+        self.select_all = QCheckBox("Select all")
+        self.select_all.stateChanged.connect(self._on_select_all)
+        root.addWidget(self.select_all)
+
         self._rows_host = QWidget()
         self._rows_box = QVBoxLayout(self._rows_host)
         self._rows_box.setContentsMargins(0, 0, 0, 0)
@@ -822,7 +831,7 @@ class BackfillDialog(QDialog):
         root.addWidget(self.progress_bar)
 
         btns = QHBoxLayout()
-        self.run_btn = QPushButton("Complete All")
+        self.run_btn = QPushButton("Complete Selected (0)")
         self.run_btn.setEnabled(False)
         self.run_btn.clicked.connect(self._on_run)
         close_btn = QPushButton("Close")
@@ -864,6 +873,7 @@ class BackfillDialog(QDialog):
                 "sentence_cn": bool(sentence_cn),
             }
             row = FieldRow(word, present)
+            row.checkbox.stateChanged.connect(lambda *_: self._update_selection())
             self._rows_box.addWidget(row)
             self._rows[nid] = row
             notes.append({
@@ -887,12 +897,28 @@ class BackfillDialog(QDialog):
         if invalid:
             parts.append(f"{invalid} card(s) contain non-English characters and cannot be created (please fix or delete).")
         self.status.setText(" ".join(parts) if parts else "All cards are complete!")
-        self.run_btn.setEnabled(bool(notes))
+        self.select_all.setEnabled(bool(notes))
+        self._update_selection()
+
+    def _update_selection(self):
+        n = sum(1 for r in self._rows.values() if r.is_checked())
+        self.run_btn.setText(f"Complete Selected ({n})")
+        self.run_btn.setEnabled(n > 0)
+
+    def _on_select_all(self, state):
+        checked = self.select_all.isChecked()
+        for row in self._rows.values():
+            row.checkbox.setChecked(checked)
 
     def _on_run(self):
+        selected = [n for n in self._pending_notes
+                    if (r := self._rows.get(n["noteId"])) and r.is_checked()]
+        if not selected:
+            return
         self.run_btn.setEnabled(False)
+        self.select_all.setEnabled(False)
         self.progress_bar.setVisible(True)
-        self._worker = BackfillWorker(self._pending_notes, mw.col.media.dir())
+        self._worker = BackfillWorker(selected, mw.col.media.dir())
         self._worker.step.connect(self._on_step)
         self._worker.card_done.connect(self._on_card_done)
         self._worker.finished.connect(self._on_finished)
@@ -915,7 +941,11 @@ class BackfillDialog(QDialog):
         mw.reset()
         ok = sum(1 for r in results if r.startswith("✓"))
         self.status.setText(f"Done — {ok} card(s) updated. Remember to sync Anki!")
-        self.run_btn.setEnabled(False)
+        for row in self._rows.values():        # reset selection so the next batch starts clean
+            row.checkbox.setChecked(False)
+        self.select_all.setChecked(False)
+        self.select_all.setEnabled(True)
+        self._update_selection()
 
 
 # ── find duplicates dialog ─────────────────────────────────────────────────────
