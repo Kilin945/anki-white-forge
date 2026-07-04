@@ -854,6 +854,21 @@ def _note_incomplete(note):
 
 # ── backfill dialog ───────────────────────────────────────────────────────────
 
+def _drop_notes(pending_notes, remove_ids):
+    """Return pending_notes minus the given note ids — a fresh list, input untouched.
+    Pure decision behind Remove Selected (view-only removal; cards stay in Anki)."""
+    remove_ids = set(remove_ids)
+    return [n for n in pending_notes if n["noteId"] not in remove_ids]
+
+
+def _removal_status(removed, remaining):
+    """Status line after Remove Selected drops rows from the list (view only)."""
+    if remaining:
+        return (f"Removed {removed} from the list. "
+                f"{remaining} still shown. Remember to sync Anki!")
+    return "All cleared from the list. Remember to sync Anki!"
+
+
 class BackfillDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1027,19 +1042,15 @@ class BackfillDialog(QDialog):
         to_remove = [nid for nid, r in self._rows.items() if r.is_checked()]
         if not to_remove:
             return
-        removed = set(to_remove)
-        for nid in to_remove:
+        for nid in to_remove:                        # Qt side: drop the row widgets
             row = self._rows.pop(nid)
             self._rows_box.removeWidget(row)
             row.setParent(None)
             row.deleteLater()
-        self._pending_notes = [n for n in self._pending_notes if n["noteId"] not in removed]
+        self._pending_notes = _drop_notes(self._pending_notes, to_remove)
         self.select_all.setChecked(False)
-        if self._rows:
-            self.status.setText(f"Removed {len(removed)} from the list. "
-                                f"{len(self._rows)} still shown. Remember to sync Anki!")
-        else:
-            self.status.setText("All cleared from the list. Remember to sync Anki!")
+        self.status.setText(_removal_status(len(to_remove), len(self._rows)))
+        if not self._rows:                           # list emptied → retire the button
             self.remove_btn.setVisible(False)
             self.select_all.setEnabled(False)
         self._update_selection()
