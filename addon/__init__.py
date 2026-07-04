@@ -894,9 +894,14 @@ class BackfillDialog(QDialog):
         self.run_btn = QPushButton("Complete Selected (0)")
         self.run_btn.setEnabled(False)
         self.run_btn.clicked.connect(self._on_run)
+        self.remove_btn = QPushButton("Remove Selected (0)")
+        self.remove_btn.setEnabled(False)
+        self.remove_btn.setVisible(False)     # only appears after a batch finishes
+        self.remove_btn.clicked.connect(self._on_remove_selected)
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
         btns.addWidget(self.run_btn)
+        btns.addWidget(self.remove_btn)
         btns.addWidget(close_btn)
         root.addLayout(btns)
 
@@ -961,6 +966,8 @@ class BackfillDialog(QDialog):
         n = sum(1 for r in self._rows.values() if r.is_checked())
         self.run_btn.setText(f"Complete Selected ({n})")
         self.run_btn.setEnabled(n > 0)
+        self.remove_btn.setText(f"Remove Selected ({n})")
+        self.remove_btn.setEnabled(n > 0)
 
     def _on_select_all(self, state):
         checked = self.select_all.isChecked()
@@ -1008,10 +1015,33 @@ class BackfillDialog(QDialog):
                                 f"didn't come back, try those again. Remember to sync Anki!")
         else:
             self.status.setText(f"Done — {done} card(s) completed. Remember to sync Anki!")
-        for row in self._rows.values():        # reset selection so the next batch starts clean
-            row.checkbox.setChecked(False)
-        self.select_all.setChecked(False)
+        # keep the boxes checked so the finished cards stay selected — the user then
+        # clicks Remove Selected to clear them from the list (view only, cards stay in Anki)
         self.select_all.setEnabled(True)
+        self.remove_btn.setVisible(True)
+        self._update_selection()
+
+    def _on_remove_selected(self):
+        """Drop the checked rows from this list — view only. The cards were just
+        completed and stay in Anki; this only clears them off the dialog."""
+        to_remove = [nid for nid, r in self._rows.items() if r.is_checked()]
+        if not to_remove:
+            return
+        removed = set(to_remove)
+        for nid in to_remove:
+            row = self._rows.pop(nid)
+            self._rows_box.removeWidget(row)
+            row.setParent(None)
+            row.deleteLater()
+        self._pending_notes = [n for n in self._pending_notes if n["noteId"] not in removed]
+        self.select_all.setChecked(False)
+        if self._rows:
+            self.status.setText(f"Removed {len(removed)} from the list. "
+                                f"{len(self._rows)} still shown. Remember to sync Anki!")
+        else:
+            self.status.setText("All cleared from the list. Remember to sync Anki!")
+            self.remove_btn.setVisible(False)
+            self.select_all.setEnabled(False)
         self._update_selection()
 
 
