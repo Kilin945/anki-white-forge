@@ -812,9 +812,11 @@ class BackfillWorker(QThread):
 REFILL_CLEAR_FIELDS = ["Sentence", "Sentence_CN", "Image_Prompt",
                        "Audio", "Front_Audio", "Translation"]
 
-# Rebuild Long Sentences 清除的欄位 — 只清「句子相關」三欄(Audio 是句子語音,隨句連動);
-# 保留 Front/Association/Translation/Image_Prompt/Front_Audio(單字層級,不受換句影響)
-REBUILD_CLEAR_FIELDS = ["Sentence", "Sentence_CN", "Audio"]
+# Rebuild Long Sentences 清除的欄位 — 換句=全重建:句子三欄(Audio 是句子語音)之外,
+# 連 Translation(依句中用法翻,換句可能換義)與 Image_Prompt(依句意搜的圖)也一起清;
+# 只保留 Front/Association/Front_Audio(單字發音與句子無關)。使用者實測後定案。
+REBUILD_CLEAR_FIELDS = ["Sentence", "Sentence_CN", "Audio",
+                        "Translation", "Image_Prompt"]
 
 
 def _note_incomplete(note):
@@ -1549,9 +1551,10 @@ def _clamp_test_count(raw, default=7):
 
 class LongSentencesSection(QWidget):
     """Batch Operations section: find sentences longer than a threshold and clear
-    their sentence-related fields (Sentence / Sentence_CN / Audio) so the existing
-    pipelines regenerate short ones — clearing only, NO generation here (that is
-    Complete Missing Cards' / the CLI's job). Synchronous, no worker.
+    REBUILD_CLEAR_FIELDS (everything except Front / Association / Front_Audio —
+    換句=全重建) so the existing pipelines regenerate short ones — clearing only,
+    NO generation here (that is Complete Missing Cards' / the CLI's job).
+    Synchronous, no worker.
     背景:句長規則(6-12字)是後來才進 prompt 的,舊卡留下大量長句(實測 >20 字 55 張)。"""
 
     def __init__(self, panel, parent=None):
@@ -1566,9 +1569,9 @@ class LongSentencesSection(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.addWidget(_section_title("Rebuild Long Sentences"))
 
-        desc = QLabel("Old cards predate the 6-12 word sentence rule. Clears Sentence, "
-                      "its translation and its audio for sentences longer than the "
-                      "threshold — regenerate them afterwards with Complete Missing Cards.")
+        desc = QLabel("Old cards predate the 6-12 word sentence rule. For sentences longer "
+                      "than the threshold, clears everything except the word, its hint and "
+                      "its pronunciation — regenerate with Complete Missing Cards.")
         desc.setWordWrap(True)
         root.addWidget(desc)
 
@@ -1659,7 +1662,7 @@ class LongSentencesSection(QWidget):
             return
         for h in self._hits:
             note = mw.col.get_note(h["nid"])
-            for f in REBUILD_CLEAR_FIELDS:       # 只清句子相關三欄
+            for f in REBUILD_CLEAR_FIELDS:       # 換句=全重建(留 Front/Association/Front_Audio)
                 if f in note:
                     note[f] = ""
             mw.col.update_note(note)
@@ -1669,8 +1672,8 @@ class LongSentencesSection(QWidget):
         self._hits = []
         self.word_list.setText("")
         self.clear_row_w.setVisible(False)
-        self.status.setText(f"✓ Cleared {n} long sentence(s) (+ translation & audio). "
-                            "Regenerate them now?")
+        self.status.setText(f"✓ Cleared {n} card(s) — sentence, translations, image "
+                            "and audio. Regenerate them now?")
         self.status.setVisible(True)
         self.post_row_w.setVisible(True)
 
@@ -1788,15 +1791,29 @@ class BatchOperationsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Batch Operations")
-        self.setMinimumWidth(640)
+        self.setMinimumSize(660, 760)      # 四個 section 疊起來已超過小視窗 → 給足高度
+
+        # sections 放進可捲動的內容區:每個 section 保有自然高度、不再互相擠壓
+        # (曾經四塊硬塞固定視窗 → 說明文字被裁、按鈕疊到清單上)
+        content = QWidget()
+        body = QVBoxLayout(content)
+        body.setContentsMargins(0, 0, 8, 0)   # 右緣留給捲軸
+        body.addWidget(TranslateSection(self))
+        body.addWidget(_hline())
+        body.addWidget(ClearFlaggedSection(self, parent=content))
+        body.addWidget(_hline())
+        body.addWidget(LongSentencesSection(self, parent=content))
+        body.addWidget(_hline())
+        body.addWidget(TestCardsSection(self, parent=content))
+        body.addStretch()
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(content)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
         root = QVBoxLayout(self)
-        root.addWidget(TranslateSection(self))
-        root.addWidget(_hline())
-        root.addWidget(ClearFlaggedSection(self, parent=self))
-        root.addWidget(_hline())
-        root.addWidget(LongSentencesSection(self, parent=self))
-        root.addWidget(_hline())
-        root.addWidget(TestCardsSection(self, parent=self))
+        root.addWidget(scroll)
         root.addWidget(_hline())
 
         close_row = QHBoxLayout()
@@ -1804,7 +1821,7 @@ class BatchOperationsDialog(QDialog):
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
         close_row.addWidget(close_btn)
-        root.addLayout(close_row)
+        root.addLayout(close_row)         # Close 固定在捲動區外,永遠可見
 
 
 # ── menu entries ──────────────────────────────────────────────────────────────

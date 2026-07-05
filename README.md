@@ -81,7 +81,7 @@ uv sync   # 自動安裝所有依賴
 **批量操作（Batch Operations）**：`⌘F`（Ctrl+F）或 **Tools → Batch Operations…** —— 一個面板、上下四塊，可擴充：
 - **上｜Backfill Sentence Translations（批次補整句翻譯）**：專補 `Sentence_CN`，開啟先顯示「共 N 筆、約 X 分鐘」；選時間盒（1/2/5/10 分鐘）或「直接完成」，以不超過 Groq 速率（約 25/分）的節奏持續翻；隨時可 **Stop**，下次再開從沒翻的續
 - **中①｜Clear Flagged Cards（清空紅旗卡）**：手機複習看到不理想的卡（例句不貼切、翻譯有誤…）用 Anki 內建**紅旗**標起來（手機卡片模板無法寫欄位，只能靠旗標）→ 回 Mac 開面板列出紅旗英文卡 → 按 **Clear N Cards**：保留 Word + Association，其餘 6 欄（例句／兩個翻譯／圖／字音／句音）**清空並拔旗**（瞬間完成、**不重新生成**）。清完可按 **Open Complete Missing Cards** 一鍵跳去 ⌘S 重生，或 **Done** 之後再自己補。只認紅旗（flag:1）、非英文卡略過
-- **中②｜Rebuild Long Sentences（重建過長例句）**：舊卡的例句在「6-12 字」規則進 prompt 之前生成，常常過長。填門檻（預設 20 字）→ Rescan 列出超標卡（`單字(字數)`、降冪）→ **Clear N Sentences** 清空例句／整句翻譯／句子語音三欄（**保留**單字翻譯、圖、單字發音；瞬間完成、不重新生成）→ 一鍵跳 ⌘S 重生短句，或大量時走 CLI
+- **中②｜Rebuild Long Sentences（重建過長例句）**：舊卡的例句在「6-12 字」規則進 prompt 之前生成，常常過長。填門檻（預設 20 字）→ Rescan 列出超標卡（`單字(字數)`、降冪）→ **Clear N Sentences** 清空例句／整句翻譯／句子語音／單字翻譯／圖（換句＝全重建，**只保留**單字與其發音；瞬間完成、不重新生成）→ 一鍵跳 ⌘S 重生短句，或大量時走 CLI
 - **下｜Test Cards（測試卡）**：開發／測試輔助。填 **Count**（預設 7）按 **Add Test Cards** 產生只有 Front + Association 的裸卡（它們會出現在 Complete Missing Cards，可用來測補卡流程）；**Clean Test Cards** 一鍵刪光。與 CLI `make_test_cards.py`（`add [N]` / `clean`）同一個 tag，兩邊建的可互相清
 
 **找重複單字**：`⌘D`（Ctrl+D）

@@ -96,6 +96,12 @@ class TestLongSentenceLabel:
 
 
 class TestRebuildClearFields:
-    def test_exactly_three_sentence_fields(self):
-        # 清且只清「句子相關」三欄 — 防手滑加欄位
-        assert addon.REBUILD_CLEAR_FIELDS == ["Sentence", "Sentence_CN", "Audio"]
+    def test_rebuild_clears_everything_except_word_level(self):
+        # 換句=全重建:清句子三欄+單字翻譯+圖(使用者實測後定案 —
+        # Translation 依句中用法翻、Image 依句意搜,換句都該重來)
+        assert addon.REBUILD_CLEAR_FIELDS == [
+            "Sentence", "Sentence_CN", "Audio", "Translation", "Image_Prompt"]
+
+    def test_word_level_fields_never_cleared(self):
+        for kept in ("Front", "Association", "Front_Audio"):
+            assert kept not in addon.REBUILD_CLEAR_FIELDS
