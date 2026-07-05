@@ -198,9 +198,10 @@ class GroqProvider:
                 max_tokens=max_tokens,
             )
             self._limiter.update(raw.headers)
+            text = raw.parse().choices[0].message.content.strip()
             with self._c429_lock:
                 self._consec_429 = 0
-            return raw.parse().choices[0].message.content.strip()
+            return text
         except RateLimitError as e:
             with self._c429_lock:
                 self._consec_429 += 1

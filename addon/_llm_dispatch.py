@@ -330,6 +330,8 @@ class GeminiProvider:
     def __init__(self, key):
         self._key = key
         self._limiter = LocalBucketLimiter(GEMINI_RPM)
+        self._consec_429 = 0
+        self._c429_lock = threading.Lock()
 
     @classmethod
     def load(cls):
@@ -355,7 +357,9 @@ class GeminiProvider:
                     body = e.read().decode()
                 except Exception:
                     body = ""
-                secs = _gemini_retry_secs(body)
+                with self._c429_lock:
+                    self._consec_429 += 1
+                    secs = _backoff_secs(_gemini_retry_secs(body), self._consec_429)
                 self._limiter.mark_exhausted(secs)
                 raise ProviderRateLimited(secs)
             raise ProviderError(f"HTTP {e.code}")
@@ -366,6 +370,8 @@ class GeminiProvider:
         text = _extract_gemini_text(data)
         if not text:
             raise ProviderError("empty response")
+        with self._c429_lock:
+            self._consec_429 = 0
         return text
 
     def headroom(self):

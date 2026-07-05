@@ -6,6 +6,7 @@ timeout 傳遞、wall_secs()、format_reset_summary()。假時鐘、免網路。
 """
 import importlib.util
 import pathlib
+import urllib.error
 from unittest.mock import patch
 
 import pytest
@@ -303,3 +304,25 @@ class TestParsersAndHelpers:
         finally:
             lg.handlers.clear()
             lg.handlers.extend(saved)
+
+
+class TestGemini429Backoff:
+    def test_consecutive_429_escalates_cooldown(self, monkeypatch):
+        # 漏接回歸測試:addon GeminiProvider 連續 429 必須指數退避(review 抓到 3/4 缺這家)
+        g = lld.GeminiProvider("fake-key")
+        err = urllib.error.HTTPError("u", 429, "Too Many", {}, None)
+        err.read = lambda: b'{"error":{"details":[{"retryDelay":"2s"}]}}'
+
+        def boom(*a, **k):
+            raise err
+
+        monkeypatch.setattr(lld.urllib.request, "urlopen", boom)
+        secs = []
+        for _ in range(3):
+            with pytest.raises(lld.ProviderRateLimited) as ei:
+                g.generate("p", temperature=0, max_tokens=8, timeout=5)
+            secs.append(ei.value.retry_after)
+
+        assert secs[0] == pytest.approx(2.0)
+        assert secs[1] == pytest.approx(4.0)   # 2×2^1
+        assert secs[2] == pytest.approx(8.0)   # 2×2^2
