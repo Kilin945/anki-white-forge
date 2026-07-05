@@ -1,9 +1,8 @@
-import os
 import re
 
 from core.dispatcher import AllProvidersLimited, Dispatcher
 from core.providers import (GROQ_KEY_PATH, GROQ_MODEL, GeminiProvider,
-                            GroqProvider, _load_groq_client)
+                            GroqProvider, _load_groq_client)  # GROQ_MODEL/GROQ_KEY_PATH/_load_groq_client 純 re-export — test_backfill.py 依賴,勿刪
 from core.rate_limiter import RateLimitReached
 
 _dispatcher = Dispatcher(
@@ -24,6 +23,7 @@ def groq_generate(prompt):
     try:
         return _dispatcher.generate(prompt, temperature=0.7, max_tokens=200)
     except AllProvidersLimited:
+        print("  [llm] all providers limited — skipping")
         return ""
     except Exception as e:
         print(f"  [llm error] {e}")

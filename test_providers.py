@@ -99,6 +99,22 @@ class TestGeminiParsing:
         assert prov._gemini_retry_secs("junk") == pytest.approx(30.0)
 
 
+class TestGeminiBadJson:
+    def test_200_with_invalid_json_raises_provider_error(self, monkeypatch):
+        prov_obj = prov.GeminiProvider("fake-key")
+
+        class _StubResponse:
+            status_code = 200
+            text = ""
+
+            def json(self):
+                raise ValueError("no JSON object could be decoded")
+
+        monkeypatch.setattr(prov.requests, "post", lambda *a, **kw: _StubResponse())
+        with pytest.raises(prov.ProviderError):
+            prov_obj.generate("hello")
+
+
 class TestProviderLoad:
     def test_gemini_no_key_returns_none(self, tmp_path, monkeypatch):
         monkeypatch.setattr(prov, "GEMINI_KEY_PATH", str(tmp_path / "nope"))

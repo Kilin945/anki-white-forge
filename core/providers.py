@@ -73,7 +73,9 @@ class HeaderLimiter:
 
 
 class LocalBucketLimiter:
-    """本地估算 headroom（Gemini 沒有 rate-limit header）：滾動窗口計數。"""
+    """本地估算 headroom（Gemini 沒有 rate-limit header）：固定窗口計數（非滾動 —— 從第一次
+    呼叫起算，滿一個 window 就整個重置，非每次呼叫往後平移）。窗口邊界可能有突發流量：舊窗口
+    快到底時打滿、新窗口一開又立刻打滿，短時間內等於雙倍配額。"""
 
     def __init__(self, per_minute, window_secs=60.0):
         self._quota = per_minute
@@ -256,7 +258,11 @@ class GeminiProvider:
             raise ProviderRateLimited(secs)
         if r.status_code != 200:
             raise ProviderError(f"HTTP {r.status_code}")
-        text = _extract_gemini_text(r.json())
+        try:
+            data = r.json()
+        except ValueError:
+            raise ProviderError("bad json")
+        text = _extract_gemini_text(data)
         if not text:
             raise ProviderError("empty response")
         return text

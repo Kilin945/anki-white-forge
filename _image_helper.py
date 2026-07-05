@@ -1,7 +1,7 @@
 """Image search CLI — called by Anki addon as subprocess."""
 import sys
 import argparse
-from core.llm import llm_image_query, _groq_client
+from core.llm import llm_image_query, engine_description
 from core.image import fetch_image, _load_pexels_key
 
 try:
@@ -19,8 +19,7 @@ def main():
     args = parser.parse_args()
 
     query = llm_image_query(args.word, args.definition, args.sentence)
-    engine = "Groq" if _groq_client else "none"
-    print(f"QUERY: {query} [{engine}]", file=sys.stderr)
+    print(f"QUERY: {query} [{engine_description()}]", file=sys.stderr)
 
     api_key = _load_pexels_key()
     if api_key:
