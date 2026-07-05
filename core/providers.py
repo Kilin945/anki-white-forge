@@ -142,6 +142,14 @@ class ProviderRateLimited(ProviderError):
         self.retry_after = float(retry_after)
 
 
+# KEEP-IN-SYNC with addon/_llm_dispatch.py::_backoff_secs
+def _backoff_secs(retry_after, consecutive):
+    """連續 429 的指數退避:別輕信 provider 的 Retry-After(Groq 免費層在 TPM 窗口
+    耗盡時仍回 2 秒,照等只會無限循環)。第 n 次連續 429 → max(retry_after, 2×2^(n-1)),
+    上限 60 秒。成功後歸零由呼叫端負責。"""
+    return min(60.0, max(float(retry_after), 2.0 * (2 ** (max(consecutive, 1) - 1))))
+
+
 def _load_groq_client():
     try:
         with open(GROQ_KEY_PATH) as f:
@@ -173,6 +181,8 @@ class GroqProvider:
     def __init__(self, client):
         self._client = client
         self._limiter = HeaderLimiter()
+        self._consec_429 = 0
+        self._c429_lock = threading.Lock()
 
     @classmethod
     def load(cls):
@@ -188,9 +198,13 @@ class GroqProvider:
                 max_tokens=max_tokens,
             )
             self._limiter.update(raw.headers)
+            with self._c429_lock:
+                self._consec_429 = 0
             return raw.parse().choices[0].message.content.strip()
         except RateLimitError as e:
-            secs = _retry_after_from(e)
+            with self._c429_lock:
+                self._consec_429 += 1
+                secs = _backoff_secs(_retry_after_from(e), self._consec_429)
             self._limiter.mark_exhausted(secs)
             raise ProviderRateLimited(secs)
         except ProviderError:
@@ -226,6 +240,8 @@ class GeminiProvider:
     def __init__(self, key):
         self._key = key
         self._limiter = LocalBucketLimiter(GEMINI_RPM)
+        self._consec_429 = 0
+        self._c429_lock = threading.Lock()
 
     @classmethod
     def load(cls):
@@ -253,7 +269,9 @@ class GeminiProvider:
         except requests.RequestException as e:
             raise ProviderError(str(e))
         if r.status_code == 429:
-            secs = _gemini_retry_secs(r.text)
+            with self._c429_lock:
+                self._consec_429 += 1
+                secs = _backoff_secs(_gemini_retry_secs(r.text), self._consec_429)
             self._limiter.mark_exhausted(secs)
             raise ProviderRateLimited(secs)
         if r.status_code != 200:
@@ -265,6 +283,8 @@ class GeminiProvider:
         text = _extract_gemini_text(data)
         if not text:
             raise ProviderError("empty response")
+        with self._c429_lock:
+            self._consec_429 = 0
         return text
 
     def headroom(self):

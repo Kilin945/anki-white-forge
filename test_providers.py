@@ -115,6 +115,21 @@ class TestGeminiBadJson:
             prov_obj.generate("hello")
 
 
+class TestBackoff:
+    def test_first_429_respects_retry_after(self):
+        assert prov._backoff_secs(2.0, 1) == pytest.approx(2.0)
+        assert prov._backoff_secs(44.0, 1) == pytest.approx(44.0)   # 較大的 retry-after 照用
+
+    def test_consecutive_429_escalates(self):
+        assert prov._backoff_secs(2.0, 2) == pytest.approx(4.0)
+        assert prov._backoff_secs(2.0, 3) == pytest.approx(8.0)
+        assert prov._backoff_secs(2.0, 5) == pytest.approx(32.0)
+
+    def test_capped_at_60(self):
+        assert prov._backoff_secs(2.0, 10) == pytest.approx(60.0)
+        assert prov._backoff_secs(120.0, 1) == pytest.approx(60.0)
+
+
 class TestProviderLoad:
     def test_gemini_no_key_returns_none(self, tmp_path, monkeypatch):
         monkeypatch.setattr(prov, "GEMINI_KEY_PATH", str(tmp_path / "nope"))

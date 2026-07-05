@@ -143,6 +143,21 @@ class TestCircuitBreaker:
             assert b.open_remaining() == pytest.approx(12.0, abs=0.2)
 
 
+class TestBackoff:
+    def test_first_429_respects_retry_after(self):
+        assert lld._backoff_secs(2.0, 1) == pytest.approx(2.0)
+        assert lld._backoff_secs(44.0, 1) == pytest.approx(44.0)   # 較大的 retry-after 照用
+
+    def test_consecutive_429_escalates(self):
+        assert lld._backoff_secs(2.0, 2) == pytest.approx(4.0)
+        assert lld._backoff_secs(2.0, 3) == pytest.approx(8.0)
+        assert lld._backoff_secs(2.0, 5) == pytest.approx(32.0)
+
+    def test_capped_at_60(self):
+        assert lld._backoff_secs(2.0, 10) == pytest.approx(60.0)
+        assert lld._backoff_secs(120.0, 1) == pytest.approx(60.0)
+
+
 class TestDispatcher:
     def test_picks_higher_headroom_and_passes_timeout(self):
         a = FakeProvider("groq", headroom=0.3, reply="from-groq")

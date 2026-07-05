@@ -116,6 +116,15 @@ def _sentence_to_write(current, generated, word):
     return None
 
 
+def _need_sentence_audio(existing_audio, sentence, sentence_was_rewritten):
+    """句音要不要(重)生成:佔位符絕不配音(留空,等真句配對生成);
+    句子這一輪被重寫 → 強制重生(舊音檔已不匹配);否則缺才補。"""
+    if not sentence or any(p in sentence for p in PLACEHOLDERS) or \
+            sentence.startswith("Please add an example sentence"):
+        return False
+    return (not existing_audio) or sentence_was_rewritten
+
+
 def _accept_word_translation(word, reply):
     """Validate a word-translation reply. Accept: a Chinese gloss (<=8 漢字, not a sentence,
     not buried in English preamble), OR a short English proper-noun NAME that echoes the
@@ -719,7 +728,8 @@ class BackfillWorker(QThread):
 
         import threading
         need_image = "<img" not in note["fields"]["Image_Prompt"]["value"]
-        need_audio = not note["fields"]["Audio"]["value"]
+        need_audio = _need_sentence_audio(note["fields"]["Audio"]["value"],
+                                          sentence, "Sentence" in fields)
         need_front = not note["fields"].get("Front_Audio", {}).get("value", "")
         need_translation = not note["fields"].get("Translation", {}).get("value", "")
         need_sentence_cn = not note["fields"].get("Sentence_CN", {}).get("value", "")

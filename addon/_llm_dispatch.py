@@ -244,6 +244,14 @@ class ProviderRateLimited(ProviderError):
         self.retry_after = float(retry_after)
 
 
+# KEEP-IN-SYNC with core/providers.py::_backoff_secs
+def _backoff_secs(retry_after, consecutive):
+    """連續 429 的指數退避:別輕信 provider 的 Retry-After(Groq 免費層在 TPM 窗口
+    耗盡時仍回 2 秒,照等只會無限循環)。第 n 次連續 429 → max(retry_after, 2×2^(n-1)),
+    上限 60 秒。成功後歸零由呼叫端負責。"""
+    return min(60.0, max(float(retry_after), 2.0 * (2 ** (max(consecutive, 1) - 1))))
+
+
 class GroqProvider:
     name = "groq"
     model = GROQ_MODEL
@@ -251,6 +259,8 @@ class GroqProvider:
     def __init__(self, key):
         self._key = key
         self._limiter = HeaderLimiter()
+        self._consec_429 = 0
+        self._c429_lock = threading.Lock()
 
     @classmethod
     def load(cls):
@@ -274,7 +284,9 @@ class GroqProvider:
                 data = json.loads(r.read().decode())
         except urllib.error.HTTPError as e:
             if e.code == 429:
-                secs = _parse_retry_after(e.headers)
+                with self._c429_lock:
+                    self._consec_429 += 1
+                    secs = _backoff_secs(_parse_retry_after(e.headers), self._consec_429)
                 self._limiter.mark_exhausted(secs)
                 raise ProviderRateLimited(secs)
             raise ProviderError(f"HTTP {e.code}")
@@ -283,9 +295,12 @@ class GroqProvider:
         except Exception as e:
             raise ProviderError(str(e))
         try:
-            return data["choices"][0]["message"]["content"].strip()
+            text = data["choices"][0]["message"]["content"].strip()
         except (KeyError, IndexError, TypeError, AttributeError):
             raise ProviderError("bad response shape")
+        with self._c429_lock:
+            self._consec_429 = 0
+        return text
 
     def headroom(self):
         return self._limiter.headroom()

@@ -72,3 +72,22 @@ class TestSentenceToWrite:
         # exists — must NOT overwrite it with a placeholder.
         result = addon._sentence_to_write("The widget spins quickly.", "", "widget")
         assert result is None
+
+
+class TestNeedSentenceAudio:
+    def test_placeholder_never_gets_audio(self):
+        ph = "Please add an example sentence for 'foo'."
+        assert addon._need_sentence_audio("", ph, True) is False
+        assert addon._need_sentence_audio("[sound:x.mp3]", ph, False) is False
+
+    def test_missing_audio_with_real_sentence(self):
+        assert addon._need_sentence_audio("", "A real sentence.", False) is True
+
+    def test_rewritten_sentence_forces_regen(self):
+        assert addon._need_sentence_audio("[sound:x.mp3]", "New sentence.", True) is True
+
+    def test_existing_audio_untouched_when_sentence_unchanged(self):
+        assert addon._need_sentence_audio("[sound:x.mp3]", "Same sentence.", False) is False
+
+    def test_empty_sentence_no_audio(self):
+        assert addon._need_sentence_audio("", "", False) is False
