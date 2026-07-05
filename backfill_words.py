@@ -96,7 +96,9 @@ def process_note(note):
         futures = {}
         if need_img:
             futures["image"] = pool.submit(_do_image, word, current_assoc, sentence, img_query)
-        if not has_audio or need_sentence:
+        # 佔位符不配音(KEEP-IN-SYNC: addon _need_sentence_audio 同一規則)——
+        # 句子生成失敗時留空,等真句子來了才成對生成,避免「佔位符語音」髒音檔
+        if (not has_audio or need_sentence) and not is_placeholder(sentence):
             futures["audio"] = pool.submit(_do_sentence_audio, word, sentence)
         if not has_front_audio:
             futures["front_audio"] = pool.submit(_do_word_audio, word)
