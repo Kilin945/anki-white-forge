@@ -273,3 +273,18 @@ class TestParsersAndHelpers:
         monkeypatch.setattr(lld, "GROQ_KEY_PATH", str(tmp_path / "nope2"))
         monkeypatch.setenv("GROQ_API_KEY", "env-key2")
         assert lld.GroqProvider.load() is not None
+
+    def test_get_logger_survives_fs_failure(self, monkeypatch):
+        # 設定失敗絕不往外拋 — logging 不能炸掉 addon 載入
+        lg = lld.logging.getLogger("whiteforge.llm")
+        saved = lg.handlers[:]
+        lg.handlers.clear()
+        try:
+            monkeypatch.setattr(lld.os, "makedirs",
+                                lambda *a, **k: (_ for _ in ()).throw(OSError("boom")))
+            out = lld.get_logger()          # 不可 raise
+            assert out is lg
+            assert len(lg.handlers) == 1    # NullHandler 佔位,維持冪等
+        finally:
+            lg.handlers.clear()
+            lg.handlers.extend(saved)

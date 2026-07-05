@@ -23,15 +23,19 @@ LOG_PATH = os.path.expanduser("~/Workspace/anki/logs/addon_llm.log")
 
 
 def get_logger():
-    """檔案 logger（1MB×3 輪替）。冪等：重複呼叫/重複載入模組不會疊 handler。"""
+    """檔案 logger（1MB×3 輪替）。冪等：重複呼叫/重複載入模組不會疊 handler。
+    設定失敗(權限/唯讀…)絕不往外拋 — logging 是周邊功能,不能炸掉 addon 載入。"""
     logger = logging.getLogger("whiteforge.llm")
     if not logger.handlers:
-        os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
-        h = logging.handlers.RotatingFileHandler(LOG_PATH, maxBytes=1_000_000,
-                                                 backupCount=3, encoding="utf-8")
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-        logger.setLevel(logging.INFO)
+        try:
+            os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+            h = logging.handlers.RotatingFileHandler(LOG_PATH, maxBytes=1_000_000,
+                                                     backupCount=3, encoding="utf-8")
+            h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+            logger.addHandler(h)
+            logger.setLevel(logging.INFO)
+        except OSError:
+            logger.addHandler(logging.NullHandler())   # 退化:靜默,但 logger 仍可用
         logger.propagate = False
     return logger
 
