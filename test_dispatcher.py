@@ -216,3 +216,37 @@ class TestBreakerIntegration:
             a._error = None
             a._reply = "groq-back"
             assert d.generate("p") == "groq-back"   # 證明 groq 的試探名額還在，可被使用
+
+    def test_unexpected_exception_releases_probe(self):
+        # Provider A: higher headroom (picked first), fails with ProviderError 3 times → OPEN
+        # Provider B: lower headroom, but can failover to it after A opens
+        # Once A opens and cools to half-open, probe fires but throws ValueError
+        # → probe flag should be cleared; without fix, it stays wedged permanently
+        a = FakeProvider("groq", headroom=0.9, error=ProviderError("expected"))
+        b = FakeProvider("gemini", headroom=0.5, reply="fallback")
+        clock = {"t": 1000.0}
+        with patch.object(disp.time, "monotonic", side_effect=lambda: clock["t"]):
+            d = disp.Dispatcher([a, b], threshold=3, cooldown_default=30.0)
+            # 3 calls: A selected first, fails with ProviderError (caught) → fails over to B
+            # After 3 failures, A's _streak=3 → OPEN
+            for _ in range(3):
+                result = d.generate("p")      # A fails, B succeeds → returns "fallback"
+                assert result == "fallback"
+            # Verify A is now OPEN
+            assert d._breakers['groq'].allows() is False
+            # Cooldown expired → A half-open, allowed to probe
+            clock["t"] = 1031.0
+            a._error = ValueError("unexpected bug")  # 換成非預期例外
+            with pytest.raises(ValueError):
+                d.generate("p")               # A allowed to probe, but throws ValueError
+                                               # ValueError 沒被 catch → probe flag 應被清但沒被清
+            # 如果 bug 存在：_probe_inflight 還是 True，allows() 回傳 False → failover 到 B
+            # 如果 bug 修好：_probe_inflight 被清，allows() 回傳 False（重新冷卻） → 也 failover
+            # 但第三次冷卻後，修好版會放行試探；有 bug 版仍被卡
+            a._error = None
+            a._reply = "ok"
+            clock["t"] = 1062.0               # 另一個冷卻週期過了
+            # 修好：A allows() 放行（probe 名額復位） → 返回 "ok"
+            # 有 bug：A allows() 擋住（probe 卡死） → failover 到 B → "fallback"
+            result = d.generate("p")
+            assert result == "ok"  # 修好的話得到 "ok"；有 bug 會是 "fallback"

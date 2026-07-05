@@ -91,4 +91,7 @@ class Dispatcher:
             except ProviderError as e:
                 cooldown = getattr(e, "retry_after", None)
                 self._breakers[p.name].record_failure(cooldown)
+            except Exception:
+                self._breakers[p.name].record_failure()   # 非預期例外也要釋放試探閘
+                raise
         raise AllProvidersLimited(self._resets())
