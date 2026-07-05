@@ -62,6 +62,29 @@ class TestCircuitBreaker:
             b.record_failure(cooldown=12.0)    # 冷卻=該家 reset 時間，不瞎猜
             assert b.open_remaining() == pytest.approx(12.0, abs=0.2)
 
+    def test_half_open_admits_single_probe(self):
+        b = disp.CircuitBreaker(threshold=3, cooldown_default=30.0)
+        clock = {"t": 1000.0}
+        with patch.object(disp.time, "monotonic", side_effect=lambda: clock["t"]):
+            for _ in range(3):
+                b.record_failure()
+            clock["t"] = 1031.0
+            assert b.allows() is True        # 第一個試探放行
+            assert b.allows() is False       # 試探結果未回報前，其他人不放
+            b.record_failure()               # 試探失敗 → 立刻再 OPEN
+            assert b.allows() is False
+
+    def test_probe_slot_released_on_success(self):
+        b = disp.CircuitBreaker(threshold=3, cooldown_default=30.0)
+        clock = {"t": 1000.0}
+        with patch.object(disp.time, "monotonic", side_effect=lambda: clock["t"]):
+            for _ in range(3):
+                b.record_failure()
+            clock["t"] = 1031.0
+            assert b.allows() is True        # 第一個試探放行
+            b.record_success()
+            assert b.allows() is True        # 復位為 CLOSED，正常放行
+
 
 class FakeProvider:
     """可編程假 provider：headroom 可為值或 callable；replies/errors 腳本化。"""
@@ -112,6 +135,21 @@ class TestRouting:
         assert d.generate("p") == "from-gemini"
         assert a.calls == 0
 
+    def test_headroom_read_once_per_call(self):
+        counters = {"groq": 0, "gemini": 0}
+
+        def make_headroom(name, base):
+            def _h():
+                counters[name] += 1
+                return base
+            return _h
+
+        a = FakeProvider("groq", headroom=make_headroom("groq", 0.3), reply="from-groq")
+        b = FakeProvider("gemini", headroom=make_headroom("gemini", 0.9), reply="from-gemini")
+        d = disp.Dispatcher([a, b])
+        assert d.generate("p") == "from-gemini"
+        assert counters == {"groq": 1, "gemini": 1}   # 每家 headroom 每次呼叫只讀一次（快照）
+
 
 class TestFailover:
     def test_failover_to_other_provider(self):
@@ -158,3 +196,23 @@ class TestBreakerIntegration:
             a._error = None
             a._reply = "groq-back"
             assert d.generate("p") == "groq-back"
+
+    def test_unused_probe_not_consumed(self):
+        err = ProviderError("boom")
+        a = FakeProvider("groq", headroom=0.9, error=err)      # headroom 較高 → 先被試、先失敗
+        b = FakeProvider("gemini", headroom=0.5, reply="ok")
+        clock = {"t": 1000.0}
+        with patch.object(disp.time, "monotonic", side_effect=lambda: clock["t"]):
+            d = disp.Dispatcher([a, b], threshold=3, cooldown_default=30.0)
+            for _ in range(3):
+                d.generate("p")            # groq 每次先被選中、失敗、failover 到 gemini
+            assert a.calls == 3            # 3 次後 groq 斷路器 OPEN
+            clock["t"] = 1031.0            # 冷卻過 → groq half-open
+            b._headroom = 0.95             # gemini headroom 現在較高 → 這次會先被選到
+            assert d.generate("p") == "ok"     # gemini 成功，groq 完全沒被 attempt 到
+            assert a.calls == 3                # groq 的試探名額沒被消耗
+
+            b._headroom = 0.0              # gemini 額度用盡，逼路由轉向 groq
+            a._error = None
+            a._reply = "groq-back"
+            assert d.generate("p") == "groq-back"   # 證明 groq 的試探名額還在，可被使用

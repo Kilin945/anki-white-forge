@@ -20,10 +20,19 @@ class CircuitBreaker:
         self._lock = threading.Lock()
         self._streak = 0
         self._open_until = 0.0
+        self._probe_inflight = False
 
     def allows(self):
         with self._lock:
-            return time.monotonic() >= self._open_until
+            now = time.monotonic()
+            if now < self._open_until:
+                return False
+            if self._open_until > 0.0:          # 冷卻剛過 → half-open：只放一筆試探
+                if self._probe_inflight:
+                    return False
+                self._probe_inflight = True
+                return True
+            return True                          # CLOSED
 
     def open_remaining(self):
         with self._lock:
@@ -33,9 +42,11 @@ class CircuitBreaker:
         with self._lock:
             self._streak = 0
             self._open_until = 0.0
+            self._probe_inflight = False
 
     def record_failure(self, cooldown=None):
         with self._lock:
+            self._probe_inflight = False
             self._streak += 1
             if self._streak >= self._threshold:
                 secs = cooldown if cooldown is not None else self._cooldown_default
@@ -66,13 +77,13 @@ class Dispatcher:
         return out
 
     def generate(self, prompt, *, temperature=0.7, max_tokens=200):
-        candidates = sorted(
-            (p for p in self.providers
-             if self._breakers[p.name].allows() and p.headroom() > 0.0),
-            key=lambda p: p.headroom(), reverse=True)
-        if not candidates:
-            raise AllProvidersLimited(self._resets())
-        for p in candidates:                      # 第一家失敗 → 依序 failover
+        ranked = sorted(((p.headroom(), p) for p in self.providers),
+                        key=lambda t: t[0], reverse=True)     # headroom 快照一次
+        for h, p in ranked:
+            if h <= 0.0:
+                continue
+            if not self._breakers[p.name].allows():           # 試探閘在「真的要打」前才問
+                continue
             try:
                 text = p.generate(prompt, temperature=temperature, max_tokens=max_tokens)
                 self._breakers[p.name].record_success()
