@@ -54,12 +54,15 @@ def _parse_retry_after(headers, default=60):
         return default
 
 
-def _load_key(path):
+def _load_key(path, env_var):
     try:
         with open(path) as f:
-            return f.read().strip()
+            key = f.read().strip()
+        if key:
+            return key
     except FileNotFoundError:
-        return ""
+        pass
+    return os.environ.get(env_var, "")
 
 
 class HeaderLimiter:
@@ -228,7 +231,7 @@ class GroqProvider:
 
     @classmethod
     def load(cls):
-        key = _load_key(GROQ_KEY_PATH)
+        key = _load_key(GROQ_KEY_PATH, "GROQ_API_KEY")
         return cls(key) if key else None
 
     def generate(self, prompt, *, temperature, max_tokens, timeout):
@@ -292,7 +295,7 @@ class GeminiProvider:
 
     @classmethod
     def load(cls):
-        key = _load_key(GEMINI_KEY_PATH)
+        key = _load_key(GEMINI_KEY_PATH, "GEMINI_API_KEY")
         return cls(key) if key else None
 
     def generate(self, prompt, *, temperature, max_tokens, timeout):

@@ -242,6 +242,18 @@ class TestParsersAndHelpers:
 
     def test_load_without_key_returns_none(self, tmp_path, monkeypatch):
         monkeypatch.setattr(lld, "GEMINI_KEY_PATH", str(tmp_path / "nope"))
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         assert lld.GeminiProvider.load() is None
         monkeypatch.setattr(lld, "GROQ_KEY_PATH", str(tmp_path / "nope2"))
+        monkeypatch.delenv("GROQ_API_KEY", raising=False)
         assert lld.GroqProvider.load() is None
+
+    def test_load_falls_back_to_env_var(self, tmp_path, monkeypatch):
+        # 與 core 同步: key 檔缺失時退 env var (檔案優先、env 其次)
+        monkeypatch.setattr(lld, "GEMINI_KEY_PATH", str(tmp_path / "nope"))
+        monkeypatch.setenv("GEMINI_API_KEY", "env-key")
+        g = lld.GeminiProvider.load()
+        assert g is not None and g.name == "gemini"
+        monkeypatch.setattr(lld, "GROQ_KEY_PATH", str(tmp_path / "nope2"))
+        monkeypatch.setenv("GROQ_API_KEY", "env-key2")
+        assert lld.GroqProvider.load() is not None
