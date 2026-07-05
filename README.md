@@ -8,10 +8,12 @@
 
 | 組件 | 技術 | 用途 |
 |------|------|------|
-| LLM | **Groq API** | 生成例句 + 圖片搜尋關鍵字 |
+| LLM | **Groq API + Gemini API**（容量感知分流，見下） | 生成例句 + 圖片搜尋關鍵字 |
 | TTS | **edge-tts** | 正面 Andrew 男聲唸單字、背面 Ava 女聲唸句子 |
 | 圖片 | **Pexels API**（DuckDuckGo fallback） | 下載單字插圖 |
 | Anki | AnkiConnect addon | 程式與 Anki 溝通 |
+
+> LLM 呼叫（`core/llm.py`）會依剩餘額度自動在 Groq、Gemini 兩家之間分流，其中一家額度見底就自動切另一家；`.gemini_key` 沒設定就退回純 Groq，功能照常。目前僅 CLI / core 批次腳本走這套分流，Anki Addon（`⌘A`/`⌘S`）仍是單 Groq。
 
 ---
 
@@ -44,6 +46,10 @@
 ```bash
 # Groq（免費，https://console.groq.com）
 echo "gsk_your_key_here" > ~/Workspace/anki/.groq_key
+
+# Gemini（可選，免費，https://aistudio.google.com/apikey）
+# 有設定就雙 provider 容量感知分流；沒設定就退回純 Groq，功能照常
+echo "your_key_here" > ~/Workspace/anki/.gemini_key
 
 # Pexels（免費，https://www.pexels.com/api）
 echo "your_key_here" > ~/Workspace/anki/.pexels_key

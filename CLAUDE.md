@@ -33,6 +33,10 @@ Anki 自動化單字系統，牌組 `My_Daily_English`、筆記類型 `English_W
 - **TestCardsSection = 手動測 dialog 用的測試卡工具（開發輔助）**。建只有 `Front`+`Association` 的裸卡（Front 用純字母假詞 `zztest…`，因 `_looks_english` 擋數字）→ 它們會出現在 Complete Missing Cards 讓你勾選測試（如 Remove Selected）。全部打 tag `whiteforge_test`，Clean 靠 tag 一鍵刪。同步、直接動 `mw.col`（`new_note`/`add_note`/`find_notes`/`remove_notes`），無 worker。**與 CLI `make_test_cards.py` 是同一工具的兩份實作**（addon 不能 import core → tag 與假詞清單各存一份，標 KEEP-IN-SYNC；同 tag 故兩邊建的可互相清）。純邏輯 `_clamp_test_count`（Count 欄解析/夾限）抽出來給 pytest 測（`test_test_cards.py`）。
 - **為何 ClearFlaggedSection 不再「清空後重新生成」（舊 Refill 的坑，已廢）**：舊設計把「重置」和「重生成」綁成一個動作，清旗綁在 `card_done`（語意是「處理完」非「填好」），而各 generation helper 失敗都**靜默回 `""` 不 raise** → 部分成功的卡照樣 emit `card_done` 被清旗 → 半成品/空卡被當完成、Refill 下次掃不到。拆開後：清空只清空（不會失敗），生成一律走 ⌘S（掃欄位內容、不靠旗子，會自動認出被清空的卡）。`RefillWorker`／`RefillFlaggedDialog` 已刪除。
 - **對話框 UI 文字一律英文**（最後訂版語言規則，求一致）；但**程式註解 / docstring / LLM prompt 範例 / 中文偵測 regex 保持中文**。改 addon 對話框新增字串用英文。
+- core 的 LLM 文字呼叫一律走 `core/dispatcher.py`（容量感知分流 Groq+Gemini、斷路器、failover）；
+  provider 在 `core/providers.py`。Gemini 沒有 rate-limit header → 本地 bucket（配額常數 `GEMINI_RPM`）。
+  兩家見底時 `groq_generate_strict` 翻譯成 `RateLimitReached(soonest_reset)`。addon 尚未接（Phase 2），
+  仍是單 Groq。`backfill_words.py` 橫幅用 `engine_description()`。
 
 ## Git 規則
 

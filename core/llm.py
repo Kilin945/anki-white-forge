@@ -1,77 +1,48 @@
 import os
 import re
-from groq import Groq, RateLimitError
 
+from core.dispatcher import AllProvidersLimited, Dispatcher
+from core.providers import (GROQ_KEY_PATH, GROQ_MODEL, GeminiProvider,
+                            GroqProvider, _load_groq_client)
 from core.rate_limiter import RateLimitReached
 
-GROQ_KEY_PATH = os.path.expanduser("~/Workspace/anki/.groq_key")
-GROQ_MODEL = "llama-3.3-70b-versatile"
+_dispatcher = Dispatcher(
+    [p for p in (GroqProvider.load(), GeminiProvider.load()) if p])
 
 
-def _load_groq_client():
-    try:
-        with open(GROQ_KEY_PATH) as f:
-            key = f.read().strip()
-        if key:
-            return Groq(api_key=key)
-    except FileNotFoundError:
-        pass
-    env_key = os.environ.get("GROQ_API_KEY", "")
-    if env_key:
-        return Groq(api_key=env_key)
-    return None
-
-
-_groq_client = _load_groq_client()
+def engine_description():
+    """人看的引擎清單（backfill_words 橫幅）。"""
+    if not _dispatcher.providers:
+        return "no LLM (set .groq_key / .gemini_key)"
+    return " + ".join(f"{p.name} ({p.model})" for p in _dispatcher.providers)
 
 
 def groq_generate(prompt):
-    if not _groq_client:
+    """單發生成：任何失敗（含兩家見底）靜默回 ''。名字保留舊稱以免動全部呼叫端。"""
+    if not _dispatcher.providers:
         return ""
     try:
-        resp = _groq_client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=200,
-        )
-        return resp.choices[0].message.content.strip()
+        return _dispatcher.generate(prompt, temperature=0.7, max_tokens=200)
+    except AllProvidersLimited:
+        return ""
     except Exception as e:
-        print(f"  [groq error] {e}")
+        print(f"  [llm error] {e}")
         return ""
 
 
 def groq_generate_strict(prompt):
-    """Like groq_generate but raises RateLimitReached on 429 — for batch jobs."""
-    if not _groq_client:
+    """批次用：兩家見底 → 翻譯成既有 RateLimitReached（retry=最快恢復那家），
+    既有 pacing 呼叫端一行不改。"""
+    if not _dispatcher.providers:
         return ""
     try:
-        resp = _groq_client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=200,
-        )
-        return resp.choices[0].message.content.strip()
-    except RateLimitError as e:
-        raise RateLimitReached(_retry_after_from(e))
-    except Exception as e:
-        print(f"  [groq error] {e}")
-        return ""
-
-
-def _retry_after_from(exc, default=60):
-    """Seconds to wait from a Groq RateLimitError's Retry-After header; default if absent."""
-    try:
-        raw = exc.response.headers.get("retry-after")
-        secs = int(float(raw))
-        return secs if secs > 0 else default
-    except (AttributeError, TypeError, ValueError):
-        return default
+        return _dispatcher.generate(prompt, temperature=0.3, max_tokens=200)
+    except AllProvidersLimited as e:
+        raise RateLimitReached(int(e.soonest_reset) + 1)
 
 
 def llm(prompt):
-    return groq_generate(prompt)        # Groq only（已移除地端 ollama fallback：太吃記憶體）
+    return groq_generate(prompt)
 
 
 def _sentence_instructions(word, association=""):
