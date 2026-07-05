@@ -22,6 +22,7 @@ Anki 自動化單字系統，牌組 `My_Daily_English`、筆記類型 `English_W
 - 圖片偵測用 `"<img" in value`（不是 `bool(value)`），以處理殘留 HTML
 - `backfill_words.py` 在句子變動時會重生音檔（`need_sentence` flag）
 - ⌘A（Add）和 ⌘S（Complete）都會生成全部欄位含 `Translation`，共用 `Worker._groq_translate()`
+- ⌘S 按 Complete 時 `_on_run` 會用 `_note_snapshot()` **重新讀最新欄位**（不是 `_pending_notes` 這種開窗時的快照）；佔位符**絕不覆蓋非空真句子**（生成失敗時該不該寫佔位符是純函式 `_sentence_to_write`，None＝保留原句）——事故根因：舊版用開窗快照判斷「還缺什麼」，撞限重跑會把已生成的真句子蓋成佔位符。停批政策：`_dispatcher.wall_secs()` 量到的牆 ≤ `SHORT_WALL_WAIT`(2s) 就原地等掉續跑，更長才停批回報（雙 provider 常見秒級小牆，不值得整批中止）。批次/LLM 事件（failover、429、斷路器 OPEN、撞限停批、佔位符守門觸發）集中記錄到 `logs/addon_llm.log`（已 gitignore，`RotatingFileHandler` 1MB×3 輪替，經 `_lld.get_logger()`）
 - 非英文字元用共用 `_looks_english()` 擋：⌘A 建立前擋、⌘S 掃描時略過非英文卡片（手機/Anki 內建新增繞過 ⌘A，故 ⌘S 是最後關卡 → 驗證要兩邊都做、邏輯共用）
 - ⌘A 拼字另用 Groq `_groq_spellcheck()`（回 OK／更正字／NONWORD），斷網退 `_validate_helper.py` 離線拼字
 - `Sentence_CN`（整句中文翻譯）由 **⌘A（即時）、⌘S Complete（日常少量補完，只翻當下缺的幾張 → 不會撞速率）、Batch Operations 面板的「Backfill Sentence Translations」區塊 / `⌘F` / CLI `backfill_sentence_cn.py`（大量、節流）** 填。**CLI `backfill_words.py` 仍刻意不碰**（它是未節流的大量補齊，整句翻譯量大會撞速率上限 → 大量場景一律走 `backfill_sentence_cn.py`）。⌘S 與 backfill_words.py 的差異就在這：GUI ⌘S 補（量小、互動），CLI 大量補齊不補。翻譯：core `llm_translate_sentence` / addon `_groq_translate_sentence` 各寫一份（addon 不能 import core），驗證以「含中文且英文詞 < 3」判定 → 保留嵌入英文詞（concurrency、Microsoft）的合法譯文

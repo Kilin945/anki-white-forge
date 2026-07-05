@@ -29,6 +29,7 @@ from . import _llm_dispatch as _lld
 # 雙 provider 分流(KEEP-IN-SYNC 鏡像;無 .gemini_key 自動退化為單 Groq)
 _dispatcher = _lld.Dispatcher(
     [p for p in (_lld.GroqProvider.load(), _lld.GeminiProvider.load()) if p])
+_log = _lld.get_logger()   # 批次/LLM 事件集中記錄到 logs/addon_llm.log（gitignored）
 
 DECK_NAME    = "My_Daily_English"
 MODEL_NAME   = "English_White_Method"
@@ -74,6 +75,20 @@ def _looks_english(word):
     """True if plausibly English (letters + space / - / '); rejects CJK, digits, symbols.
     Shared charset gate for both ⌘D (add) and ⌘S (complete)."""
     return bool(ENGLISH_WORD_RE.fullmatch((word or "").strip()))
+
+
+def _sentence_to_write(current, generated, word):
+    """生成結果 → 該寫入 Sentence 的值；None = 不要寫（保住既有真句子）。
+    - 生成成功 → 寫生成句
+    - 生成失敗且既有值是空/佔位符 → 寫佔位符（維持原行為，讓卡片仍被掃到）
+    - 生成失敗但既有值是真句子 → None（絕不用佔位符蓋掉真句子）
+    第二次補卡的資料損毀事故（撞限失敗仍用佔位符蓋掉已生成的真句子）就是少了這一層守門；
+    第一層防線是 `_on_run` 改讀最新欄位，這裡是即使欄位判斷有誤也絕不覆蓋真句子的第二層。"""
+    if generated:
+        return generated
+    if not current or any(p in current for p in PLACEHOLDERS):
+        return f"Please add an example sentence for '{word}'."
+    return None
 
 
 def _accept_word_translation(word, reply):
@@ -621,6 +636,7 @@ class FieldRow(QWidget):
 # ── backfill worker ───────────────────────────────────────────────────────────
 
 MAX_BACKFILL_WORKERS = 3
+SHORT_WALL_WAIT = 2.0      # 秒。牆比這短就原地等掉續跑；更長才停批回報(人工核可的政策)
 
 
 class BackfillWorker(QThread):
@@ -647,10 +663,15 @@ class BackfillWorker(QThread):
         if self._hit_limit:
             return f"skip {word}"
         wall = _dispatcher.wall_secs()
+        if 0 < wall <= SHORT_WALL_WAIT:
+            _log.info("short wall %.1fs — waiting", wall)
+            time.sleep(wall + 0.2)             # 短牆:等掉它,額度窗口一過就續跑
+            wall = _dispatcher.wall_secs()
         if wall > 0:
             self._hit_limit = True
             self.retry_after = max(self.retry_after, int(wall) + 1)
             self.limit_resets = _dispatcher.resets()
+            _log.warning("⌘S stopped: resets=%s", self.limit_resets)
             return f"skip {word}"
         fields = {}
 
@@ -658,11 +679,16 @@ class BackfillWorker(QThread):
         if not current or any(p in current for p in PLACEHOLDERS):
             assoc = _clean_text(note["fields"].get("Association", {}).get("value", ""))
             sentence, _ = self._w._llm_sentence(word, assoc)
-            if not sentence:
-                sentence = f"Please add an example sentence for '{word}'."
-            fields["Sentence"] = sentence
-            self.step.emit(note_id, "sentence",
-                           "ok" if not any(p in sentence for p in PLACEHOLDERS) else "warn")
+            to_write = _sentence_to_write(current, sentence, word)
+            if to_write is not None:
+                fields["Sentence"] = to_write
+                sentence = to_write
+                self.step.emit(note_id, "sentence",
+                               "ok" if not any(p in to_write for p in PLACEHOLDERS) else "warn")
+            else:
+                sentence = _clean_text(current)   # keep the real sentence — don't overwrite with a placeholder
+                self.step.emit(note_id, "sentence", "warn")
+                _log.warning("%s: sentence gen failed, kept existing sentence", word)
         else:
             sentence = _clean_text(current)
 
@@ -744,6 +770,7 @@ class BackfillWorker(QThread):
 
     def run(self):
         from concurrent.futures import ThreadPoolExecutor, as_completed
+        _log.info("⌘S run start: %d cards", len(self.notes))
         results = []
         with ThreadPoolExecutor(max_workers=MAX_BACKFILL_WORKERS) as pool:
             futures = {pool.submit(self._process_one, note): note for note in self.notes}
@@ -773,6 +800,32 @@ def _note_incomplete(note):
     return (not note["Sentence"] or bad_sentence or not note["Audio"]
             or "<img" not in note["Image_Prompt"] or not front_audio
             or not translation or not sentence_cn)
+
+
+def _note_snapshot(note):
+    """Anki Note -> the field-dict shape BackfillWorker expects, read fresh from
+    mw.col.get_note() right now (main thread only — collection access must stay off
+    worker threads). Used by `_on_run` so a second Complete click always re-reads
+    current field values instead of trusting a snapshot taken when the dialog opened
+    (that staleness is what let a rate-limited retry overwrite a good sentence with a
+    placeholder — see _sentence_to_write). Notes already complete are harmless to pass
+    through: BackfillWorker's need_* checks skip everything for them."""
+    front_audio = note["Front_Audio"] if "Front_Audio" in note else ""
+    translation = note["Translation"] if "Translation" in note else ""
+    sentence_cn = note["Sentence_CN"] if "Sentence_CN" in note else ""
+    return {
+        "noteId": note.id,
+        "fields": {
+            "Front":        {"value": note["Front"]},
+            "Association":  {"value": note["Association"]},
+            "Sentence":     {"value": note["Sentence"]},
+            "Image_Prompt": {"value": note["Image_Prompt"]},
+            "Audio":        {"value": note["Audio"]},
+            "Front_Audio":  {"value": front_audio},
+            "Translation":  {"value": translation},
+            "Sentence_CN":  {"value": sentence_cn},
+        }
+    }
 
 
 # ── backfill dialog ───────────────────────────────────────────────────────────
@@ -920,7 +973,11 @@ class BackfillDialog(QDialog):
         self.run_btn.setEnabled(False)
         self.select_all.setEnabled(False)
         self.progress_bar.setVisible(True)
-        self._worker = BackfillWorker(selected, mw.col.media.dir())
+        # Re-read current field values now (not self._pending_notes, a snapshot from when
+        # the dialog opened) — a second Complete click must not think fields are still
+        # missing just because they were missing when the dialog was first opened.
+        fresh_notes = [_note_snapshot(mw.col.get_note(n["noteId"])) for n in selected]
+        self._worker = BackfillWorker(fresh_notes, mw.col.media.dir())
         self._worker.step.connect(self._on_step)
         self._worker.card_done.connect(self._on_card_done)
         self._worker.finished.connect(self._on_finished)

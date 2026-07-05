@@ -248,6 +248,22 @@ class TestParsersAndHelpers:
         monkeypatch.delenv("GROQ_API_KEY", raising=False)
         assert lld.GroqProvider.load() is None
 
+    def test_get_logger_returns_named_logger(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(lld, "LOG_PATH", str(tmp_path / "addon_llm.log"))
+        logger = lld.get_logger()
+        assert logger.name == "whiteforge.llm"
+
+    def test_get_logger_idempotent_no_duplicate_handlers(self, tmp_path, monkeypatch):
+        # 冪等性才是重點:logger 名稱在整個測試套件內是全域的(logging 模組的登記表用
+        # 名稱當 key,不分是哪個 spec_from_file_location 載入的模組實例)——所以這裡不
+        # 假設呼叫前 handler 數是 0,只驗證「呼叫兩次不會疊出第二個 handler」。
+        monkeypatch.setattr(lld, "LOG_PATH", str(tmp_path / "addon_llm2.log"))
+        logger1 = lld.get_logger()
+        count = len(logger1.handlers)
+        logger2 = lld.get_logger()
+        assert logger2 is logger1
+        assert len(logger2.handlers) == count
+
     def test_load_falls_back_to_env_var(self, tmp_path, monkeypatch):
         # 與 core 同步: key 檔缺失時退 env var (檔案優先、env 其次)
         monkeypatch.setattr(lld, "GEMINI_KEY_PATH", str(tmp_path / "nope"))

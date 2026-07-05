@@ -10,12 +10,31 @@ core → 邏輯鏡像一份，改一邊要改另一邊）。刻意差異（addon
 自足：只用 stdlib、無 aqt、無相對匯入 → 測試以 spec_from_file_location 直接載入。
 """
 import json
+import logging
+import logging.handlers
 import os
 import re
 import threading
 import time
 import urllib.error
 import urllib.request
+
+LOG_PATH = os.path.expanduser("~/Workspace/anki/logs/addon_llm.log")
+
+
+def get_logger():
+    """檔案 logger（1MB×3 輪替）。冪等：重複呼叫/重複載入模組不會疊 handler。"""
+    logger = logging.getLogger("whiteforge.llm")
+    if not logger.handlers:
+        os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+        h = logging.handlers.RotatingFileHandler(LOG_PATH, maxBytes=1_000_000,
+                                                 backupCount=3, encoding="utf-8")
+        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        logger.addHandler(h)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+    return logger
+
 
 GROQ_KEY_PATH = os.path.expanduser("~/Workspace/anki/.groq_key")
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -376,17 +395,27 @@ class Dispatcher:
                 continue
             if not self._breakers[p.name].allows():           # 攻擊前才取試探閘
                 continue
+            _log.debug("route → %s headroom=%.2f", p.name, h)
             try:
                 text = p.generate(prompt, temperature=temperature,
                                   max_tokens=max_tokens, timeout=timeout)
                 self._breakers[p.name].record_success()
                 return text
+            except ProviderRateLimited as e:
+                self._breakers[p.name].record_failure(e.retry_after)
+                _log.warning("%s 429 retry_after=%s", p.name, e.retry_after)
+                if self._breakers[p.name].open_remaining() > 0:
+                    _log.warning("breaker OPEN %s cooldown=%s", p.name, e.retry_after)
             except ProviderError as e:
                 cooldown = getattr(e, "retry_after", None)
                 self._breakers[p.name].record_failure(cooldown)
+                _log.warning("%s failed (%s) → failover", p.name, e)
+                if self._breakers[p.name].open_remaining() > 0:
+                    _log.warning("breaker OPEN %s cooldown=%s", p.name, cooldown)
             except Exception:
                 self._breakers[p.name].record_failure()   # 非預期例外也要釋放試探閘
                 raise
+        _log.warning("all providers limited resets=%s", self.resets())
         raise AllProvidersLimited(self.resets())
 
 
@@ -398,3 +427,6 @@ def format_reset_summary(resets):
         parts.append(f"{label} resets in ~{int(secs)}s" if i == 0
                      else f"{label} in ~{int(secs)}s")
     return ", ".join(parts)
+
+
+_log = get_logger()   # module logger — created once, used by Dispatcher above (late binding)

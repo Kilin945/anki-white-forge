@@ -10,3 +10,4 @@ __pycache__/
 .idea/
 addon/meta.json
 addon/__pycache__/
+logs/

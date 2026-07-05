@@ -252,3 +252,6 @@ A：確認 Groq 有在用（進度顯示 `Groq`）；造句失敗時不再退地
 
 **Q：同步時出現衝突對話框？**
 A：選「上傳到 AnkiWeb」— 電腦端是最新的
+
+**Q：想看 Complete Missing Cards / LLM 呼叫的除錯紀錄？**
+A：看 `logs/addon_llm.log`（自動產生、輪替保留最近 3MB）
