@@ -13,7 +13,7 @@
 | 圖片 | **Pexels API**（DuckDuckGo fallback） | 下載單字插圖 |
 | Anki | AnkiConnect addon | 程式與 Anki 溝通 |
 
-> LLM 呼叫（`core/llm.py`）會依剩餘額度自動在 Groq、Gemini 兩家之間分流，其中一家額度見底就自動切另一家；`.gemini_key` 沒設定就退回純 Groq，功能照常。目前僅 CLI / core 批次腳本走這套分流，Anki Addon（`⌘A`/`⌘S`）仍是單 Groq。
+> LLM 呼叫（`core/llm.py`）會依剩餘額度自動在 Groq、Gemini 兩家之間分流，其中一家額度見底就自動切另一家；`.gemini_key` 沒設定就退回純 Groq，功能照常。CLI / core 與 Anki Addon（`⌘A`/`⌘S`/批量面板）都走這套分流。
 
 ---
 
@@ -217,7 +217,7 @@ Anki/
 
 | 檔案 | 說明 |
 |------|------|
-| `addon/__init__.py` | Anki 插件主程式（symlink 到 `~/Library/.../addons21/my_word_adder/`）。`⌘A` 新增單字（含整句翻譯）、`⌘S` 補齊缺失卡片（例句/整句翻譯/圖/音/單字翻譯，少量日常用）、`⌘D` 找重複、`⌘F` / 選單 **Batch Operations…**（批量操作面板，堆疊式 section：上 `TranslateSection` 節流批次補整句翻譯、下 `ClearFlaggedSection` 清空紅旗卡內容+拔旗不生成；`BatchOperationsDialog` 組裝）。新增防護用正規化比對（HTML/大小寫變體都擋）。對話框 UI 一律英文。LLM 用 urllib 直呼 Groq，TTS/圖片透過 subprocess，BackfillWorker 3 路並發。改完需重啟 Anki |
+| `addon/__init__.py` | Anki 插件主程式（symlink 到 `~/Library/.../addons21/my_word_adder/`）。`⌘A` 新增單字（含整句翻譯）、`⌘S` 補齊缺失卡片（例句/整句翻譯/圖/音/單字翻譯，少量日常用）、`⌘D` 找重複、`⌘F` / 選單 **Batch Operations…**（批量操作面板，堆疊式 section：上 `TranslateSection` 節流批次補整句翻譯、下 `ClearFlaggedSection` 清空紅旗卡內容+拔旗不生成；`BatchOperationsDialog` 組裝）。新增防護用正規化比對（HTML/大小寫變體都擋）。對話框 UI 一律英文。LLM 經 `addon/_llm_dispatch.py`（Groq+Gemini 分流鏡像）以 urllib 直呼，TTS/圖片透過 subprocess，BackfillWorker 3 路並發。改完需重啟 Anki |
 
 ### 設定與測試
 

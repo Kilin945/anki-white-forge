@@ -24,12 +24,15 @@ from aqt.qt import (
 )
 from aqt.utils import showWarning, tooltip
 
+from . import _llm_dispatch as _lld
+
+# 雙 provider 分流(KEEP-IN-SYNC 鏡像;無 .gemini_key 自動退化為單 Groq)
+_dispatcher = _lld.Dispatcher(
+    [p for p in (_lld.GroqProvider.load(), _lld.GeminiProvider.load()) if p])
+
 DECK_NAME    = "My_Daily_English"
 MODEL_NAME   = "English_White_Method"
 ANKI_URL     = "http://127.0.0.1:8765"
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL   = "llama-3.3-70b-versatile"
-GROQ_KEY_PATH = os.path.expanduser("~/Workspace/anki/.groq_key")
 PLACEHOLDERS = ["No example found", "please add manually", "is used in English", "Please add an example"]
 VENV_PYTHON     = os.path.expanduser("~/Workspace/anki/.venv/bin/python")
 GTTS_SCRIPT     = os.path.expanduser("~/Workspace/anki/_gtts_helper.py")
@@ -56,14 +59,6 @@ BOX_STYLE = {  # text is just the field label; state shown by colour only (no �
     "warn":    ("border:1.5px solid #ea580c; border-radius:6px; padding:6px 8px; color:#ea580c; font-weight:600;", "{}"),
 }
 _FIELD_LABEL = dict(FIELD_BOXES)
-
-
-def _load_groq_key():
-    try:
-        with open(GROQ_KEY_PATH) as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        return os.environ.get("GROQ_API_KEY", "")
 
 
 def _clean_text(raw, *, lower=False):
@@ -138,103 +133,29 @@ def _deck_note_ids():
     return mw.col.find_notes(f'deck:"{DECK_NAME}" note:"{MODEL_NAME}"')
 
 
-def _parse_int(v):
-    try:
-        return int(v)
-    except (TypeError, ValueError):
-        return None
-
-
-def _parse_reset_secs(s):
-    """Groq reset header → seconds. Handles '1m26.4s' / '185ms' / '2.5s' / '1h2m'."""
-    if not s:
-        return 0.0
-    return sum(float(num) * {"ms": 0.001, "s": 1, "m": 60, "h": 3600}[unit]
-               for num, unit in re.findall(r"([\d.]+)(ms|s|m|h)", s))
-
-
-class _GroqLimiter:
-    """Adaptive rate-limit guard. Every Groq response carries the live limit + remaining
-    quota (x-ratelimit-* headers); we read them and, when the per-minute token budget runs
-    low, briefly wait for the bucket to refill — so bursts (⌘S) stay under the limit instead
-    of crashing into 429. Self-tuning: if Groq changes the limit (or we switch providers),
-    the headers reflect it, no hard-coded number. Thread-safe (⌘S calls Groq concurrently)."""
-
-    _TOKEN_FLOOR = 1500      # stop one call short of empty → never actually 429, no waiting
-
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._remaining_tokens = None
-        self._reset_at = 0.0
-
-    def wall_secs(self):
-        """How long until there's quota again (secs). 0 = clear to call now. The caller
-        stops immediately when this is > 0 — we never silently wait."""
-        with self._lock:
-            if self._remaining_tokens is None or self._remaining_tokens >= self._TOKEN_FLOOR:
-                return 0.0
-            return max(0.0, self._reset_at - time.monotonic())
-
-    def update(self, headers):
-        """Record live remaining tokens + reset time from a response's headers."""
-        if not headers:
-            return
-        rt = _parse_int(headers.get("x-ratelimit-remaining-tokens"))
-        if rt is None:
-            return
-        with self._lock:
-            self._remaining_tokens = rt
-            self._reset_at = time.monotonic() + _parse_reset_secs(headers.get("x-ratelimit-reset-tokens"))
-
-
-_groq_limiter = _GroqLimiter()
-
-
 def _groq_chat(prompt, *, temperature, max_tokens, timeout, strict=False):
-    """POST one user prompt to Groq; return the stripped reply, or '' on no key / any
-    failure. strict=True re-raises HTTP 429 as _AddonRateLimited (so the burst engine can
-    pace/stop) instead of swallowing it as ''."""
-    key = _load_groq_key()
-    if not key:
+    """One LLM text call via the dual-provider dispatcher; '' on no key / failure.
+    strict=True surfaces both-providers-limited as _AddonRateLimited (so the burst
+    engine can pace/stop) instead of swallowing it as ''."""
+    if not _dispatcher.providers:
         return ""
-    payload = json.dumps({
-        "model": GROQ_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }).encode()
-    req = urllib.request.Request(GROQ_API_URL, data=payload,
-              headers={"Content-Type": "application/json",
-                       "Authorization": f"Bearer {key}",
-                       "User-Agent": "AnkiWordAdder/1.0"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            _groq_limiter.update(r.headers)
-            return json.loads(r.read().decode())["choices"][0]["message"]["content"].strip()
-    except urllib.error.HTTPError as e:
-        if strict and e.code == 429:
-            raise _AddonRateLimited(_parse_retry_after(e.headers))
+        return _dispatcher.generate(prompt, temperature=temperature,
+                                    max_tokens=max_tokens, timeout=timeout)
+    except _lld.AllProvidersLimited as e:
+        if strict:
+            raise _AddonRateLimited(int(e.soonest_reset) + 1)
         return ""
     except Exception:
         return ""
 
 
 class _AddonRateLimited(Exception):
-    """Raised by _groq_chat(strict=True) on HTTP 429 — used to end a burst in 批次回填.
-    retry_after = seconds to wait before retrying (from Retry-After header, else 60)."""
+    """Raised by _groq_chat(strict=True) when all providers are rate-limited — used to
+    end a burst in 批次回填. retry_after = seconds to wait before retrying."""
     def __init__(self, retry_after=60):
         super().__init__("rate limited")
         self.retry_after = retry_after
-
-
-def _parse_retry_after(headers, default=60):
-    """Seconds to wait from a 429 Retry-After header; default if missing/invalid."""
-    raw = headers.get("Retry-After") if headers else None
-    try:
-        secs = int(float(raw))
-        return secs if secs > 0 else default
-    except (TypeError, ValueError):
-        return default
 
 
 def _groq_spellcheck(word):
@@ -716,6 +637,7 @@ class BackfillWorker(QThread):
         self._w.media_dir = media_dir
         self._hit_limit = False        # hit a real rate-limit wall → stop the rest, dialog notifies
         self.retry_after = 0
+        self.limit_resets = {}         # 撞牆當下兩家的恢復秒數(對話框訊息用)
 
     def _process_one(self, note):
         note_id = note["noteId"]
@@ -724,10 +646,11 @@ class BackfillWorker(QThread):
         # immediately (the dialog says how many are left). No waiting.
         if self._hit_limit:
             return f"skip {word}"
-        wall = _groq_limiter.wall_secs()
+        wall = _dispatcher.wall_secs()
         if wall > 0:
             self._hit_limit = True
             self.retry_after = max(self.retry_after, int(wall) + 1)
+            self.limit_resets = _dispatcher.resets()
             return f"skip {word}"
         fields = {}
 
@@ -1023,8 +946,15 @@ class BackfillDialog(QDialog):
         done = total - left
         if getattr(self._worker, "_hit_limit", False):
             secs = int(self._worker.retry_after)
-            self.status.setText(f"Hit the cloud rate limit — completed {done}, {left} still need "
-                                f"filling. Try again in ~{secs}s, then reselect.")
+            resets = getattr(self._worker, "limit_resets", {})
+            if len(resets) > 1:        # 雙 provider:報每家真實恢復時間
+                self.status.setText(
+                    f"Both providers out of quota — {_lld.format_reset_summary(resets)}. "
+                    f"Completed {done}, {left} still need filling.")
+            else:                      # 單 Groq 退化:沿用原措辭
+                self.status.setText(
+                    f"Hit the cloud rate limit — completed {done}, {left} still need "
+                    f"filling. Try again in ~{secs}s, then reselect.")
         elif left:
             self.status.setText(f"Completed {done}, {left} still need filling — some fields "
                                 f"didn't come back, try those again. Remember to sync Anki!")

@@ -18,7 +18,7 @@ Anki 自動化單字系統，牌組 `My_Daily_English`、筆記類型 `English_W
 
 - Addon 真檔在 repo `addon/`，symlink 到 Anki `addons21/my_word_adder/`；改完 `addon/` 需**重啟 Anki** 才生效
 - Addon（`addon/__init__.py`）跑在 Anki 的 Python，**不能 import `core/`** → 改用 subprocess 呼叫 `_image_helper.py`、`_gtts_helper.py`、`_validate_helper.py`
-- Addon 用 urllib 直呼 Groq（非 groq SDK）→ 一定要帶 `User-Agent: AnkiWordAdder/1.0` header
+- Addon 的 LLM 呼叫走 `addon/_llm_dispatch.py`（urllib、非 SDK；Groq 必帶 `User-Agent: AnkiWordAdder/1.0`）
 - 圖片偵測用 `"<img" in value`（不是 `bool(value)`），以處理殘留 HTML
 - `backfill_words.py` 在句子變動時會重生音檔（`need_sentence` flag）
 - ⌘A（Add）和 ⌘S（Complete）都會生成全部欄位含 `Translation`，共用 `Worker._groq_translate()`
@@ -35,8 +35,9 @@ Anki 自動化單字系統，牌組 `My_Daily_English`、筆記類型 `English_W
 - **對話框 UI 文字一律英文**（最後訂版語言規則，求一致）；但**程式註解 / docstring / LLM prompt 範例 / 中文偵測 regex 保持中文**。改 addon 對話框新增字串用英文。
 - core 的 LLM 文字呼叫一律走 `core/dispatcher.py`（容量感知分流 Groq+Gemini、斷路器、failover）；
   provider 在 `core/providers.py`。Gemini 沒有 rate-limit header → 本地 bucket（配額常數 `GEMINI_RPM`）。
-  兩家見底時 `groq_generate_strict` 翻譯成 `RateLimitReached(soonest_reset)`。addon 尚未接（Phase 2）
-  → 現況見 README 架構段。`backfill_words.py` 橫幅用 `engine_description()`。
+  兩家見底時 `groq_generate_strict` 翻譯成 `RateLimitReached(soonest_reset)`。addon 走鏡像子模組
+  `addon/_llm_dispatch.py`（KEEP-IN-SYNC 對照 core 兩檔；自足 stdlib-only → pytest 直接檔案載入測，
+  改動要同步雙邊）。`backfill_words.py` 橫幅用 `engine_description()`。
 
 ## Git 規則
 
