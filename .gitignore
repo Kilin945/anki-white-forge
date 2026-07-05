@@ -8,3 +8,5 @@ __pycache__/
 .groq_key
 .gemini_key
 .idea/
+addon/meta.json
+addon/__pycache__/

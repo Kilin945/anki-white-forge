@@ -16,7 +16,7 @@ Anki 自動化單字系統，牌組 `My_Daily_English`、筆記類型 `English_W
 
 ## Key Rules（改 code 踩雷點）
 
-- Addon 真檔在 repo `addon/`，symlink 到 Anki `addons21/my_word_adder/`；改完 `addon/` 需**重啟 Anki** 才生效
+- Addon 真檔在 repo `addon/`，Anki 端 `addons21/my_word_adder` 是**指向整個 `addon/` 資料夾的 symlink**（新增檔案自動生效，不用補 link；Anki 會把 `meta.json`/`__pycache__` 寫進 repo `addon/`，已 gitignore）；改完 `addon/` 需**重啟 Anki** 才生效
 - Addon（`addon/__init__.py`）跑在 Anki 的 Python，**不能 import `core/`** → 改用 subprocess 呼叫 `_image_helper.py`、`_gtts_helper.py`、`_validate_helper.py`
 - Addon 的 LLM 呼叫走 `addon/_llm_dispatch.py`（urllib、非 SDK；Groq 必帶 `User-Agent: AnkiWordAdder/1.0`）
 - 圖片偵測用 `"<img" in value`（不是 `bool(value)`），以處理殘留 HTML
@@ -26,7 +26,7 @@ Anki 自動化單字系統，牌組 `My_Daily_English`、筆記類型 `English_W
 - ⌘A 拼字另用 Groq `_groq_spellcheck()`（回 OK／更正字／NONWORD），斷網退 `_validate_helper.py` 離線拼字
 - `Sentence_CN`（整句中文翻譯）由 **⌘A（即時）、⌘S Complete（日常少量補完，只翻當下缺的幾張 → 不會撞速率）、Batch Operations 面板的「Backfill Sentence Translations」區塊 / `⌘F` / CLI `backfill_sentence_cn.py`（大量、節流）** 填。**CLI `backfill_words.py` 仍刻意不碰**（它是未節流的大量補齊，整句翻譯量大會撞速率上限 → 大量場景一律走 `backfill_sentence_cn.py`）。⌘S 與 backfill_words.py 的差異就在這：GUI ⌘S 補（量小、互動），CLI 大量補齊不補。翻譯：core `llm_translate_sentence` / addon `_groq_translate_sentence` 各寫一份（addon 不能 import core），驗證以「含中文且英文詞 < 3」判定 → 保留嵌入英文詞（concurrency、Microsoft）的合法譯文
 - **卡片模板裡「可點」的元件一律用 `<button>`/`<a>`，不要用 `<div>`** —— AnkiMobile 原生 tap 手勢會略過互動元件；用 `<div>`+JS `stopPropagation` 擋不住原生手勢（點擊會被當成翻牌/評分），且卡片 `<script>` 跑幾張後 AnkiMobile 會停止重跑。見 `templates/back.html` 的 `.trans-box`（翻譯框）
-- 大量翻譯走 pacing（撞 429 就等 `Retry-After` 再續，不猜固定批量）。偵測 429：core `groq_generate_strict` 拋 `RateLimitReached`、addon `_groq_chat_strict` 拋 `_AddonRateLimited`，各帶 `retry_after`
+- 大量翻譯走 pacing（撞 429 就等 `Retry-After` 再續，不猜固定批量）。偵測 429：core `groq_generate_strict` 拋 `RateLimitReached`、addon `_groq_chat(strict=True)` 在兩家 provider 都不可用（`AllProvidersLimited`）時拋 `_AddonRateLimited`，各帶 `retry_after`
 - 例句與單字翻譯的「語意」由**造句 prompt** 決定，優先序：**Association（提示）→ SWE 領域義 → 常用日常義**；單字翻譯（`_groq_translate` / `llm_translate`）一律「依句中用法」翻、且**禁列近義重複詞**（如「水杯、茶杯」）。造句 prompt 有**兩份且須同步**：addon `_sentence_prompt` 與 core `_sentence_instructions`（addon 不能 import core，改一邊要改另一邊，檔內已標 KEEP-IN-SYNC）。association 已串進 ⌘A / ⌘S / CLI 造句，不要再讓它只餵圖片。
 - **Batch Operations 面板（⌘F / 選單 Batch Operations…）= 統一批量面板**，三個堆疊式 section：上 `TranslateSection`（批次補整句翻譯，沿用 `SentenceCNWorker`）、中 `ClearFlaggedSection`（清空紅旗卡）、下 `TestCardsSection`（產生/清除測試卡）。`BatchOperationsDialog` 用 `QFrame` 分隔線（`_hline()`）組裝，section 各自 `QWidget` 自帶 scan/state，未來加新批量功能就再加一個 section widget。section 要關面板就呼叫傳入的 `panel.accept()`。
 - **ClearFlaggedSection = 手機標紅旗 → Mac 清空+拔旗（刻意不生成）**。手機端**做不到**清/改欄位（AnkiMobile 無外掛、卡片模板 JS 不能寫欄位、連 flag/mark 都不行，Anki 開發者明言）→ 手機只用 **Anki 內建紅旗**標記。清空：對每張 `update_note` 清 6 欄（`REFILL_CLEAR_FIELDS`，保留 `Front`+`Association`）+ `set_user_flag_for_cards(0, cids)` 拔旗 → `save`+`reset`。**同步、瞬間、無 worker/進度條/Stop**。重生交給 ⌘S（清完顯示「Open Complete Missing Cards」一鍵跳 ⌘S，或 Done）。掃卡比照 `BackfillDialog` 用 `_looks_english` 略過非英文/空 Front；只認 `flag:1`；**列出清單 + 按 Clear 就是閘門，不做二次確認 dialog**。

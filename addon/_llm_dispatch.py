@@ -261,7 +261,7 @@ class GroqProvider:
             raise ProviderError(str(e))
         try:
             return data["choices"][0]["message"]["content"].strip()
-        except (KeyError, IndexError, TypeError):
+        except (KeyError, IndexError, TypeError, AttributeError):
             raise ProviderError("bad response shape")
 
     def headroom(self):

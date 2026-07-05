@@ -55,6 +55,8 @@ echo "your_key_here" > ~/Workspace/anki/.gemini_key
 echo "your_key_here" > ~/Workspace/anki/.pexels_key
 ```
 
+> Key 檔在 Anki 插件啟動時讀取一次——新增或更換 key 後，重啟 Anki 才生效（CLI 腳本則每次執行時讀）。
+
 ### Python 環境
 ```bash
 cd ~/Workspace/anki
