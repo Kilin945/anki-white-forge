@@ -125,6 +125,42 @@ def _need_sentence_audio(existing_audio, sentence, sentence_was_rewritten):
     return (not existing_audio) or sentence_was_rewritten
 
 
+# traceback 濃縮:整頁 stderr → 最關鍵的 1~2 行例外訊息。
+# Python traceback 精華永遠在最下面,且例外行「頂格不縮排」;
+# File/code/^^^^ 都縮排、框架句可辨識 → 過濾掉後取最後幾行即為病根。
+_TB_FRAME_LINES = (
+    "Traceback (most recent call last):",
+    "The above exception was the direct cause of the following exception:",
+    "During handling of the above exception, another exception occurred:",
+)
+
+
+def _key_error_lines(stderr, max_lines=2):
+    """把 subprocess 的整頁 traceback 濃縮成最關鍵的例外行(給面板顯示)。
+    過濾縮排的 File/code 行、^^^^/~~~~ 指示箭頭、...<N lines>... 省略標記、
+    框架句;保留頂格的例外行(如 socket.gaierror: ...),取最後 max_lines 行。
+    萃取不到(非 traceback 字串)→ 回最後一條非空行(截斷)。"""
+    lines = [ln.rstrip() for ln in (stderr or "").splitlines()]
+    exc_lines = []
+    for ln in lines:
+        s = ln.strip()
+        if not s:
+            continue
+        if ln[0].isspace():            # 縮排 → File / code / ^^^^ / ~~~~
+            continue
+        if set(s) <= set("^~"):        # 純指示箭頭(保險:萬一沒縮排)
+            continue
+        if s.startswith("...<") and s.endswith(">..."):   # ...<5 lines>...
+            continue
+        if s in _TB_FRAME_LINES:
+            continue
+        exc_lines.append(s)
+    if exc_lines:
+        return "\n".join(exc_lines[-max_lines:])
+    tail = [ln.strip() for ln in lines if ln.strip()]     # fallback:最後一條非空行
+    return tail[-1][:300] if tail else ""
+
+
 def _accept_word_translation(word, reply):
     """Validate a word-translation reply. Accept: a Chinese gloss (<=8 漢字, not a sentence,
     not buried in English preamble), OR a short English proper-noun NAME that echoes the
@@ -377,7 +413,11 @@ class Worker(QThread):
             capture_output=True, text=True, timeout=30,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"TTS batch failed: {result.stderr.strip()}")
+            detail = _key_error_lines(result.stderr)
+            raise RuntimeError(
+                "Audio generation failed. Check your network and retry."
+                + (f"\n\n{detail}" if detail else "")
+            )
 
 
 # ── dialog ───────────────────────────────────────────────────────────────────
@@ -425,6 +465,7 @@ class AddWordDialog(QDialog):
 
         self.status = QLabel("")
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status.setWordWrap(True)    # 錯誤訊息可能多行/長 → 換行不截斷
         root.addWidget(self.status)
 
         self.progress_bar = QProgressBar()
