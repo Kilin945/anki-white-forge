@@ -49,6 +49,11 @@ GEMINI_MODEL = "gemini-flash-latest"  # 浮動別名：模型換代不會 404（
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GEMINI_RPM = 15          # 免費層每分鐘請求數（2026-07 查自官方文件；變了改這裡）
 
+# 兩家現行模型都是思考型：思考 token 也算進 max_tokens/maxOutputTokens，
+# 小預算（翻譯 32、拼字 12）會被思考吃光 → 正文空字串。呼叫端的 max_tokens
+# 語意維持「正文預算」，送出時由 provider 加上這個餘裕（實測 low 思考約 60-100 token）。
+REASONING_HEADROOM = 512
+
 USER_AGENT = "AnkiWordAdder/1.0"
 
 
@@ -272,7 +277,8 @@ class GroqProvider:
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": temperature,
-            "max_tokens": max_tokens,
+            "max_tokens": max_tokens + REASONING_HEADROOM,
+            "reasoning_effort": "low",
         }).encode()
         req = urllib.request.Request(GROQ_API_URL, data=payload,
                   headers={"Content-Type": "application/json",
@@ -342,7 +348,8 @@ class GeminiProvider:
         payload = json.dumps({
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": temperature,
-                                 "maxOutputTokens": max_tokens},
+                                 "maxOutputTokens": max_tokens + REASONING_HEADROOM,
+                                 "thinkingConfig": {"thinkingLevel": "low"}},
         }).encode()
         req = urllib.request.Request(GEMINI_URL.format(model=self.model), data=payload,
                   headers={"Content-Type": "application/json",

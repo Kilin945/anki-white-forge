@@ -130,6 +130,11 @@ GEMINI_MODEL = "gemini-flash-latest"  # 浮動別名：模型換代不會 404（
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GEMINI_RPM = 15          # 免費層每分鐘請求數（2026-07 查自官方文件；變了改這裡）
 
+# 兩家現行模型都是思考型：思考 token 也算進 max_tokens/maxOutputTokens，
+# 小預算（翻譯 32、拼字 12）會被思考吃光 → 正文空字串。呼叫端的 max_tokens
+# 語意維持「正文預算」，送出時由 provider 加上這個餘裕（實測 low 思考約 60-100 token）。
+REASONING_HEADROOM = 512
+
 
 class ProviderError(Exception):
     """Provider 呼叫失敗（非 429）。"""
@@ -195,7 +200,8 @@ class GroqProvider:
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_tokens=max_tokens + REASONING_HEADROOM,
+                extra_body={"reasoning_effort": "low"},
             )
             self._limiter.update(raw.headers)
             text = raw.parse().choices[0].message.content.strip()
@@ -261,7 +267,8 @@ class GeminiProvider:
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": temperature,
-                                 "maxOutputTokens": max_tokens},
+                                 "maxOutputTokens": max_tokens + REASONING_HEADROOM,
+                                 "thinkingConfig": {"thinkingLevel": "low"}},
         }
         self._limiter.record_call()
         try:
