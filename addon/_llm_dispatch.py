@@ -42,10 +42,10 @@ def get_logger():
 
 GROQ_KEY_PATH = os.path.expanduser("~/Workspace/anki/.groq_key")
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "openai/gpt-oss-120b"
 
 GEMINI_KEY_PATH = os.path.expanduser("~/Workspace/anki/.gemini_key")
-GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = "gemini-flash-latest"  # 浮動別名：模型換代不會 404（2026-08 llama-3.3/gemini-2.0 同日退役事故）
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GEMINI_RPM = 15          # 免費層每分鐘請求數（2026-07 查自官方文件；變了改這裡）
 
