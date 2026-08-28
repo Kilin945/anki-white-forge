@@ -142,3 +142,70 @@ class TestProviderLoad:
         monkeypatch.setattr(prov, "GEMINI_KEY_PATH", str(p))
         g = prov.GeminiProvider.load()
         assert g is not None and g.name == "gemini"
+
+
+class TestEffortPayload:
+    """effort → Groq reasoning_effort / Gemini thinkingLevel + headroom。"""
+
+    def _groq_kwargs(self, **gen_kw):
+        captured = {}
+
+        class _FakeRaw:
+            headers = {}
+            def parse(self):
+                class _M:
+                    content = "hi"
+                class _C:
+                    message = _M()
+                class _P:
+                    choices = [_C()]
+                return _P()
+
+        class _FakeClient:
+            class chat:
+                class completions:
+                    class with_raw_response:
+                        @staticmethod
+                        def create(**kw):
+                            captured.update(kw)
+                            return _FakeRaw()
+
+        prov.GroqProvider(_FakeClient()).generate("p", temperature=0, max_tokens=32, **gen_kw)
+        return captured
+
+    def test_groq_default_low(self):
+        kw = self._groq_kwargs()
+        assert kw["extra_body"]["reasoning_effort"] == "low"
+        assert kw["max_tokens"] == 32 + prov.REASONING_HEADROOM
+
+    def test_groq_medium_deeper_headroom(self):
+        kw = self._groq_kwargs(effort="medium")
+        assert kw["extra_body"]["reasoning_effort"] == "medium"
+        assert kw["max_tokens"] == 32 + prov.REASONING_HEADROOM_DEEP
+
+    def _gemini_cfg(self, monkeypatch, **gen_kw):
+        captured = {}
+
+        class _StubResponse:
+            status_code = 200
+            text = ""
+            def json(self):
+                return {"candidates": [{"content": {"parts": [{"text": "hi"}]}}]}
+
+        def fake_post(url, json=None, timeout=None, headers=None):
+            captured.update(json)
+            return _StubResponse()
+
+        monkeypatch.setattr(prov.requests, "post", fake_post)
+        prov.GeminiProvider("k").generate("p", temperature=0, max_tokens=32, **gen_kw)
+        return captured["generationConfig"]
+
+    def test_gemini_default_low(self, monkeypatch):
+        cfg = self._gemini_cfg(monkeypatch)
+        assert cfg["thinkingConfig"]["thinkingLevel"] == "low"
+        assert cfg["maxOutputTokens"] == 32 + prov.REASONING_HEADROOM
+
+    def test_gemini_medium_maps_to_high(self, monkeypatch):
+        cfg = self._gemini_cfg(monkeypatch, effort="medium")
+        assert cfg["thinkingConfig"]["thinkingLevel"] == "high"
+        assert cfg["maxOutputTokens"] == 32 + prov.REASONING_HEADROOM_DEEP

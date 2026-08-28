@@ -16,12 +16,12 @@ def engine_description():
     return " + ".join(f"{p.name} ({p.model})" for p in _dispatcher.providers)
 
 
-def groq_generate(prompt):
+def groq_generate(prompt, effort="low"):
     """單發生成：任何失敗（含兩家見底）靜默回 ''。名字保留舊稱以免動全部呼叫端。"""
     if not _dispatcher.providers:
         return ""
     try:
-        return _dispatcher.generate(prompt, temperature=0.7, max_tokens=200)
+        return _dispatcher.generate(prompt, temperature=0.7, max_tokens=200, effort=effort)
     except AllProvidersLimited:
         print("  [llm] all providers limited — skipping")
         return ""
@@ -41,8 +41,8 @@ def groq_generate_strict(prompt):
         raise RateLimitReached(int(e.soonest_reset) + 1)
 
 
-def llm(prompt):
-    return groq_generate(prompt)
+def llm(prompt, effort="low"):
+    return groq_generate(prompt, effort=effort)
 
 
 def _sentence_instructions(word, association=""):
@@ -75,7 +75,7 @@ def _sentence_instructions(word, association=""):
 
 def llm_sentence(word, association=""):
     prompt = _sentence_instructions(word, association) + "\n\nOutput only the sentence. No explanation, no quotes."
-    result = llm(prompt)
+    result = llm(prompt, effort="medium")     # 造句是多條件約束任務 → 較高思考等級
     return result if len(result) > 10 else ""
 
 
@@ -103,7 +103,7 @@ def llm_sentence_and_query(word, association="", sentence=""):
         "the meaning you used.\n\n"
         "Output only the two lines, nothing else. No labels, no numbering."
     )
-    result = llm(prompt)
+    result = llm(prompt, effort="medium")     # 造句是多條件約束任務 → 較高思考等級
     lines = [l.strip() for l in result.strip().splitlines() if l.strip()]
     if len(lines) >= 2:
         sent = lines[0].strip('"\'')

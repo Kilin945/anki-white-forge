@@ -51,8 +51,19 @@ GEMINI_RPM = 15          # 免費層每分鐘請求數（2026-07 查自官方文
 
 # 兩家現行模型都是思考型：思考 token 也算進 max_tokens/maxOutputTokens，
 # 小預算（翻譯 32、拼字 12）會被思考吃光 → 正文空字串。呼叫端的 max_tokens
-# 語意維持「正文預算」，送出時由 provider 加上這個餘裕（實測 low 思考約 60-100 token）。
+# 語意維持「正文預算」，送出時由 provider 加上思考餘裕（實測 low 思考約 60-100 token）。
+# effort="medium"（造句用）思考較長 → 給更深的餘裕。
 REASONING_HEADROOM = 512
+REASONING_HEADROOM_DEEP = 1024
+
+
+def _reasoning_headroom(effort):
+    return REASONING_HEADROOM if effort == "low" else REASONING_HEADROOM_DEEP
+
+
+def _thinking_level(effort):
+    # Gemini 只有 low/high 兩檔（minimal 被 API 拒絕）→ low 以上一律 high
+    return "low" if effort == "low" else "high"
 
 USER_AGENT = "AnkiWordAdder/1.0"
 
@@ -272,13 +283,13 @@ class GroqProvider:
         key = _load_key(GROQ_KEY_PATH, "GROQ_API_KEY")
         return cls(key) if key else None
 
-    def generate(self, prompt, *, temperature, max_tokens, timeout):
+    def generate(self, prompt, *, temperature, max_tokens, timeout, effort="low"):
         payload = json.dumps({
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": temperature,
-            "max_tokens": max_tokens + REASONING_HEADROOM,
-            "reasoning_effort": "low",
+            "max_tokens": max_tokens + _reasoning_headroom(effort),
+            "reasoning_effort": effort,
         }).encode()
         req = urllib.request.Request(GROQ_API_URL, data=payload,
                   headers={"Content-Type": "application/json",
@@ -344,12 +355,12 @@ class GeminiProvider:
         key = _load_key(GEMINI_KEY_PATH, "GEMINI_API_KEY")
         return cls(key) if key else None
 
-    def generate(self, prompt, *, temperature, max_tokens, timeout):
+    def generate(self, prompt, *, temperature, max_tokens, timeout, effort="low"):
         payload = json.dumps({
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": temperature,
-                                 "maxOutputTokens": max_tokens + REASONING_HEADROOM,
-                                 "thinkingConfig": {"thinkingLevel": "low"}},
+                                 "maxOutputTokens": max_tokens + _reasoning_headroom(effort),
+                                 "thinkingConfig": {"thinkingLevel": _thinking_level(effort)}},
         }).encode()
         req = urllib.request.Request(GEMINI_URL.format(model=self.model), data=payload,
                   headers={"Content-Type": "application/json",
@@ -419,7 +430,7 @@ class Dispatcher:
         r = self.resets()
         return min(r.values()) if r else 0.0
 
-    def generate(self, prompt, *, temperature, max_tokens, timeout):
+    def generate(self, prompt, *, temperature, max_tokens, timeout, effort="low"):
         ranked = sorted(((p.headroom(), p) for p in self.providers),
                         key=lambda t: t[0], reverse=True)     # headroom 快照一次
         for h, p in ranked:
@@ -430,7 +441,8 @@ class Dispatcher:
             _log.debug("route → %s headroom=%.2f", p.name, h)
             try:
                 text = p.generate(prompt, temperature=temperature,
-                                  max_tokens=max_tokens, timeout=timeout)
+                                  max_tokens=max_tokens, timeout=timeout,
+                                  effort=effort)
                 self._breakers[p.name].record_success()
                 return text
             except ProviderRateLimited as e:

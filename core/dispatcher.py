@@ -76,7 +76,7 @@ class Dispatcher:
             out[p.name] = max(p.reset_secs(), self._breakers[p.name].open_remaining())
         return out
 
-    def generate(self, prompt, *, temperature=0.7, max_tokens=200):
+    def generate(self, prompt, *, temperature=0.7, max_tokens=200, effort="low"):
         ranked = sorted(((p.headroom(), p) for p in self.providers),
                         key=lambda t: t[0], reverse=True)     # headroom 快照一次
         for h, p in ranked:
@@ -85,7 +85,8 @@ class Dispatcher:
             if not self._breakers[p.name].allows():           # 試探閘在「真的要打」前才問
                 continue
             try:
-                text = p.generate(prompt, temperature=temperature, max_tokens=max_tokens)
+                text = p.generate(prompt, temperature=temperature, max_tokens=max_tokens,
+                                  effort=effort)
                 self._breakers[p.name].record_success()
                 return text
             except ProviderError as e:

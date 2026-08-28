@@ -132,8 +132,19 @@ GEMINI_RPM = 15          # 免費層每分鐘請求數（2026-07 查自官方文
 
 # 兩家現行模型都是思考型：思考 token 也算進 max_tokens/maxOutputTokens，
 # 小預算（翻譯 32、拼字 12）會被思考吃光 → 正文空字串。呼叫端的 max_tokens
-# 語意維持「正文預算」，送出時由 provider 加上這個餘裕（實測 low 思考約 60-100 token）。
+# 語意維持「正文預算」，送出時由 provider 加上思考餘裕（實測 low 思考約 60-100 token）。
+# effort="medium"（造句用）思考較長 → 給更深的餘裕。
 REASONING_HEADROOM = 512
+REASONING_HEADROOM_DEEP = 1024
+
+
+def _reasoning_headroom(effort):
+    return REASONING_HEADROOM if effort == "low" else REASONING_HEADROOM_DEEP
+
+
+def _thinking_level(effort):
+    # Gemini 只有 low/high 兩檔（minimal 被 API 拒絕）→ low 以上一律 high
+    return "low" if effort == "low" else "high"
 
 
 class ProviderError(Exception):
@@ -194,14 +205,14 @@ class GroqProvider:
         client = _load_groq_client()
         return cls(client) if client else None
 
-    def generate(self, prompt, *, temperature=0.7, max_tokens=200):
+    def generate(self, prompt, *, temperature=0.7, max_tokens=200, effort="low"):
         try:
             raw = self._client.chat.completions.with_raw_response.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
-                max_tokens=max_tokens + REASONING_HEADROOM,
-                extra_body={"reasoning_effort": "low"},
+                max_tokens=max_tokens + _reasoning_headroom(effort),
+                extra_body={"reasoning_effort": effort},
             )
             self._limiter.update(raw.headers)
             text = raw.parse().choices[0].message.content.strip()
@@ -262,13 +273,13 @@ class GeminiProvider:
         env_key = os.environ.get("GEMINI_API_KEY", "")
         return cls(env_key) if env_key else None
 
-    def generate(self, prompt, *, temperature=0.7, max_tokens=200):
+    def generate(self, prompt, *, temperature=0.7, max_tokens=200, effort="low"):
         url = GEMINI_URL.format(model=self.model)
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": temperature,
-                                 "maxOutputTokens": max_tokens + REASONING_HEADROOM,
-                                 "thinkingConfig": {"thinkingLevel": "low"}},
+                                 "maxOutputTokens": max_tokens + _reasoning_headroom(effort),
+                                 "thinkingConfig": {"thinkingLevel": _thinking_level(effort)}},
         }
         self._limiter.record_call()
         try:

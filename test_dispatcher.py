@@ -250,3 +250,27 @@ class TestBreakerIntegration:
             # 有 bug：A allows() 擋住（probe 卡死） → failover 到 B → "fallback"
             result = d.generate("p")
             assert result == "ok"  # 修好的話得到 "ok"；有 bug 會是 "fallback"
+
+
+class TestEffortPassthrough:
+    def test_default_effort_is_low(self):
+        p = FakeProvider("groq")
+        p.last_kwargs = None
+        orig = p.generate
+        def spy(prompt, **kw):
+            p.last_kwargs = kw
+            return orig(prompt, **kw)
+        p.generate = spy
+        disp.Dispatcher([p]).generate("p", temperature=0, max_tokens=8)
+        assert p.last_kwargs["effort"] == "low"
+
+    def test_explicit_effort_forwarded(self):
+        p = FakeProvider("groq")
+        p.last_kwargs = None
+        orig = p.generate
+        def spy(prompt, **kw):
+            p.last_kwargs = kw
+            return orig(prompt, **kw)
+        p.generate = spy
+        disp.Dispatcher([p]).generate("p", temperature=0, max_tokens=8, effort="medium")
+        assert p.last_kwargs["effort"] == "medium"

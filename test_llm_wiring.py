@@ -64,3 +64,25 @@ class TestWiring:
 
     def test_load_groq_client_still_importable(self):
         assert callable(llm_mod._load_groq_client)     # test_backfill.py 靠它
+
+
+class TestSentenceEffort:
+    """造句走較高思考等級（effort=medium）；其他呼叫維持預設 low。"""
+
+    def test_llm_sentence_uses_medium_effort(self):
+        fake = _FakeDispatcher(reply="A cat sat on the warm mat.")
+        with patch.object(llm_mod, "_dispatcher", fake):
+            llm_mod.llm_sentence("cat")
+        assert fake.kwargs["effort"] == "medium"
+
+    def test_llm_sentence_and_query_uses_medium_effort(self):
+        fake = _FakeDispatcher(reply="A cat sat.\ncat photo")
+        with patch.object(llm_mod, "_dispatcher", fake):
+            llm_mod.llm_sentence_and_query("cat")
+        assert fake.kwargs["effort"] == "medium"
+
+    def test_llm_translate_defaults_to_low_effort(self):
+        fake = _FakeDispatcher(reply="貓")
+        with patch.object(llm_mod, "_dispatcher", fake):
+            llm_mod.llm_translate("cat", "A cat sat.")
+        assert fake.kwargs["effort"] == "low"

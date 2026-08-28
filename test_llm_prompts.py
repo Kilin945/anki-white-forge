@@ -7,7 +7,7 @@ import core.llm as llm_mod
 def _capture(fn, *args):
     """Call fn with llm() patched to record the prompt and return a valid 2-line reply."""
     seen = {}
-    def fake_llm(prompt):
+    def fake_llm(prompt, **kw):
         seen["prompt"] = prompt
         return "A developer follows the team's naming convention here.\nnaming convention code screen"
     with patch.object(llm_mod, "llm", fake_llm):

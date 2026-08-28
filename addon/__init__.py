@@ -218,7 +218,7 @@ def _deck_note_ids():
     return mw.col.find_notes(f'deck:"{DECK_NAME}" note:"{MODEL_NAME}"')
 
 
-def _groq_chat(prompt, *, temperature, max_tokens, timeout, strict=False):
+def _groq_chat(prompt, *, temperature, max_tokens, timeout, strict=False, effort="low"):
     """One LLM text call via the dual-provider dispatcher; '' on no key / failure.
     strict=True surfaces both-providers-limited as _AddonRateLimited (so the burst
     engine can pace/stop) instead of swallowing it as ''."""
@@ -226,7 +226,8 @@ def _groq_chat(prompt, *, temperature, max_tokens, timeout, strict=False):
         return ""
     try:
         return _dispatcher.generate(prompt, temperature=temperature,
-                                    max_tokens=max_tokens, timeout=timeout)
+                                    max_tokens=max_tokens, timeout=timeout,
+                                    effort=effort)
     except _lld.AllProvidersLimited as e:
         if strict:
             raise _AddonRateLimited(int(e.soonest_reset) + 1)
@@ -344,7 +345,9 @@ class Worker(QThread):
     # ── helpers ──────────────────────────────────────────────────────────────
 
     def _groq_sentence(self, word, association=""):
-        return _groq_chat(_sentence_prompt(word, association), temperature=0.7, max_tokens=200, timeout=15)
+        # 造句是多條件約束任務 → 較高思考等級（其餘呼叫維持預設 low）
+        return _groq_chat(_sentence_prompt(word, association), temperature=0.7,
+                          max_tokens=200, timeout=15, effort="medium")
 
     def _llm_sentence(self, word, association=""):
         result = self._groq_sentence(word, association)

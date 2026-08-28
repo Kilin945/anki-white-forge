@@ -165,7 +165,8 @@ class TestDispatcher:
         b = FakeProvider("gemini", headroom=0.9, reply="from-gemini")
         d = lld.Dispatcher([a, b])
         assert d.generate("p", temperature=0.5, max_tokens=64, timeout=9) == "from-gemini"
-        assert b.last_kwargs == {"temperature": 0.5, "max_tokens": 64, "timeout": 9}
+        assert b.last_kwargs == {"temperature": 0.5, "max_tokens": 64, "timeout": 9,
+                                 "effort": "low"}
         assert a.calls == 0
 
     def test_switches_when_headroom_shifts(self):
@@ -326,3 +327,78 @@ class TestGemini429Backoff:
         assert secs[0] == pytest.approx(2.0)
         assert secs[1] == pytest.approx(4.0)   # 2×2^1
         assert secs[2] == pytest.approx(8.0)   # 2×2^2
+
+
+class _CapturedResp:
+    """假 HTTP 回應（context manager），給 payload 捕捉測試用。"""
+    def __init__(self, body):
+        self._body = body
+        self.headers = {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self):
+        return self._body
+
+
+class TestEffort:
+    """effort 參數：dispatcher 傳遞 + 兩家 provider 的思考等級/headroom payload。"""
+
+    def test_dispatcher_passes_effort_default_low(self):
+        p = FakeProvider("groq")
+        d = lld.Dispatcher([p])
+        d.generate("p", temperature=0, max_tokens=8, timeout=5)
+        assert p.last_kwargs["effort"] == "low"
+
+    def test_dispatcher_passes_effort_explicit(self):
+        p = FakeProvider("groq")
+        d = lld.Dispatcher([p])
+        d.generate("p", temperature=0, max_tokens=8, timeout=5, effort="medium")
+        assert p.last_kwargs["effort"] == "medium"
+
+    def _groq_payload(self, monkeypatch, **gen_kw):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured.update(lld.json.loads(req.data.decode()))
+            return _CapturedResp(b'{"choices":[{"message":{"content":"hi"}}]}')
+
+        monkeypatch.setattr(lld.urllib.request, "urlopen", fake_urlopen)
+        lld.GroqProvider("k").generate("p", temperature=0, max_tokens=32, timeout=5, **gen_kw)
+        return captured
+
+    def test_groq_default_low_effort_and_headroom(self, monkeypatch):
+        payload = self._groq_payload(monkeypatch)
+        assert payload["reasoning_effort"] == "low"
+        assert payload["max_tokens"] == 32 + lld.REASONING_HEADROOM
+
+    def test_groq_medium_effort_deeper_headroom(self, monkeypatch):
+        payload = self._groq_payload(monkeypatch, effort="medium")
+        assert payload["reasoning_effort"] == "medium"
+        assert payload["max_tokens"] == 32 + lld.REASONING_HEADROOM_DEEP
+
+    def _gemini_payload(self, monkeypatch, **gen_kw):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured.update(lld.json.loads(req.data.decode()))
+            return _CapturedResp(
+                b'{"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}')
+
+        monkeypatch.setattr(lld.urllib.request, "urlopen", fake_urlopen)
+        lld.GeminiProvider("k").generate("p", temperature=0, max_tokens=32, timeout=5, **gen_kw)
+        return captured["generationConfig"]
+
+    def test_gemini_default_low_thinking(self, monkeypatch):
+        cfg = self._gemini_payload(monkeypatch)
+        assert cfg["thinkingConfig"]["thinkingLevel"] == "low"
+        assert cfg["maxOutputTokens"] == 32 + lld.REASONING_HEADROOM
+
+    def test_gemini_medium_maps_to_high_thinking(self, monkeypatch):
+        cfg = self._gemini_payload(monkeypatch, effort="medium")
+        assert cfg["thinkingConfig"]["thinkingLevel"] == "high"
+        assert cfg["maxOutputTokens"] == 32 + lld.REASONING_HEADROOM_DEEP
