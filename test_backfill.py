@@ -322,3 +322,19 @@ class TestNoteComplete:
 
     def test_missing_translation_incomplete(self):
         assert bw.note_complete(_full_note(translation="")) is False
+
+
+class TestSentenceUsableCore:
+    """CLI 端的句子可用性判斷(gate 下游用;與 addon._sentence_usable KEEP-IN-SYNC)。"""
+
+    def test_real_sentence_usable(self):
+        from core.text import sentence_usable
+        assert sentence_usable("The cat sat on the mat.") is True
+
+    def test_empty_not_usable(self):
+        from core.text import sentence_usable
+        assert sentence_usable("") is False
+
+    def test_placeholder_not_usable(self):
+        from core.text import sentence_usable
+        assert sentence_usable("Please add an example sentence for 'cat'.") is False

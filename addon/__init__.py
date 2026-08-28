@@ -102,6 +102,14 @@ def _long_sentence_label(word, count):
     return f"{word}({count})"
 
 
+def _sentence_usable(sentence):
+    """句子可不可以餵給依賴句意的下游（翻譯/搜圖/配音）。
+    空句或佔位符 → False：下游全部跳過，等真句子生出來一起重做，
+    避免「翻譯了佔位符」這類欄位彼此不一致的髒卡。
+    KEEP-IN-SYNC: core/text.py::sentence_usable（addon 不能 import core）。"""
+    return bool(sentence) and not any(p in sentence for p in PLACEHOLDERS)
+
+
 def _sentence_to_write(current, generated, word):
     """生成結果 → 該寫入 Sentence 的值；None = 不要寫（保住既有真句子）。
     - 生成成功 → 寫生成句
@@ -292,13 +300,17 @@ class Worker(QThread):
             sentence, engine = self._llm_sentence(word, self.association)
             if not sentence:
                 sentence = f"Please add an example sentence for '{word}'."
-            self.step.emit("sentence", "ok" if not any(p in sentence for p in PLACEHOLDERS) else "warn")
+            sentence_ok = _sentence_usable(sentence)
+            self.step.emit("sentence", "ok" if sentence_ok else "warn")
 
-            # Image, Translation and Audio in parallel
+            # Image, Translation and Audio in parallel — but only when the sentence is
+            # usable: 依賴句意的下游（搜圖/翻譯/句音）拿佔位符當輸入會做出彼此不一致
+            # 的髒卡（例：Sentence_CN 是佔位符的翻譯）→ 全部跳過亮橘，之後 ⌘S 連同
+            # 句子一起重做。Front_Audio（單字音）與句子無關，照做。
             image_result = [None]
             translation_result = [""]
             sentence_cn_result = [""]
-            audio_filename = f"{word}_tts.mp3"
+            audio_filename = f"{word}_tts.mp3" if sentence_ok else ""
             front_audio_filename = f"{word}_word.mp3"
 
             def do_image():
@@ -308,21 +320,27 @@ class Worker(QThread):
                 translation_result[0] = self._groq_translate(word, sentence)
                 sentence_cn_result[0] = self._groq_translate_sentence(sentence)
 
-            img_thread = threading.Thread(target=do_image)
-            trans_thread = threading.Thread(target=do_translate)
-            img_thread.start()
-            trans_thread.start()
+            img_thread = trans_thread = None
+            if sentence_ok:
+                img_thread = threading.Thread(target=do_image)
+                trans_thread = threading.Thread(target=do_translate)
+                img_thread.start()
+                trans_thread.start()
 
             audio_items = [
                 {"text": word, "filepath": os.path.join(self.media_dir, front_audio_filename), "voice": VOICE_WORD},
-                {"text": sentence, "filepath": os.path.join(self.media_dir, audio_filename), "voice": VOICE_SENTENCE},
             ]
+            if sentence_ok:
+                audio_items.append(
+                    {"text": sentence, "filepath": os.path.join(self.media_dir, audio_filename), "voice": VOICE_SENTENCE})
             try:
                 self._make_audio_batch(audio_items)
-                self.step.emit("audio", "ok")
+                self.step.emit("audio", "ok" if sentence_ok else "warn")
             finally:
-                img_thread.join()          # always join so threads don't leak on audio failure
-                trans_thread.join()
+                if img_thread:
+                    img_thread.join()      # always join so threads don't leak on audio failure
+                if trans_thread:
+                    trans_thread.join()
 
             self.step.emit("image", "ok" if image_result[0] else "warn")
             self.step.emit("translation", "ok" if translation_result[0] else "warn")
@@ -777,6 +795,17 @@ class BackfillWorker(QThread):
         need_front = not note["fields"].get("Front_Audio", {}).get("value", "")
         need_translation = not note["fields"].get("Translation", {}).get("value", "")
         need_sentence_cn = not note["fields"].get("Sentence_CN", {}).get("value", "")
+
+        # 句子不可用（生成失敗）→ 依賴句意的下游全部跳過亮橘，下次 ⌘S 連同句子一起
+        # 重做——避免翻譯/搜圖拿佔位符當輸入的髒卡（句音由 _need_sentence_audio 自擋，
+        # Front_Audio 與句子無關照做）
+        if not _sentence_usable(sentence):
+            for key, needed in (("image", need_image),
+                                ("translation", need_translation),
+                                ("sentence_cn", need_sentence_cn)):
+                if needed:
+                    self.step.emit(note_id, key, "warn")
+            need_image = need_translation = need_sentence_cn = False
 
         image_result = [None]
         translation_result = [""]

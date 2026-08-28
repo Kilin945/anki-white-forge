@@ -23,6 +23,7 @@ Anki 自動化單字系統，牌組 `My_Daily_English`、筆記類型 `English_W
 - `backfill_words.py` 在句子變動時會重生音檔（`need_sentence` flag）
 - ⌘A（Add）和 ⌘S（Complete）都會生成全部欄位含 `Translation`，共用 `Worker._groq_translate()`
 - ⌘S 按 Complete 時 `_on_run` 會用 `_note_snapshot()` **重新讀最新欄位**（不是 `_pending_notes` 這種開窗時的快照）；佔位符**絕不覆蓋非空真句子**（生成失敗時該不該寫佔位符是純函式 `_sentence_to_write`，None＝保留原句）——事故根因：舊版用開窗快照判斷「還缺什麼」，撞限重跑會把已生成的真句子蓋成佔位符。停批政策：`_dispatcher.wall_secs()` 量到的牆 ≤ `SHORT_WALL_WAIT`(2s) 就原地等掉續跑，更長才停批回報（雙 provider 常見秒級小牆，不值得整批中止）。批次/LLM 事件（failover、429、斷路器 OPEN、撞限停批、佔位符守門觸發）集中記錄到 `logs/addon_llm.log`（已 gitignore，`RotatingFileHandler` 1MB×3 輪替，經 `_lld.get_logger()`）。句音由 `_need_sentence_audio` 決定：佔位符不配音、句子重寫強制重生
+- **句子不可用（空/佔位符）→ 依賴句意的下游全部跳過**（Image、Translation、Sentence_CN、句音；Front_Audio 與句子無關照做），亮橘等下次 ⌘S 連同句子一起重做——事故根因：句子生成失敗仍照跑下游，`Sentence_CN` 變成「佔位符的翻譯」這種欄位彼此不一致的髒卡。判斷是純函式 addon `_sentence_usable` / core `sentence_usable`（KEEP-IN-SYNC），閘門接在 **⌘A `Worker.run`、⌘S `_process_one`、CLI `backfill_words.py`** 三處，改一處要檢查另兩處
 - LLM 呼叫的 `effort` 參數（預設 `"low"`）：**造句傳 `"medium"`**（多條件約束任務），翻譯/拼字等查詢式短呼叫維持 low。對映：Groq `reasoning_effort` 直吃；Gemini 只有 low/high 兩檔（minimal 被 API 拒）→ low 以上一律 high。思考餘裕跟著走：low=`REASONING_HEADROOM`(512)、更高=`REASONING_HEADROOM_DEEP`(1024)，兩份 KEEP-IN-SYNC
 - 非英文字元用共用 `_looks_english()` 擋：⌘A 建立前擋、⌘S 掃描時略過非英文卡片（手機/Anki 內建新增繞過 ⌘A，故 ⌘S 是最後關卡 → 驗證要兩邊都做、邏輯共用）
 - ⌘A 拼字另用 Groq `_groq_spellcheck()`（回 OK／更正字／NONWORD），斷網退 `_validate_helper.py` 離線拼字

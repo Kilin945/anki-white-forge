@@ -6,7 +6,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from core.anki import anki, DECK_NAME
-from core.text import strip_html, is_placeholder, has_image
+from core.text import strip_html, is_placeholder, has_image, sentence_usable
 from core.llm import llm_sentence_and_query, llm_translate, engine_description
 from core.tts import make_audio, VOICE_WORD, VOICE_SENTENCE
 from core.image import fetch_image
@@ -92,17 +92,26 @@ def process_note(note):
     else:
         sentence = current_sentence
 
+    # 句子不可用（生成失敗）→ 依賴句意的下游（搜圖/翻譯/句音）全部跳過，下次再連同
+    # 句子一起重做——避免翻譯/搜圖拿佔位符當輸入的髒卡。Front_Audio 與句子無關照做。
+    usable = sentence_usable(sentence)
+    if not usable:
+        if need_img:
+            lines.append("  Image    : ⚠ skipped (no usable sentence)")
+        if not has_translation:
+            lines.append("  翻譯     : ⚠ skipped (no usable sentence)")
+
     with ThreadPoolExecutor(max_workers=3) as pool:
         futures = {}
-        if need_img:
+        if need_img and usable:
             futures["image"] = pool.submit(_do_image, word, current_assoc, sentence, img_query)
         # 佔位符不配音(KEEP-IN-SYNC: addon _need_sentence_audio 同一規則)——
         # 句子生成失敗時留空,等真句子來了才成對生成,避免「佔位符語音」髒音檔
-        if (not has_audio or need_sentence) and not is_placeholder(sentence):
+        if (not has_audio or need_sentence) and usable:
             futures["audio"] = pool.submit(_do_sentence_audio, word, sentence)
         if not has_front_audio:
             futures["front_audio"] = pool.submit(_do_word_audio, word)
-        if not has_translation:
+        if not has_translation and usable:
             futures["translation"] = pool.submit(llm_translate, word, sentence)
 
         if "image" in futures:
