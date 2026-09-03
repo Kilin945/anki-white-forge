@@ -13,6 +13,7 @@ import subprocess
 import urllib.request
 import urllib.error
 
+import aqt
 from aqt import mw
 from aqt.qt import (
     QAction, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
@@ -441,14 +442,154 @@ class Worker(QThread):
             )
 
 
+# ── 非阻塞視窗的三道防線 ──────────────────────────────────────────────────────
+# 批次視窗改用非阻塞 show()（不鎖 Anki）之後，exec() 原本隱性提供的保護沒了，
+# 這裡逐一補回：批次互斥、關窗不留殭屍 worker、卡片被別處刪掉的防呆。
+
+_batch_owner = None                  # 目前在跑批次的視窗名稱（None = 沒有）
+_batch_lock = threading.Lock()
+
+
+def _batch_acquire(label):
+    """取得批次權；別的視窗正在跑就回 False（呼叫端負責告知使用者）。
+    為何要互斥：兩個批次同時跑會搶同一份速率額度，而且 ⌘S 與 ⌘F 都會寫
+    Sentence_CN → 對同一批卡的同一欄位重複寫、互相蓋掉。"""
+    global _batch_owner
+    with _batch_lock:
+        if _batch_owner is not None and _batch_owner != label:
+            return False
+        _batch_owner = label
+        return True
+
+
+def _batch_release(label):
+    """釋放批次權；只有持有者能釋放（別的視窗收尾不該解掉別人的鎖）。"""
+    global _batch_owner
+    with _batch_lock:
+        if _batch_owner == label:
+            _batch_owner = None
+
+
+def _batch_busy():
+    return _batch_owner
+
+
+def _batch_busy_message():
+    return (f"A batch is already running in {_batch_owner}. "
+            f"Wait for it to finish, then try again.")
+
+
+def _blocked_by_batch(show_message):
+    """跑批中不准動卡片：清空欄位 / 建卡 / 刪卡會和正在寫同一批卡的 worker 打架。
+    擋下來就回 True（並用傳進來的函式把原因顯示給使用者）。"""
+    if _batch_busy() is None:
+        return False
+    show_message(_batch_busy_message())
+    return True
+
+
+def _live_note(note_id):
+    """note 還在就回它，已被刪掉回 None。
+    非阻塞視窗開著時卡片可能被別處刪掉（⌘F Clean Test Cards、⌘D 刪重複、Browse），
+    `mw.col.get_note()` 會拋 NotFoundError → 呼叫端跳過，而不是讓例外冒到 Anki。"""
+    try:
+        return mw.col.get_note(note_id)
+    except Exception:
+        return None
+
+
+class _BatchDialogMixin:
+    """批次視窗共用：Anki dialog-manager 契約 + 跑批中不關窗。
+
+    - `done()`（Close / X / accept 都會走到）在批次跑到一半時只「請 worker 停」，
+      不真的關窗——視窗一關，worker 的 signal 就打到已刪除的 Qt 物件，而且
+      `_on_finished` 還會在背後 `mw.col.save()` / `mw.reset()`。worker 收尾時
+      各 dialog 呼叫 `_end_batch()`，那時才真的關。
+    - `closeWithCallback()`：Anki 退出 / 切 profile 時 `aqt.dialogs.closeAll` 會呼叫，
+      先停批並等 thread 真的結束，才放 Anki 繼續卸載 collection。
+    """
+    _DM_NAME = None          # aqt.dialogs 註冊名（子類覆寫）
+    _BATCH_LABEL = None      # 批次互斥用的顯示名（子類覆寫）
+    # 退出時等 worker 收尾的上限。取 15s = 單次 LLM 呼叫的 timeout：手上那張卡的
+    # 網路呼叫最多就這麼久，等掉它才不會對正在卸載的 collection 寫入。有界 → 不會
+    # 無限卡住 Anki 關閉。
+    _STOP_WAIT_MS = 15000
+    _CLOSE_WAIT_MS = 3000    # 收尾後關窗前的等待上限（見 _force_close）
+
+    def _active_worker(self):
+        """回目前在跑的 worker，沒有就 None。
+        worker 不掛在 self 上的視窗要覆寫（Batch Operations 的掛在 section 上）。"""
+        w = getattr(self, "_worker", None)
+        return w if (w is not None and w.isRunning()) else None
+
+    def _batch_active(self):
+        return self._active_worker() is not None
+
+    def _request_stop(self):
+        w = self._active_worker()
+        if w is not None and hasattr(w, "stop"):
+            w.stop()
+
+    def _set_batch_status(self, text):
+        """顯示「正在停批」訊息；沒有 status 標籤的視窗覆寫這個。"""
+        status = getattr(self, "status", None)
+        if status is not None:
+            status.setText(text)
+
+    def done(self, r):
+        if self._batch_active():
+            self._close_pending = True
+            self._close_result = r
+            self._request_stop()
+            self._set_batch_status(
+                "Stopping the batch — this window closes when the current card is done.")
+            return
+        aqt.dialogs.markClosed(self._DM_NAME)
+        super().done(r)
+
+    def _end_batch(self):
+        """worker 收尾時由各 dialog 的 _on_finished / _on_error 呼叫：
+        釋放批次權，若使用者在跑批中按過 Close 就補上真正的關窗。"""
+        _batch_release(self._BATCH_LABEL)
+        if getattr(self, "_close_pending", False):
+            self._close_pending = False
+            self._force_close(getattr(self, "_close_result", 0))
+
+    def _force_close(self, r):
+        """真的關窗。不走 done() 的守門：worker 用的是自訂 finished signal，
+        在 run() 還沒返回時就發出 → 這一刻 isRunning() 仍是 True，走 done()
+        會被守門擋掉、視窗永遠關不掉。收尾 signal 既然已發完，剩下的只是 thread
+        退出，等一下即可（順帶避免 GC 掉還在跑的 QThread）。"""
+        w = self._active_worker()
+        if w is not None:
+            w.wait(self._CLOSE_WAIT_MS)
+        aqt.dialogs.markClosed(self._DM_NAME)
+        super().done(r)
+
+    def closeWithCallback(self, callback):
+        w = self._active_worker()
+        if w is not None:
+            self._request_stop()
+            w.wait(self._STOP_WAIT_MS)     # 有界等待:worker 真的結束才放 Anki 卸載 collection
+        _batch_release(self._BATCH_LABEL)
+        self._close_pending = False
+        try:
+            self._force_close(0)
+        finally:
+            callback()
+
+
 # ── dialog ───────────────────────────────────────────────────────────────────
 
-class AddWordDialog(QDialog):
+class AddWordDialog(_BatchDialogMixin, QDialog):
     _STATUS_STYLE = {
         "info": "font-size:13px; color:#64748b;",
         "ok":   "font-size:18px; color:#16a34a; font-weight:700; padding:6px;",
         "warn": "font-size:14px; color:#ea580c; font-weight:600;",
     }
+
+    _DM_NAME = "WhiteForgeAddWord"
+    _BATCH_LABEL = "Add English Word"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -456,6 +597,9 @@ class AddWordDialog(QDialog):
         self.setMinimumWidth(580)        # wider than the 5-box row so the stretches centre it (side margins)
         self._worker = None
         self._setup_ui()
+
+    def _set_batch_status(self, text):
+        self._set_status(text, "info")
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
@@ -636,6 +780,10 @@ class AddWordDialog(QDialog):
             self._set_status(f"'{word}' already exists in the deck.", "warn")
             return
 
+        if not _batch_acquire(self._BATCH_LABEL):     # 別的批次在跑 → 會互搶額度
+            self._set_status(_batch_busy_message(), "warn")
+            return
+
         self.add_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
         self._set_status(f"Generating: {word}")
@@ -679,11 +827,13 @@ class AddWordDialog(QDialog):
         finally:
             self.add_btn.setEnabled(True)
             self.progress_bar.setVisible(False)
+            self._end_batch()
 
     def _on_error(self, msg):
         self._set_status(f"Error: {msg}", "warn")
         self.add_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
+        self._end_batch()
 
 
 class FieldRow(QWidget):
@@ -748,15 +898,20 @@ class BackfillWorker(QThread):
         self._w = Worker.__new__(Worker)
         self._w.media_dir = media_dir
         self._hit_limit = False        # hit a real rate-limit wall → stop the rest, dialog notifies
+        self._stopped = False          # 使用者關窗/Anki 退出 → 做完手上這張就收工
         self.retry_after = 0
         self.limit_resets = {}         # 撞牆當下兩家的恢復秒數(對話框訊息用)
+
+    def stop(self):
+        """請 worker 收工：剩下的卡直接跳過（同 _hit_limit 的既有跳過機制）。"""
+        self._stopped = True
 
     def _process_one(self, note):
         note_id = note["noteId"]
         word = _clean_text(note["fields"]["Front"]["value"], lower=True)
         # Deterministic rate-limit gate: near the cloud limit → stop here and skip the rest
         # immediately (the dialog says how many are left). No waiting.
-        if self._hit_limit:
+        if self._hit_limit or self._stopped:
             return f"skip {word}"
         wall = _dispatcher.wall_secs()
         if 0 < wall <= SHORT_WALL_WAIT:
@@ -959,7 +1114,10 @@ def _removal_status(removed, remaining):
     return "All cleared from the list. Remember to sync Anki!"
 
 
-class BackfillDialog(QDialog):
+class BackfillDialog(_BatchDialogMixin, QDialog):
+    _DM_NAME = "WhiteForgeBackfill"
+    _BATCH_LABEL = "Complete Missing Cards"
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Complete Missing Cards")
@@ -969,6 +1127,28 @@ class BackfillDialog(QDialog):
         self._rows = {}
         self._setup_ui()
         self._scan()
+
+    def reopen(self):
+        """單例被叫回前面時 Anki 的 dialog manager 會呼叫這裡 → 重掃一次。
+        不重掃的話「⌘F 清空紅旗卡 → Open Complete Missing Cards」會看到清空前的
+        舊清單，剛清空的卡不在裡面，一鍵重生等於沒作用。批次還在跑就不動
+        （重掃會把正在更新的列表整片換掉）。"""
+        if self._batch_active():
+            return
+        self._clear_rows()
+        self.remove_btn.setVisible(False)
+        self.select_all.setChecked(False)
+        self._scan()
+
+    def _clear_rows(self):
+        """清掉列表所有 widget 與 stretch —— 重掃前必清,否則新舊清單疊加。"""
+        self._rows = {}
+        while self._rows_box.count():
+            item = self._rows_box.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
@@ -1084,13 +1264,22 @@ class BackfillDialog(QDialog):
                     if (r := self._rows.get(n["noteId"])) and r.is_checked()]
         if not selected:
             return
-        self.run_btn.setEnabled(False)
-        self.select_all.setEnabled(False)
-        self.progress_bar.setVisible(True)
+        if not _batch_acquire(self._BATCH_LABEL):     # 別的批次在跑 → 會互搶額度/重複寫卡
+            self.status.setText(_batch_busy_message())
+            return
         # Re-read current field values now (not self._pending_notes, a snapshot from when
         # the dialog opened) — a second Complete click must not think fields are still
         # missing just because they were missing when the dialog was first opened.
-        fresh_notes = [_note_snapshot(mw.col.get_note(n["noteId"])) for n in selected]
+        # 視窗非阻塞後卡片可能已被別處刪掉 → _live_note 跳過死掉的 id。
+        fresh_notes = [_note_snapshot(note) for n in selected
+                       if (note := _live_note(n["noteId"])) is not None]
+        if not fresh_notes:
+            _batch_release(self._BATCH_LABEL)
+            self.status.setText("Those cards no longer exist — reopen this window to rescan.")
+            return
+        self.run_btn.setEnabled(False)
+        self.select_all.setEnabled(False)
+        self.progress_bar.setVisible(True)
         self._worker = BackfillWorker(fresh_notes, mw.col.media.dir())
         self._worker.step.connect(self._on_step)
         self._worker.card_done.connect(self._on_card_done)
@@ -1113,9 +1302,13 @@ class BackfillDialog(QDialog):
         mw.col.save()
         mw.reset()
         total = len(self._worker.notes)
-        left = sum(1 for n in self._worker.notes if _note_incomplete(mw.col.get_note(n["noteId"])))
+        # 已被刪掉的卡不算「還缺」（非阻塞視窗開著時可能被別處刪除）
+        left = sum(1 for n in self._worker.notes
+                   if (note := _live_note(n["noteId"])) is not None and _note_incomplete(note))
         done = total - left
-        if getattr(self._worker, "_hit_limit", False):
+        if getattr(self._worker, "_stopped", False):
+            self.status.setText(f"Stopped — completed {done}, {left} still need filling.")
+        elif getattr(self._worker, "_hit_limit", False):
             secs = int(self._worker.retry_after)
             resets = getattr(self._worker, "limit_resets", {})
             if len(resets) > 1:        # 雙 provider:報每家真實恢復時間
@@ -1136,6 +1329,7 @@ class BackfillDialog(QDialog):
         self.select_all.setEnabled(True)
         self.remove_btn.setVisible(True)
         self._update_selection()
+        self._end_batch()
 
     def _on_remove_selected(self):
         """Drop the checked rows from this list — view only. The cards were just
@@ -1159,9 +1353,12 @@ class BackfillDialog(QDialog):
 
 # ── find duplicates dialog ─────────────────────────────────────────────────────
 
-class FindDuplicatesDialog(QDialog):
+class FindDuplicatesDialog(_BatchDialogMixin, QDialog):
     """Find cards whose Front is the same after normalization (HTML/case-insensitive),
     and let the user pick which to delete. Catches dupes that slipped in via mobile."""
+
+    _DM_NAME = "WhiteForgeDuplicates"
+    _BATCH_LABEL = "Find Duplicate Words"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1170,6 +1367,9 @@ class FindDuplicatesDialog(QDialog):
         self.setMinimumHeight(420)
         self._setup_ui()
         self._scan()
+
+    def reopen(self):
+        self._scan()        # _scan() 自己會先 tree.clear()
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
@@ -1225,6 +1425,8 @@ class FindDuplicatesDialog(QDialog):
             self.del_btn.setEnabled(False)
 
     def _on_delete(self):
+        if _blocked_by_batch(self.status.setText):   # 別在批次寫卡時把卡刪掉
+            return
         to_delete = []
         for i in range(self.tree.topLevelItemCount()):
             parent = self.tree.topLevelItem(i)
@@ -1364,8 +1566,9 @@ class TranslateSection(QWidget):
     estimate and a time-box menu. Paced by SentenceCNWorker; resume is automatic
     (each scan re-checks what's missing)."""
 
-    def __init__(self, parent=None):
+    def __init__(self, panel, parent=None):
         super().__init__(parent)
+        self._panel = panel          # the Batch Operations dialog (批次互斥 + 關窗收尾)
         self._worker = None
         self._notes = []
         self._setup_ui()
@@ -1439,6 +1642,9 @@ class TranslateSection(QWidget):
     def _start(self, budget_seconds):
         if not self._notes:
             return
+        if not _batch_acquire(self._panel._BATCH_LABEL):   # ⌘S 也寫 Sentence_CN → 不准同時跑
+            self.status.setText(_batch_busy_message())
+            return
         for b, _secs in self._mode_btns:
             b.setEnabled(False)
         self.stop_btn.setEnabled(True)
@@ -1478,6 +1684,7 @@ class TranslateSection(QWidget):
         else:
             self.status.setText(f"Translated {done} this run, {remaining} left. Remember to sync Anki!")
         self._scan()       # refresh count + re-enable mode buttons for another round
+        self._panel._end_batch()
 
 
 class ClearFlaggedSection(QWidget):
@@ -1579,16 +1786,22 @@ class ClearFlaggedSection(QWidget):
     def _on_clear(self):
         if not self._flagged:
             return
+        if _blocked_by_batch(self.status.setText):
+            self.status.setVisible(True)
+            return
+        n = 0
         for item in self._flagged:
-            note = mw.col.get_note(item["nid"])
+            note = _live_note(item["nid"])       # 視窗非阻塞後卡片可能已被別處刪掉
+            if note is None:
+                continue
             for f in REFILL_CLEAR_FIELDS:        # keep Front + Association, blank the rest
                 if f in note:
                     note[f] = ""
             mw.col.update_note(note)
             mw.col.set_user_flag_for_cards(0, item["cids"])
+            n += 1
         mw.col.save()
         mw.reset()
-        n = len(self._flagged)
         self.word_list.setText("")
         self.clear_row_w.setVisible(False)
         self.status.setText(f"✓ Cleared {n} card(s) and removed their flags. "
@@ -1743,15 +1956,21 @@ class LongSentencesSection(QWidget):
     def _on_clear(self):
         if not self._hits:
             return
+        if _blocked_by_batch(self.status.setText):
+            self.status.setVisible(True)
+            return
+        n = 0
         for h in self._hits:
-            note = mw.col.get_note(h["nid"])
+            note = _live_note(h["nid"])          # 視窗非阻塞後卡片可能已被別處刪掉
+            if note is None:
+                continue
             for f in REBUILD_CLEAR_FIELDS:       # 換句=全重建(留 Front/Association/Front_Audio)
                 if f in note:
                     note[f] = ""
             mw.col.update_note(note)
+            n += 1
         mw.col.save()
         mw.reset()
-        n = len(self._hits)
         self._hits = []
         self.word_list.setText("")
         self.clear_row_w.setVisible(False)
@@ -1827,6 +2046,8 @@ class TestCardsSection(QWidget):
         self.status.setVisible(True)
 
     def _on_add(self):
+        if _blocked_by_batch(self._set_status):
+            return
         n = _clamp_test_count(self.count_input.text())
         model = mw.col.models.by_name(MODEL_NAME)
         if not model:
@@ -1849,6 +2070,8 @@ class TestCardsSection(QWidget):
         self.post_row_w.setVisible(True)
 
     def _on_clean(self):
+        if _blocked_by_batch(self._set_status):
+            return
         nids = mw.col.find_notes(f"tag:{TEST_CARD_TAG}")
         if not nids:
             self._set_status("No test cards to clean.")
@@ -1865,11 +2088,14 @@ class TestCardsSection(QWidget):
         open_backfill_dialog()
 
 
-class BatchOperationsDialog(QDialog):
+class BatchOperationsDialog(_BatchDialogMixin, QDialog):
     """Unified batch panel: sentence-translation backfill on top, clear-flagged
     in the upper-middle, rebuild long sentences in the lower-middle, test-card
     helper at the bottom, separated by dividers. Built from stacked self-contained
     section widgets so more batch operations can be added as new blocks."""
+
+    _DM_NAME = "WhiteForgeBatchOps"
+    _BATCH_LABEL = "Batch Operations"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1881,13 +2107,18 @@ class BatchOperationsDialog(QDialog):
         content = QWidget()
         body = QVBoxLayout(content)
         body.setContentsMargins(0, 0, 8, 0)   # 右緣留給捲軸
-        body.addWidget(TranslateSection(self))
+        self._translate = TranslateSection(self, parent=content)
+        clear_flagged  = ClearFlaggedSection(self, parent=content)
+        long_sentences = LongSentencesSection(self, parent=content)
+        test_cards     = TestCardsSection(self, parent=content)
+        self._sections = [self._translate, clear_flagged, long_sentences, test_cards]
+        body.addWidget(self._translate)
         body.addWidget(_hline())
-        body.addWidget(ClearFlaggedSection(self, parent=content))
+        body.addWidget(clear_flagged)
         body.addWidget(_hline())
-        body.addWidget(LongSentencesSection(self, parent=content))
+        body.addWidget(long_sentences)
         body.addWidget(_hline())
-        body.addWidget(TestCardsSection(self, parent=content))
+        body.addWidget(test_cards)
         body.addStretch()
 
         scroll = QScrollArea()
@@ -1906,20 +2137,61 @@ class BatchOperationsDialog(QDialog):
         close_row.addWidget(close_btn)
         root.addLayout(close_row)         # Close 固定在捲動區外,永遠可見
 
+    # 這個面板的 worker 掛在 TranslateSection 上,不在面板自己身上 → 覆寫這兩個 hook
+    def _active_worker(self):
+        w = getattr(self._translate, "_worker", None)
+        return w if (w is not None and w.isRunning()) else None
+
+    def _set_batch_status(self, text):
+        self._translate.status.setText(text)
+
+    def reopen(self):
+        """單例被叫回前面 → 各 section 重掃，否則計數與清單是上次開窗時的。
+        翻譯批次還在跑就不動它。"""
+        for section in self._sections:
+            if section is self._translate and self._batch_active():
+                continue
+            scan = getattr(section, "_scan", None)
+            if scan is not None:
+                scan()
+
 
 # ── menu entries ──────────────────────────────────────────────────────────────
 
+_DM_NAMES = {
+    AddWordDialog:          AddWordDialog._DM_NAME,
+    BackfillDialog:         BackfillDialog._DM_NAME,
+    FindDuplicatesDialog:   FindDuplicatesDialog._DM_NAME,
+    BatchOperationsDialog:  BatchOperationsDialog._DM_NAME,
+}
+
+for _cls, _name in _DM_NAMES.items():
+    # 交給 Anki 內建的 dialog manager 管，而不是自己造一個 registry：一次拿到單例、
+    # 還原被縮小的視窗、raise、reopen() 重掃，**以及** Anki 退出 / 切 profile 時
+    # closeAll() 會來收（自製 registry 它看不到 → worker 會對正在卸載的 collection 續寫）。
+    aqt.dialogs.register_dialog(_name, lambda cls=_cls: cls(mw))
+
+
+def _show_nonmodal(dialog_cls):
+    """批次類視窗用非阻塞方式開啟（show() 而非 exec()）：不鎖 Anki 主視窗，
+    生成跑很久時可以移開/縮小視窗、繼續用 Anki。
+    Settings 不是批次視窗，維持 modal exec()。"""
+    dlg = aqt.dialogs.open(_DM_NAMES[dialog_cls])
+    dlg.show()
+    return dlg
+
+
 def open_dialog():
-    AddWordDialog(mw).exec()
+    _show_nonmodal(AddWordDialog)
 
 def open_backfill_dialog():
-    BackfillDialog(mw).exec()
+    _show_nonmodal(BackfillDialog)
 
 def open_duplicates_dialog():
-    FindDuplicatesDialog(mw).exec()
+    _show_nonmodal(FindDuplicatesDialog)
 
 def open_batch_operations_dialog():
-    BatchOperationsDialog(mw).exec()
+    _show_nonmodal(BatchOperationsDialog)
 
 DEFAULT_SHORTCUTS = {"add": "Ctrl+A", "complete": "Ctrl+S", "find_duplicates": "Ctrl+D",
                      "backfill_cn": "Ctrl+F"}
