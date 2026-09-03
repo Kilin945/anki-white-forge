@@ -5,53 +5,10 @@ Remove Selected 只把勾選的列從對話框清單移除(純視圖操作,不�
 不依賴 Qt 的純函式,這裡直接測。Qt 的顯示/隱藏/removeWidget 不在測試範圍
 (需 Anki 的 PyQt 執行環境,無法在此 headless 驗證)。
 
-addon 模組會 import Anki 的 aqt,測試環境沒有 → 用「萬用」假模組頂替 aqt 後 import。
+addon 會 import Anki 的 aqt（測試環境沒有）→ 假 aqt 由 conftest.py 統一安裝。
 """
-import sys
-import types
 
-import pytest
-
-
-# ── 用萬用 stub 頂替 aqt,讓 addon 能被 import ──────────────────────────────────
-class _AnyMeta(type):
-    def __getattr__(cls, _):
-        return _Any()
-
-
-class _Any(metaclass=_AnyMeta):
-    """什麼都能做的替身:可被繼承、可呼叫、任何屬性存取都回另一個替身。"""
-    def __init__(self, *a, **k):
-        pass
-
-    def __call__(self, *a, **k):
-        return _Any()
-
-    def __getattr__(self, _):
-        return _Any()
-
-
-def _install_fake_aqt():
-    aqt = types.ModuleType("aqt")
-    aqt.mw = _Any()
-    qt = types.ModuleType("aqt.qt")
-    for name in ["QAction", "QDialog", "QVBoxLayout", "QHBoxLayout", "QFormLayout",
-                 "QLabel", "QLineEdit", "QPushButton", "QProgressBar", "QScrollArea",
-                 "QTreeWidget", "QTreeWidgetItem", "QWidget", "QFrame", "QCheckBox",
-                 "QKeySequenceEdit", "QKeySequence", "QMessageBox", "QThread",
-                 "pyqtSignal", "Qt"]:
-        setattr(qt, name, _Any)
-    aqt.qt = qt
-    utils = types.ModuleType("aqt.utils")
-    utils.showWarning = _Any()
-    utils.tooltip = _Any()
-    sys.modules["aqt"] = aqt
-    sys.modules["aqt.qt"] = qt
-    sys.modules["aqt.utils"] = utils
-
-
-_install_fake_aqt()
-import addon  # noqa: E402  (the real addon module)
+import addon  # noqa: E402  (假 aqt 已由 conftest.py 安裝)
 
 
 # ── _drop_notes:移除指定 note id 後,pending_notes 剩下什麼 ────────────────────

@@ -1,51 +1,10 @@
 """Batch Operations「Rebuild Long Sentences」section 的純邏輯測試。
 
 Qt/mw.col 層(掃描、清除、跳轉)走手動驗證;這裡測抽出來的決策純函式。
-addon 會 import aqt → 用萬用假模組頂替後 import(同 test_backfill_remove.py)。
+addon 會 import Anki 的 aqt（測試環境沒有）→ 假 aqt 由 conftest.py 統一安裝。
 """
-import sys
-import types
 
-import pytest
-
-
-class _AnyMeta(type):
-    def __getattr__(cls, _):
-        return _Any()
-
-
-class _Any(metaclass=_AnyMeta):
-    def __init__(self, *a, **k):
-        pass
-
-    def __call__(self, *a, **k):
-        return _Any()
-
-    def __getattr__(self, _):
-        return _Any()
-
-
-def _install_fake_aqt():
-    aqt = types.ModuleType("aqt")
-    aqt.mw = _Any()
-    qt = types.ModuleType("aqt.qt")
-    for name in ["QAction", "QDialog", "QVBoxLayout", "QHBoxLayout", "QFormLayout",
-                 "QLabel", "QLineEdit", "QPushButton", "QProgressBar", "QScrollArea",
-                 "QTreeWidget", "QTreeWidgetItem", "QWidget", "QFrame", "QCheckBox",
-                 "QKeySequenceEdit", "QKeySequence", "QMessageBox", "QThread",
-                 "pyqtSignal", "Qt"]:
-        setattr(qt, name, _Any)
-    aqt.qt = qt
-    utils = types.ModuleType("aqt.utils")
-    utils.showWarning = _Any()
-    utils.tooltip = _Any()
-    sys.modules["aqt"] = aqt
-    sys.modules["aqt.qt"] = qt
-    sys.modules["aqt.utils"] = utils
-
-
-_install_fake_aqt()
-import addon  # noqa: E402
+import addon  # 假 aqt 已由 conftest.py 安裝
 
 
 class TestSentenceWordCount:
