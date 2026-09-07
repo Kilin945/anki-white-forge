@@ -56,7 +56,7 @@ Anki 自動化單字系統，牌組 `My_Daily_English`、筆記類型 `English_W
 
 - 以**一段完整功能**為單位 commit，不要每改幾行小東西就 commit（例如只改幾行中文、調個字串，不需單獨 commit）。把相關的程式、**文件（README / CLAUDE.md）**、測試**併進同一個功能 commit**——README 不要單獨拆成一個 commit。
 - 一個 commit = 一段有意義的功能 / 修復 / 重構（連同它的文件與測試）；不同功能仍分開 commit，不要把多個不相關功能塞進同一個。
-- commit type 用 conventional 風格：`feat` / `fix` / `docs` / `style` / `refactor` / `perf` / `chore` 等。commit 描述用**中文**（type 用英文）
+- commit type 用 conventional 風格：`feat` / `fix` / `docs` / `style` / `refactor` / `perf` / `chore` 等。commit 標題與內文依全域規則用**英文**（Workspace 專案 = 練英文 commit；2026-08-25 起）
 - commit 前先跑 Pre-push Checklist
 - 不確定要不要 commit 時，問使用者
 
