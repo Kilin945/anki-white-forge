@@ -1,6 +1,6 @@
 # Anki White Forge
 
-Anki 自動化單字系統，牌組 `My_Daily_English`、筆記類型 `English_White_Method`。
+Anki 自動化單字系統，牌組 `My Daily English`、筆記類型 `English_White_Method`。
 
 > **完整介紹、安裝、架構、欄位、用法 → 見 [README.md](README.md)（使用面資訊的單一事實來源）。**
 > 本檔只寫 README 不涵蓋的東西：給 AI（Claude）改 code 用的規則與踩雷點。

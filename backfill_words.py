@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Batch fill missing fields for My_Daily_English cards."""
+"""Batch fill missing fields for My Daily English cards."""
 import os
 import time
 import threading
@@ -144,7 +144,7 @@ def process_note(note):
 
 def main():
     print("Fetching notes…")
-    ids = anki("findNotes", query=f"deck:{DECK_NAME}")
+    ids = anki("findNotes", query=f'deck:"{DECK_NAME}"')
     notes = anki("notesInfo", notes=ids)
 
     pending = [n for n in notes if not note_complete(n)]

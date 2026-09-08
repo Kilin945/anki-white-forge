@@ -12,7 +12,7 @@ PLACEHOLDERS = ["No example found", "please add manually", "is used in English",
 
 def main():
     word = sys.argv[1] if len(sys.argv) > 1 else "exceptional"
-    ids = anki("findNotes", query=f'deck:My_Daily_English Front:"{word}"')
+    ids = anki("findNotes", query=f'deck:"My Daily English" Front:"{word}"')
     if not ids:
         print(f"[ERROR] '{word}' not found.")
         return

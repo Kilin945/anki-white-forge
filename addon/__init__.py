@@ -1,5 +1,5 @@
 """
-My Word Adder — add English words to My_Daily_English with auto-fill.
+My Word Adder — add English words to My Daily English with auto-fill.
 Tools > Add English Word… (⌘A / Ctrl+A)  ·  Complete Missing Cards (⌘S / Ctrl+S)
 """
 
@@ -32,7 +32,7 @@ _dispatcher = _lld.Dispatcher(
     [p for p in (_lld.GroqProvider.load(), _lld.GeminiProvider.load()) if p])
 _log = _lld.get_logger()   # 批次/LLM 事件集中記錄到 logs/addon_llm.log（gitignored）
 
-DECK_NAME    = "My_Daily_English"
+DECK_NAME    = "My Daily English"
 MODEL_NAME   = "English_White_Method"
 ANKI_URL     = "http://127.0.0.1:8765"
 PLACEHOLDERS = ["No example found", "please add manually", "is used in English", "Please add an example"]

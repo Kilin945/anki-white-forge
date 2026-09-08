@@ -61,7 +61,7 @@ def add_cards(n):
 
 
 def clean():
-    ids = anki("findNotes", query=f'deck:{DECK_NAME} tag:{TEST_TAG}')
+    ids = anki("findNotes", query=f'deck:"{DECK_NAME}" tag:{TEST_TAG}')
     if not ids:
         print("No test cards to clean.")
         return

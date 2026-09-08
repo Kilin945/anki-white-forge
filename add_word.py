@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add a single word to My_Daily_English. Usage: uv run python add_word.py <word> [association]"""
+"""Add a single word to My Daily English. Usage: uv run python add_word.py <word> [association]"""
 import sys
 import os
 import re

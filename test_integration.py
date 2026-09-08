@@ -20,7 +20,7 @@ def anki(action, **params):
 
 def cleanup(words):
     for word in words:
-        ids = anki("findNotes", query=f'deck:My_Daily_English Front:"{word}"')
+        ids = anki("findNotes", query=f'deck:"My Daily English" Front:"{word}"')
         if ids:
             anki("deleteNotes", notes=ids)
 
@@ -29,7 +29,7 @@ def add_bare_cards(words_with_assoc):
     """Add cards with only Front + Association, everything else empty."""
     for word, assoc in words_with_assoc:
         anki("addNote", note={
-            "deckName": "My_Daily_English",
+            "deckName": "My Daily English",
             "modelName": "English_White_Method",
             "fields": {
                 "Front": word,
@@ -56,7 +56,7 @@ def run_backfill():
 def verify_cards(words):
     results = []
     for word in words:
-        ids = anki("findNotes", query=f'deck:My_Daily_English Front:"{word}"')
+        ids = anki("findNotes", query=f'deck:"My Daily English" Front:"{word}"')
         if not ids:
             results.append((word, "NOT FOUND", {}))
             continue

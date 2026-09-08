@@ -1,7 +1,7 @@
 import requests
 
 ANKI_URL = "http://127.0.0.1:8765"
-DECK_NAME = "My_Daily_English"
+DECK_NAME = "My Daily English"
 MODEL_NAME = "English_White_Method"
 
 

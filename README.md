@@ -19,7 +19,7 @@
 
 ## 牌組結構
 
-**牌組**：`My_Daily_English`
+**牌組**：`My Daily English`
 **筆記類型**：`English_White_Method`
 
 | 欄位 | 說明 | 填寫方式 |

@@ -9,7 +9,7 @@ MEDIA_DIR = os.path.expanduser("~/Library/Application Support/Anki2/Kilin/collec
 
 
 def main():
-    ids = anki("findNotes", query=f"deck:{DECK_NAME}")
+    ids = anki("findNotes", query=f'deck:"{DECK_NAME}"')
     notes = anki("notesInfo", notes=ids)
     print(f"Found {len(notes)} cards. Regenerating audio…")
     print(f"TTS: edge-tts (word={VOICE_WORD}, sentence={VOICE_SENTENCE})\n")

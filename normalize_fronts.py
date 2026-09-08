@@ -1,4 +1,4 @@
-"""Normalize existing Front fields in My_Daily_English.
+"""Normalize existing Front fields in My Daily English.
 
 Rule: always strip residual HTML; then lowercase the word, EXCEPT all-uppercase
 acronyms (e.g. ASAP, GDP) which keep their case. New words added via ⌘D / add_word.py
@@ -31,7 +31,7 @@ def normalized(raw):
 def main():
     apply = "--apply" in sys.argv
 
-    ids = anki("findNotes", query='deck:My_Daily_English note:English_White_Method')
+    ids = anki("findNotes", query='deck:"My Daily English" note:English_White_Method')
     info = anki("notesInfo", notes=ids)
 
     # collision guard: a normalized value shared by >1 note would create duplicate Fronts
