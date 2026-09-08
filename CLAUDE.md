@@ -14,6 +14,8 @@ Anki 自動化單字系統，牌組 `My Daily English`、筆記類型 `English_W
 
 **鐵則：同一個事實只放一處。** 兩邊重複遲早會不同步（drift）——例如快捷鍵曾經 README、CLAUDE.md、code 三處各說各話，最後 README 是錯的。
 
+**README 行文規則：短句、一句一事。** 不用箭頭鏈（A → B → C）、不用斜線串接（例句／翻譯／圖）、不把括號套進括號。流程寫成編號步驟或列點。改功能後補文件時照這個風格寫，不要把新資訊壓回一行——資訊全對但密到要回頭解析，一樣是爛文件（2026-08-27 整份 README 因此重寫過一次）。
+
 ## Key Rules（改 code 踩雷點）
 
 - Addon 真檔在 repo `addon/`，Anki 端 `addons21/my_word_adder` 是**指向整個 `addon/` 資料夾的 symlink**（新增檔案自動生效，不用補 link；Anki 會把 `meta.json`/`__pycache__` 寫進 repo `addon/`，已 gitignore）；改完 `addon/` 需**重啟 Anki** 才生效

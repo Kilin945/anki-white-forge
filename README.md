@@ -1,6 +1,6 @@
 # My Daily English — Anki 自動化單字系統
 
-個人英文單字學習系統，基於 Anki + AnkiConnect，輸入單字後自動生成例句、圖片、語音。
+個人英文單字學習系統，基於 Anki + AnkiConnect。輸入一個單字，例句、圖片、語音全部自動生成。
 
 ---
 
@@ -13,7 +13,7 @@
 | 圖片 | **Pexels API**（DuckDuckGo fallback） | 下載單字插圖 |
 | Anki | AnkiConnect addon | 程式與 Anki 溝通 |
 
-> LLM 呼叫（`core/llm.py`）會依剩餘額度自動在 Groq、Gemini 兩家之間分流，其中一家額度見底就自動切另一家；`.gemini_key` 沒設定就退回純 Groq，功能照常。CLI / core 與 Anki Addon（`⌘A`/`⌘S`/批量面板）都走這套分流。
+> LLM 呼叫（`core/llm.py`）會依剩餘額度在 Groq 和 Gemini 之間自動分流，一家額度見底就切到另一家。沒設定 `.gemini_key` 就只用 Groq，功能不變。CLI、core 和 Anki Addon（⌘A、⌘S、批量面板）走的都是同一套分流。
 
 ---
 
@@ -31,9 +31,9 @@
 | `Audio` | 句子語音 (Ava) | 自動（edge-tts） |
 | `Front_Audio` | 單字發音 (Andrew) | 自動（edge-tts） |
 | `Translation` | 單字中文翻譯（背面點擊顯示） | 自動（Groq LLM） |
-| `Sentence_CN` | 整句中文翻譯（背面點擊顯示） | ⌘A 即時 / ⌘S 補齊 / Batch Operations 面板批次（Groq LLM） |
+| `Sentence_CN` | 整句中文翻譯（背面點擊顯示） | ⌘A 即時、⌘S 補齊、或 Batch Operations 面板批次（Groq LLM） |
 
-> 背面的 `Translation`（單字）與 `Sentence_CN`（整句）都是**點一下才顯示**的填空框。
+> 背面的 `Translation`（單字）與 `Sentence_CN`（整句）都是點一下才顯示的填空框。
 
 ---
 
@@ -48,14 +48,14 @@
 echo "gsk_your_key_here" > ~/Workspace/anki/.groq_key
 
 # Gemini（可選，免費，https://aistudio.google.com/apikey）
-# 有設定就雙 provider 容量感知分流；沒設定就退回純 Groq，功能照常
+# 有設定就雙 provider 容量感知分流；沒設定就只用 Groq，功能照常
 echo "your_key_here" > ~/Workspace/anki/.gemini_key
 
 # Pexels（免費，https://www.pexels.com/api）
 echo "your_key_here" > ~/Workspace/anki/.pexels_key
 ```
 
-> Key 檔在 Anki 插件啟動時讀取一次——新增或更換 key 後，重啟 Anki 才生效（CLI 腳本則每次執行時讀）。
+> Key 檔在 Anki 插件啟動時讀一次。新增或更換 key 後要重啟 Anki 才生效。CLI 腳本則是每次執行時讀。
 
 ### Python 環境
 ```bash
@@ -77,28 +77,43 @@ uv sync   # 自動安裝所有依賴
 
 批次跑到一半按 Close，會先停批：做完手上那張卡，視窗才關閉。
 
-**新增單字**：`⌘A`（Ctrl+A）→ 輸入單字 → Enter
-- 自動生成例句、圖片、雙語音、單字翻譯、整句翻譯
-- 驗證：非英文字元直接擋；Groq 拼字檢查，疑似拼錯會建議正確字；重複防呆（正規化比對）
+#### 新增單字：`⌘A`
 
-**補齊缺失卡片**：`⌘S`（Ctrl+S）
-- 掃描所有缺少欄位的卡片（例句／整句翻譯／圖／音／單字翻譯）
-- 3 張並發處理，左圖右文即時進度顯示
-- 含整句翻譯 `Sentence_CN`（手機／內建新增繞過 ⌘A 的卡片，⌘S 一鍵補完）；大量回填請改走下方專用選單以免撞速率
+按 `⌘A`，輸入單字，按 Enter。例句、圖片、雙語音、單字翻譯、整句翻譯全部自動生成。
 
-**批量操作（Batch Operations）**：`⌘F`（Ctrl+F）或 **Tools → Batch Operations…** —— 一個面板、上下四塊，可擴充：
-- **上｜Backfill Sentence Translations（批次補整句翻譯）**：專補 `Sentence_CN`，開啟先顯示「共 N 筆、約 X 分鐘」；選時間盒（1/2/5/10 分鐘）或「直接完成」，以不超過 Groq 速率（約 25/分）的節奏持續翻；隨時可 **Stop**，下次再開從沒翻的續
-- **中①｜Clear Flagged Cards（清空紅旗卡）**：手機複習看到不理想的卡（例句不貼切、翻譯有誤…）用 Anki 內建**紅旗**標起來（手機卡片模板無法寫欄位，只能靠旗標）→ 回 Mac 開面板列出紅旗英文卡 → 按 **Clear N Cards**：保留 Word + Association，其餘 6 欄（例句／兩個翻譯／圖／字音／句音）**清空並拔旗**（瞬間完成、**不重新生成**）。清完可按 **Open Complete Missing Cards** 一鍵跳去 ⌘S 重生，或 **Done** 之後再自己補。只認紅旗（flag:1）、非英文卡略過
-- **中②｜Rebuild Long Sentences（重建過長例句）**：舊卡的例句在「6-12 字」規則進 prompt 之前生成，常常過長。填門檻（預設 20 字）→ Rescan 列出超標卡（`單字(字數)`、降冪）→ **Clear N Sentences** 清空例句／整句翻譯／句子語音／單字翻譯／圖（換句＝全重建，**只保留**單字與其發音；瞬間完成、不重新生成）→ 一鍵跳 ⌘S 重生短句，或大量時走 CLI
-- **下｜Test Cards（測試卡）**：開發／測試輔助。填 **Count**（預設 7）按 **Add Test Cards** 產生只有 Front + Association 的裸卡（它們會出現在 Complete Missing Cards，可用來測補卡流程）；**Clean Test Cards** 一鍵刪光。與 CLI `make_test_cards.py`（`add [N]` / `clean`）同一個 tag，兩邊建的可互相清
+輸入有三道防呆。非英文字元直接擋下。Groq 會檢查拼字，疑似拼錯時建議正確的字。重複的字也會擋，比對前先正規化，所以大小寫或 HTML 變體騙不過它。
 
-**找重複單字**：`⌘D`（Ctrl+D）
-- 正規化後 Front 相同的卡片分組列出（抓得到手機漏進來的 HTML / 大小寫變體）
-- 勾選要刪的（每組至少保留一張）→ 確認刪除
+#### 補齊缺失卡片：`⌘S`
 
-> ⌘A / ⌘S / ⌘D / ⌘F 可在 **Tools → My Word Adder Settings…** 直接按組合鍵設定（免改 JSON、即時生效），或清除以關閉。
+掃描所有缺欄位的卡片，缺什麼補什麼：例句、整句翻譯、圖、音、單字翻譯。3 張並發處理，左圖右文顯示即時進度。
+
+手機或 Anki 內建介面新增的卡片沒經過 ⌘A，欄位是空的，⌘S 一鍵補完，整句翻譯也包含在內。要大量回填的話，改走下面的 Batch Operations 面板，以免撞到速率上限。
+
+#### 批量操作：`⌘F` 或 Tools → Batch Operations…
+
+一個面板，由上而下四塊，之後有新批量功能就往下加。
+
+**Backfill Sentence Translations（批次補整句翻譯）**
+專門補 `Sentence_CN`。開啟時先顯示共幾筆、預估幾分鐘。選一個時間盒（1、2、5、10 分鐘）或直接跑完，翻譯節奏控制在 Groq 速率內（約每分鐘 25 句）。隨時可以按 Stop，下次打開從沒翻的地方繼續。
+
+**Clear Flagged Cards（清空紅旗卡）**
+手機複習時看到不理想的卡（例句不貼切、翻譯有誤），先用 Anki 內建的紅旗標起來。回到 Mac 開這個面板，它會列出所有紅旗英文卡。按 Clear N Cards 之後，卡片只留 Word 和 Association，其餘六欄（例句、兩個翻譯、圖、字音、句音）清空，旗子也拔掉。清空是瞬間完成的，不會重新生成。想馬上補，按 Open Complete Missing Cards 一鍵跳去 ⌘S；想之後再補就按 Done。只認紅旗（flag:1），非英文卡略過。
+
+為什麼繞這一圈：手機的卡片模板寫不了欄位，紅旗是手機上唯一能做的記號。
+
+**Rebuild Long Sentences（重建過長例句）**
+舊卡的例句生成得比「6-12 字」規則進 prompt 更早，常常過長。填一個字數門檻（預設 20 字），按 Rescan 列出超標的卡，顯示「單字(字數)」、字數多的排前面。按 Clear N Sentences 會清空例句、整句翻譯、句子語音、單字翻譯和圖，只保留單字和單字發音。換了句子就等於全部重建，翻譯和圖都該跟著重來。清空同樣瞬間完成、不重新生成。清完一鍵跳 ⌘S 重生短句；量大時改走 CLI。
+
+**Test Cards（測試卡）**
+開發、測試輔助。填 Count（預設 7）按 Add Test Cards，產生只有 Front + Association 的裸卡。這些卡會出現在 Complete Missing Cards，可以拿來測補卡流程。Clean Test Cards 一鍵刪光。它和 CLI 的 `make_test_cards.py`（`add [N]`、`clean`）用同一個 tag，兩邊建的可以互相清。
+
+#### 找重複單字：`⌘D`
+
+把正規化後 Front 相同的卡片分組列出，抓得到手機漏進來的 HTML 或大小寫變體。勾選要刪的卡（每組至少保留一張），確認後刪除。
+
+> ⌘A、⌘S、⌘D、⌘F 都可以在 **Tools → My Word Adder Settings…** 直接按組合鍵重新設定，即時生效，不用改 JSON；清除設定就等於關閉該快捷鍵。
 >
-> 對話框 UI 文字一律英文（統一語言）。
+> 對話框的 UI 文字一律英文（統一語言）。
 
 ### 方式二：Terminal
 
@@ -108,7 +123,7 @@ cd ~/Workspace/anki
 # 新增單字
 uv run python add_word.py "glimpse" "a brief look"
 
-# 批次補齊所有空白欄位（例句/圖/音/單字翻譯，4 路並發）
+# 批次補齊所有空白欄位（例句、圖、音、單字翻譯，4 路並發）
 uv run python backfill_words.py
 
 # 批次回填整句翻譯 Sentence_CN（撞速率上限自動等 60s 續跑，Ctrl-C 結束）
@@ -122,11 +137,11 @@ uv run python regen_audio.py
 
 ## 手機新增 → Mac 補齊
 
-1. 手機 AnkiMobile → 新增卡片（只填 Front + Association）→ 同步
-2. Mac Anki → 同步
-3. `⌘S`（Complete Missing Cards）一鍵補完所有欄位（含整句翻譯）。CLI `backfill_words.py` 不含整句翻譯，需另跑 `backfill_sentence_cn.py`
-4. Mac Anki → 同步（選「上傳到 AnkiWeb」）
-5. 手機 → 同步 → 完整卡片出現
+1. 手機 AnkiMobile 新增卡片，只填 Front + Association，然後同步
+2. Mac Anki 同步
+3. 按 `⌘S`（Complete Missing Cards）一鍵補完所有欄位，含整句翻譯。走 CLI 的話注意：`backfill_words.py` 不補整句翻譯，要另跑 `backfill_sentence_cn.py`
+4. Mac Anki 同步，選「上傳到 AnkiWeb」
+5. 手機同步，完整卡片出現
 
 ---
 
@@ -142,8 +157,9 @@ uv run python regen_audio.py
 | 背景 | 底色 | `#FDFBF7` 乳白 | WCAG 對比度 5:1 |
 | 互動 | 翻譯填空框外框 | `#d6cfc4` 米色 | 透明底＋細外框＝可點但不搶戲 |
 
-字體：**Poppins**（標題）+ **Inter**（內文）
-佈局：左圖右文、手機響應式（圖上文下，圖片限高 200px）。單字翻譯與整句翻譯為**點擊顯示**的填空框（同款同字級）
+字體：**Poppins**（標題）+ **Inter**（內文）。
+
+佈局是左圖右文，手機響應式改為圖上文下，圖片限高 200px。單字翻譯與整句翻譯是點擊顯示的填空框，兩個同款同字級。
 
 ---
 
@@ -190,7 +206,7 @@ Anki/
 
 | 檔案 | 說明 |
 |------|------|
-| `core/llm.py` | LLM 統一入口。Groq API（無地端 fallback）。句子生成、圖片查詢、合併呼叫都在這裡 |
+| `core/llm.py` | LLM 統一入口。句子生成、圖片查詢、合併呼叫都在這裡 |
 | `core/tts.py` | TTS 語音生成。edge-tts wrapper，定義 Andrew（正面）和 Ava（背面）語音 |
 | `core/image.py` | 圖片搜尋下載。Pexels API 優先，DuckDuckGo fallback |
 | `core/text.py` | 文字處理。strip_html、normalize、is_placeholder、has_image |
@@ -202,19 +218,19 @@ Anki/
 |------|------|
 | `templates/style.css` | 卡片 CSS。科學配色 Light Mode + 手機 RWD |
 | `templates/front.html` | 正面 HTML（單字 + 播放鍵） |
-| `templates/back.html` | 背面 HTML（左圖右文 + 單字高亮 + 播放鍵 JS 定位 + 兩個點擊顯示的翻譯框，用 `<button>` 以相容 AnkiMobile 手勢） |
+| `templates/back.html` | 背面 HTML。左圖右文、句中單字高亮、播放鍵用 JS 定位。兩個點擊顯示的翻譯框用 `<button>` 做，因為 AnkiMobile 的原生手勢會略過非互動元件 |
 
 ### 主程式
 
 | 檔案 | 說明 |
 |------|------|
 | `add_word.py` | CLI 新增單字。用法：`uv run python add_word.py <word> [association]` |
-| `backfill_words.py` | 批次補齊缺少欄位（例句/圖/音/單字翻譯，不含整句翻譯）。4 路並發。用法：`uv run python backfill_words.py` |
-| `backfill_sentence_cn.py` | 批次回填整句翻譯 `Sentence_CN`。撞速率上限自動等待續跑、可 Ctrl-C 結束、下次續。用法：`uv run python backfill_sentence_cn.py` |
+| `backfill_words.py` | 批次補齊缺少欄位（例句、圖、音、單字翻譯，不含整句翻譯）。4 路並發。用法：`uv run python backfill_words.py` |
+| `backfill_sentence_cn.py` | 批次回填整句翻譯 `Sentence_CN`。撞速率上限自動等待續跑，可 Ctrl-C 結束，下次續跑。用法：`uv run python backfill_sentence_cn.py` |
 | `regen_audio.py` | 重新生成所有音檔。用法：`uv run python regen_audio.py` |
 | `update_template.py` | 讀取 `templates/` 並更新 Anki 模板。用法：`uv run python update_template.py` |
 | `debug_audio.py` | 音檔除錯。用法：`uv run python debug_audio.py <word>` |
-| `normalize_fronts.py` | 正規化既有 Front：去殘留 HTML + 轉小寫，全大寫縮寫（如 ASAP）保留。預設只預覽，加 `--apply` 才寫入 |
+| `normalize_fronts.py` | 正規化既有 Front：去殘留 HTML、轉小寫，全大寫縮寫（如 ASAP）保留。預設只預覽，加 `--apply` 才寫入 |
 
 ### Addon subprocess 模組
 
@@ -228,7 +244,7 @@ Anki/
 
 | 檔案 | 說明 |
 |------|------|
-| `addon/__init__.py` | Anki 插件主程式（symlink 到 `~/Library/.../addons21/my_word_adder/`）。`⌘A` 新增單字（含整句翻譯）、`⌘S` 補齊缺失卡片（例句/整句翻譯/圖/音/單字翻譯，少量日常用）、`⌘D` 找重複、`⌘F` / 選單 **Batch Operations…**（批量操作面板，堆疊式 section：上 `TranslateSection` 節流批次補整句翻譯、下 `ClearFlaggedSection` 清空紅旗卡內容+拔旗不生成；`BatchOperationsDialog` 組裝）。新增防護用正規化比對（HTML/大小寫變體都擋）。對話框 UI 一律英文。LLM 經 `addon/_llm_dispatch.py`（Groq+Gemini 分流鏡像）以 urllib 直呼，TTS/圖片透過 subprocess，BackfillWorker 3 路並發。改完需重啟 Anki |
+| `addon/__init__.py` | Anki 插件主程式，symlink 到 `~/Library/.../addons21/my_word_adder/`。⌘A、⌘S、⌘D、⌘F 四個功能的實作都在這裡，用法見上面「日常使用」。LLM 走 `addon/_llm_dispatch.py` 以 urllib 直呼（Groq + Gemini 分流鏡像），TTS 和圖片透過 subprocess，補卡 BackfillWorker 3 路並發。改完需重啟 Anki |
 
 ### 設定與測試
 
@@ -257,7 +273,7 @@ A：在 Anki 瀏覽器刪除 `Image_Prompt` 欄位內容，再跑 `Ctrl+Shift+C`
 A：跑 `uv run python regen_audio.py` 重新生成所有音檔
 
 **Q：Complete Missing Cards 跑太慢？**
-A：確認 Groq 有在用（進度顯示 `Groq`）；造句失敗時不再退地端，會留 placeholder 等下次補，檢查 `.groq_key` 與網路
+A：確認 Groq 有在用（進度顯示 `Groq`）。造句失敗時不退地端，會留 placeholder 等下次補。檢查 `.groq_key` 與網路
 
 **Q：同步時出現衝突對話框？**
 A：選「上傳到 AnkiWeb」— 電腦端是最新的
