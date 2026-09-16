@@ -655,7 +655,7 @@ def _():
     dlg.close(); _app.processEvents()
     return dlg.status.text()
 
-@check("批次跑到一半卡片被刪：worker 不會拋到 Anki，收尾計數也不算它還缺")
+@check("批次跑到一半卡片被刪：worker 不拋例外，收尾計數不把它算成缺也不算成完成")
 def _():
     seed(3)
     GATE.clear()
@@ -669,6 +669,7 @@ def _():
     pump(lambda: addon._batch_busy() is None, 30, "finished")
     txt = dlg.status.text()
     assert "still need filling" not in txt, txt     # 被刪的卡不該被算成「還缺」
+    assert "2 card(s) completed" in txt, txt        # 也不該被算成「已完成」
     assert len(mw.col._notes) == 2
     dlg.close(); _app.processEvents()
     return txt

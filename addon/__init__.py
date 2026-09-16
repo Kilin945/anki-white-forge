@@ -564,6 +564,7 @@ class _BatchDialogMixin:
         if w is not None:
             w.wait(self._CLOSE_WAIT_MS)
         aqt.dialogs.markClosed(self._DM_NAME)
+        self._close_pending = False        # 與 closeWithCallback 一致:關掉了就不留旗標
         super().done(r)
 
     def closeWithCallback(self, callback):
@@ -1301,10 +1302,13 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
         self.progress_bar.setVisible(False)
         mw.col.save()
         mw.reset()
-        total = len(self._worker.notes)
-        # 已被刪掉的卡不算「還缺」（非阻塞視窗開著時可能被別處刪除）
-        left = sum(1 for n in self._worker.notes
-                   if (note := _live_note(n["noteId"])) is not None and _note_incomplete(note))
+        # 已被刪掉的卡（非阻塞視窗開著時可能被別處刪除）兩邊都不算：不算「還缺」,
+        # 也不算「已完成」——只從 total 扣掉。否則 3 張選取、跑到一半刪掉 1 張,
+        # 會顯示「3 card(s) completed」而實際只做了 2 張。
+        live = [note for n in self._worker.notes
+                if (note := _live_note(n["noteId"])) is not None]
+        total = len(live)
+        left = sum(1 for note in live if _note_incomplete(note))
         done = total - left
         if getattr(self._worker, "_stopped", False):
             self.status.setText(f"Stopped — completed {done}, {left} still need filling.")
