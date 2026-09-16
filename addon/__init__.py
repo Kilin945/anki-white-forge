@@ -36,10 +36,13 @@ DECK_NAME    = "My Daily English"
 MODEL_NAME   = "English_White_Method"
 ANKI_URL     = "http://127.0.0.1:8765"
 PLACEHOLDERS = ["No example found", "please add manually", "is used in English", "Please add an example"]
-VENV_PYTHON     = os.path.expanduser("~/Workspace/anki/.venv/bin/python")
-GTTS_SCRIPT     = os.path.expanduser("~/Workspace/anki/_gtts_helper.py")
-IMAGE_SCRIPT    = os.path.expanduser("~/Workspace/anki/_image_helper.py")
-VALIDATE_SCRIPT = os.path.expanduser("~/Workspace/anki/_validate_helper.py")
+# repo 根從自己的位置推 — addon 是 symlink 掛進 Anki 的 addons21,
+# 所以要 realpath 才會落在 repo 而不是 symlink 所在的資料夾。
+_REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+VENV_PYTHON     = os.path.join(_REPO, ".venv", "bin", "python")
+GTTS_SCRIPT     = os.path.join(_REPO, "_gtts_helper.py")
+IMAGE_SCRIPT    = os.path.join(_REPO, "_image_helper.py")
+VALIDATE_SCRIPT = os.path.join(_REPO, "_validate_helper.py")
 VOICE_WORD     = "en-US-AndrewNeural"
 VOICE_SENTENCE = "en-US-AvaNeural"
 

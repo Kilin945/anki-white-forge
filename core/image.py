@@ -6,7 +6,8 @@ try:
 except ImportError:
     from duckduckgo_search import DDGS
 
-PEXELS_KEY_PATH = os.path.expanduser("~/Workspace/anki/.pexels_key")
+_REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+PEXELS_KEY_PATH = os.path.join(_REPO, ".pexels_key")
 PEXELS_API = "https://api.pexels.com/v1/search"
 
 

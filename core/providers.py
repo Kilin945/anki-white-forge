@@ -122,10 +122,11 @@ class LocalBucketLimiter:
 import requests
 from groq import Groq, RateLimitError
 
-GROQ_KEY_PATH = os.path.expanduser("~/Workspace/anki/.groq_key")
+_REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+GROQ_KEY_PATH = os.path.join(_REPO, ".groq_key")
 GROQ_MODEL = "openai/gpt-oss-120b"
 
-GEMINI_KEY_PATH = os.path.expanduser("~/Workspace/anki/.gemini_key")
+GEMINI_KEY_PATH = os.path.join(_REPO, ".gemini_key")
 GEMINI_MODEL = "gemini-flash-latest"  # 浮動別名：模型換代不會 404（2026-08 llama-3.3/gemini-2.0 同日退役事故）
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GEMINI_RPM = 15          # 免費層每分鐘請求數（2026-07 查自官方文件；變了改這裡）

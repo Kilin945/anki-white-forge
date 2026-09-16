@@ -19,7 +19,10 @@ import time
 import urllib.error
 import urllib.request
 
-LOG_PATH = os.path.expanduser("~/Workspace/anki/logs/addon_llm.log")
+# repo 根從自己的位置推 — addon 是 symlink 掛進 Anki 的 addons21,
+# 所以要 realpath 才會落在 repo 而不是 symlink 所在的資料夾。
+_REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+LOG_PATH = os.path.join(_REPO, "logs", "addon_llm.log")
 
 
 def get_logger():
@@ -40,11 +43,11 @@ def get_logger():
     return logger
 
 
-GROQ_KEY_PATH = os.path.expanduser("~/Workspace/anki/.groq_key")
+GROQ_KEY_PATH = os.path.join(_REPO, ".groq_key")
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "openai/gpt-oss-120b"
 
-GEMINI_KEY_PATH = os.path.expanduser("~/Workspace/anki/.gemini_key")
+GEMINI_KEY_PATH = os.path.join(_REPO, ".gemini_key")
 GEMINI_MODEL = "gemini-flash-latest"  # 浮動別名：模型換代不會 404（2026-08 llama-3.3/gemini-2.0 同日退役事故）
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GEMINI_RPM = 15          # 免費層每分鐘請求數（2026-07 查自官方文件；變了改這裡）

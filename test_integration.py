@@ -1,4 +1,5 @@
 """Integration test: add 3 words and verify all fields are populated."""
+import os
 import time
 import requests
 
@@ -48,7 +49,7 @@ def run_backfill():
     result = subprocess.run(
         ["uv", "run", "python", "backfill_words.py"],
         capture_output=True, text=True, timeout=120,
-        cwd="/Users/yeqilin/Workspace/anki",
+        cwd=os.path.dirname(os.path.realpath(__file__)),
     )
     return result.stdout, result.stderr, result.returncode
 
