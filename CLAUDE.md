@@ -46,6 +46,7 @@ Anki 自動化單字系統，牌組 `My Daily English`、筆記類型 `English_W
   - 非阻塞後「視窗開著時卡片被別處刪掉」變成可達路徑 → 對快取的 note id 一律用 `_live_note()`（`mw.col.get_note` 會拋 `NotFoundError`），不要直接 `get_note`
   - worker 掛在 section 上而不是 dialog 上的視窗（Batch Operations）要覆寫 `_active_worker()`／`_set_batch_status()`
   - Settings 是設定視窗，維持 modal `exec()`。純邏輯測試在 `test_nonmodal_dialogs.py`
+- **pytest 全綠不代表 Qt 沒事** <!-- @assert:path check_qt_compat.py -->：`conftest.py` 的假 aqt 把每個 Qt 類別換成 `_Any`（`AddWordDialog.__mro__` 裡根本沒有 `QDialog`）→ 那批測試驗的是純邏輯，對「這一版 Qt 還能不能用」**零覆蓋**。Anki / Qt 升級後要跑 `uv run python check_qt_compat.py`：它載入 **Anki.app 內實際在用的那份** PyQt6 與 aqt（`Contents/Resources/app_packages` 加進 `sys.path`；**只能加這個**，`Resources/app` 底下另一個 `anki` 套件會遮蔽真正的），用真 Qt 建構四個對話框、掛真快捷鍵、走 `aqt.dialogs` 的單例與 `closeAll()`。offscreen、不需要 Anki 開著。覆蓋面只到「想得到的破法」為止——遇到新的升級踩雷就往裡面加一條，不加它就永遠停在當時的覆蓋面
 - **測試用的假 aqt 統一放 `conftest.py`**（module 層 `install_fake_aqt()`，conftest 保證比測試模組先載入）。測試檔直接 `import addon` 就好，**不要各自抄一份 stub**——曾經 7 個檔逐字重複，addon 多 import 一個 Qt 類別就要改 7 次。
 - **對話框 UI 文字一律英文**（最後訂版語言規則，求一致）；但**程式註解 / docstring / LLM prompt 範例 / 中文偵測 regex 保持中文**。改 addon 對話框新增字串用英文。
 - core 的 LLM 文字呼叫一律走 `core/dispatcher.py`（容量感知分流 Groq+Gemini、斷路器、failover）；
