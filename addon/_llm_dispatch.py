@@ -448,14 +448,18 @@ class Dispatcher:
             except ProviderRateLimited as e:
                 self._breakers[p.name].record_failure(e.retry_after)
                 _log.warning("%s 429 retry_after=%s", p.name, e.retry_after)
-                if self._breakers[p.name].open_remaining() > 0:
-                    _log.warning("breaker OPEN %s cooldown=%s", p.name, e.retry_after)
+                # 印實際生效的冷卻,不是例外帶來的建議值(後者可能是 None,
+                # record_failure 會 fallback 到 cooldown_default)
+                opened = self._breakers[p.name].open_remaining()
+                if opened > 0:
+                    _log.warning("breaker OPEN %s cooldown=%.0fs", p.name, opened)
             except ProviderError as e:
                 cooldown = getattr(e, "retry_after", None)
                 self._breakers[p.name].record_failure(cooldown)
                 _log.warning("%s failed (%s) → failover", p.name, e)
-                if self._breakers[p.name].open_remaining() > 0:
-                    _log.warning("breaker OPEN %s cooldown=%s", p.name, cooldown)
+                opened = self._breakers[p.name].open_remaining()
+                if opened > 0:
+                    _log.warning("breaker OPEN %s cooldown=%.0fs", p.name, opened)
             except Exception:
                 self._breakers[p.name].record_failure()   # 非預期例外也要釋放試探閘
                 raise

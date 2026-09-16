@@ -144,6 +144,63 @@ class TestCircuitBreaker:
             assert b.open_remaining() == pytest.approx(12.0, abs=0.2)
 
 
+class _RecordingLog:
+    """收 log 呼叫的假 logger。真 _log 的 propagate=False 且直寫 logs/addon_llm.log,
+    caplog 抓不到、也不該讓測試污染那個檔 → 直接替換模組層的 _log。"""
+    def __init__(self):
+        self.msgs = []
+
+    def warning(self, fmt, *args):
+        self.msgs.append(fmt % args)
+
+    def debug(self, *a, **k):
+        pass
+
+    def info(self, *a, **k):
+        pass
+
+    def opens(self):
+        return [m for m in self.msgs if m.startswith("breaker OPEN")]
+
+
+class TestBreakerOpenLog:
+    """breaker OPEN 印的是「實際生效的冷卻秒數」,不是例外帶來的建議值。
+    根因:timeout 型失敗(ProviderError)沒有 retry_after → 舊版直接印 cooldown=None,
+    讀 log 的人以為沒有冷卻;實際 record_failure 已 fallback 到 cooldown_default。"""
+
+    def test_timeout_failure_logs_effective_cooldown_not_none(self):
+        p = FakeProvider("gemini", headroom=0.9,
+                         error=lld.ProviderError("The read operation timed out"))
+        rec = _RecordingLog()
+        with patch.object(lld.time, "monotonic", return_value=1000.0), \
+             patch.object(lld, "_log", rec):
+            d = lld.Dispatcher([p], threshold=1, cooldown_default=30.0)
+            with pytest.raises(lld.AllProvidersLimited):
+                d.generate("p", temperature=0, max_tokens=8, timeout=8)
+        assert rec.opens() == ["breaker OPEN gemini cooldown=30s"]
+
+    def test_429_logs_effective_cooldown(self):
+        p = FakeProvider("groq", headroom=0.9,
+                         error=lld.ProviderRateLimited(retry_after=12.0))
+        rec = _RecordingLog()
+        with patch.object(lld.time, "monotonic", return_value=1000.0), \
+             patch.object(lld, "_log", rec):
+            d = lld.Dispatcher([p], threshold=1, cooldown_default=30.0)
+            with pytest.raises(lld.AllProvidersLimited):
+                d.generate("p", temperature=0, max_tokens=8, timeout=8)
+        assert rec.opens() == ["breaker OPEN groq cooldown=12s"]
+
+    def test_no_open_log_below_threshold(self):
+        p = FakeProvider("gemini", headroom=0.9, error=lld.ProviderError("x"))
+        rec = _RecordingLog()
+        with patch.object(lld.time, "monotonic", return_value=1000.0), \
+             patch.object(lld, "_log", rec):
+            d = lld.Dispatcher([p], threshold=3, cooldown_default=30.0)
+            with pytest.raises(lld.AllProvidersLimited):
+                d.generate("p", temperature=0, max_tokens=8, timeout=8)
+        assert rec.opens() == []          # 未達門檻 → 不印 OPEN
+
+
 class TestBackoff:
     def test_first_429_respects_retry_after(self):
         assert lld._backoff_secs(2.0, 1) == pytest.approx(2.0)
