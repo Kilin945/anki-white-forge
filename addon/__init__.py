@@ -1249,6 +1249,11 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
             parts.append(f"{invalid} card(s) contain non-English characters and cannot be created (please fix or delete).")
         self.status.setText(" ".join(parts) if parts else "All cards are complete!")
         self.select_all.setEnabled(bool(notes))
+        # 預設全選:日常用法就是「開窗、按一下、全部補完」,要挑掉某張卡再自己取消勾選。
+        # 直接呼叫 _on_select_all 而不是靠 setChecked 的 stateChanged —— 值沒變時
+        # Qt 不會 emit,reopen 進來若 select_all 已是 True,新掃出來的列就會漏勾。
+        self.select_all.setChecked(bool(notes))
+        self._on_select_all()
         self._update_selection()
 
     def _update_selection(self):
@@ -1258,7 +1263,7 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
         self.remove_btn.setText(f"Remove Selected ({n})")
         self.remove_btn.setEnabled(n > 0)
 
-    def _on_select_all(self, state):
+    def _on_select_all(self, state=None):
         checked = self.select_all.isChecked()
         for row in self._rows.values():
             row.checkbox.setChecked(checked)

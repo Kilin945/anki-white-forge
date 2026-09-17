@@ -544,16 +544,48 @@ def _():
     seed(2)
     bf = addon.BackfillDialog(mw); bf.show(); _app.processEvents()
     row = list(bf._rows.values())[0]
-    assert bf.run_btn.text() == "Complete Selected (0)", bf.run_btn.text()
-    QTest.keyClick(row.checkbox, Qt.Key.Key_Space)
+    assert bf.run_btn.text() == "Complete Selected (2)", bf.run_btn.text()
+    QTest.keyClick(row.checkbox, Qt.Key.Key_Space)      # 取消單列
     _app.processEvents()
-    assert row.is_checked(), "Space 沒勾起來"
+    assert not row.is_checked(), "Space 沒取消勾選"
     assert bf.run_btn.text() == "Complete Selected (1)", bf.run_btn.text()
-    QTest.keyClick(bf.select_all, Qt.Key.Key_Space)
+    QTest.keyClick(bf.select_all, Qt.Key.Key_Space)     # 取消全選
     _app.processEvents()
+    assert bf.run_btn.text() == "Complete Selected (0)", bf.run_btn.text()
+    bf.close(); _app.processEvents()
+    return "單列 Space → (1)，Select all Space → (0)"
+
+
+@check("⌘S 開窗即全選：掃到卡就全部勾好，按一下 Complete Selected 就能跑")
+def _():
+    seed(3)
+    bf = addon.BackfillDialog(mw); bf.show(); _app.processEvents()
+    assert bf.select_all.isChecked(), "Select all 沒被勾起來"
+    assert all(r.is_checked() for r in bf._rows.values()), "有列沒被連動勾到"
+    assert bf.run_btn.text() == "Complete Selected (3)", bf.run_btn.text()
+    assert bf.run_btn.isEnabled(), "Complete Selected 沒啟用"
+    # reopen 重掃也要全選 —— select_all 已是 True 時 setChecked 不 emit,
+    # 靠 signal 連動的寫法會在這裡漏勾。
+    seed(2)
+    bf.reopen(); _app.processEvents()
+    assert len(bf._rows) == 2, f"reopen 後掃到 {len(bf._rows)} 列"
+    assert all(r.is_checked() for r in bf._rows.values()), "reopen 後有列沒被勾到"
     assert bf.run_btn.text() == "Complete Selected (2)", bf.run_btn.text()
     bf.close(); _app.processEvents()
-    return "單列 Space → (1)，Select all Space → (2)"
+    return "開窗 3/3 全勾，reopen 重掃 2/2 全勾"
+
+
+@check("⌘S 沒有缺卡時不勾也不啟用：Select all 停用、按鈕 (0)")
+def _():
+    seed(0)
+    bf = addon.BackfillDialog(mw); bf.show(); _app.processEvents()
+    assert not bf._rows, f"不該掃到列,卻有 {len(bf._rows)} 列"
+    assert not bf.select_all.isChecked(), "沒卡卻把 Select all 勾起來"
+    assert not bf.select_all.isEnabled(), "沒卡卻啟用 Select all"
+    assert bf.run_btn.text() == "Complete Selected (0)", bf.run_btn.text()
+    assert not bf.run_btn.isEnabled(), "沒卡卻啟用 Complete Selected"
+    bf.close(); _app.processEvents()
+    return "空清單:不勾、不啟用"
 
 @check("四組快捷鍵（Ctrl+A/S/D/F）真按下去會觸發各自的 handler")
 def _():

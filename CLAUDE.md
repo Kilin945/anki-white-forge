@@ -43,6 +43,7 @@ Anki 自動化單字系統，牌組 `My Daily English`、筆記類型 `English_W
   2. **關窗即結束批次** → `_BatchDialogMixin.done()` 在跑批中只請 worker 停、**不關窗**（視窗一關，worker 的 signal 就打到已刪除的 Qt 物件，`_on_finished` 還會在背後 `mw.col.save()`）。worker 收尾時各 dialog 呼叫 `_end_batch()` 才真的關。**關窗一定要走 `_force_close()` 不能走 `done()`**——worker 用的是自訂 `finished` signal（在 `run()` 返回前就發出），那一刻 `isRunning()` 仍是 True，走 `done()` 會被自己的守門擋掉、視窗永遠關不掉
   3. **Anki 退出/切 profile 的收拾** → 用 **Anki 內建 `aqt.dialogs`**（`register_dialog`/`open`/`markClosed`）而不是自製 registry：`closeAll()` 只看得到它自己的登記表，自製的看不到 → worker 會對正在卸載的 collection 續寫。內建的還附贈單例、還原被縮小的視窗、`reopen()` 重掃 hook。契約：每個視窗要有 `silentlyClose` 或 `closeWithCallback`（mixin 已提供），且**所有關窗路徑都必須經過 `markClosed`**（`done()` 是唯一漏斗：Close 鈕 `accept()`、X、Esc 都會走到它）
   - `reopen()` 一定要實作重掃：dialog 只在 `__init__` 掃卡，單例被叫回前面若不重掃，「⌘F 清空紅旗卡 → Open Complete Missing Cards」會看到清空前的舊清單、一鍵重生等於沒作用
+  - ⌘S 的 `_scan()` **掃完要全選**（日常用法是開窗按一下就整批跑，挑卡靠手動取消勾選）。全選一定要**明確呼叫 `_on_select_all()`**，不要只 `select_all.setChecked(True)` 靠 `stateChanged` 連動——Qt 在值沒變時不 emit，`reopen()` 進來若 `select_all` 已是 True，新掃出來的列就整片漏勾。回歸保護在 `check_qt_runtime.py` 的「⌘S 開窗即全選」一項（含 reopen 重掃）
   - 非阻塞後「視窗開著時卡片被別處刪掉」變成可達路徑 → 對快取的 note id 一律用 `_live_note()`（`mw.col.get_note` 會拋 `NotFoundError`），不要直接 `get_note`
   - worker 掛在 section 上而不是 dialog 上的視窗（Batch Operations）要覆寫 `_active_worker()`／`_set_batch_status()`
   - Settings 是設定視窗，維持 modal `exec()`。純邏輯測試在 `test_nonmodal_dialogs.py`
