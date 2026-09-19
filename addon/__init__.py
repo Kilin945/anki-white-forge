@@ -891,7 +891,8 @@ SHORT_WALL_WAIT = 2.0      # 秒。牆比這短就原地等掉續跑；更長才
 
 class BackfillWorker(QThread):
     step      = pyqtSignal(object, str, str)   # (note_id, field, ...) — object: note ids exceed 32-bit int
-    card_done = pyqtSignal(object)             # (note_id) finished successfully
+    card_done = pyqtSignal(object)             # (note_id) 這張處理完了 —— 不等於補齊了
+                                               # (欄位生失敗只會 emit step warn,不中斷)
     finished  = pyqtSignal(list)
     error     = pyqtSignal(str)
 
@@ -1103,19 +1104,39 @@ def _note_snapshot(note):
 
 # ── backfill dialog ───────────────────────────────────────────────────────────
 
+def _finished_ids(note_ids, lookup):
+    """Which of these rows came back complete — the pure decision behind Remove Finished.
+
+    `lookup(note_id)` returns the live note, or None when the card is gone. A card
+    counts as finished when it exists and `_note_incomplete` says nothing is missing,
+    or when it was deleted elsewhere (it can neither be filled nor needs to be).
+
+    判定一定要重讀欄位,**不能**拿 worker 的 `card_done` 訊號當依據:card_done 的語意是
+    「這張處理完了」不是「這張補齊了」——某個欄位生失敗時 helper 靜默回空字串、不 raise,
+    照樣跑到最後 emit card_done。拿它當依據,半成品會被當成完成而從清單上消失
+    （紅旗卡 Refill 就是這樣把自己的待辦清單擦掉的,見 CLAUDE.md）。"""
+    done = set()
+    for nid in note_ids:
+        note = lookup(nid)
+        if note is None or not _note_incomplete(note):
+            done.add(nid)
+    return done
+
+
 def _drop_notes(pending_notes, remove_ids):
     """Return pending_notes minus the given note ids — a fresh list, input untouched.
-    Pure decision behind Remove Selected (view-only removal; cards stay in Anki)."""
+    Pure decision behind Remove Finished (view-only removal; cards stay in Anki)."""
     remove_ids = set(remove_ids)
     return [n for n in pending_notes if n["noteId"] not in remove_ids]
 
 
 def _removal_status(removed, remaining):
-    """Status line after Remove Selected drops rows from the list (view only)."""
+    """Status line after Remove Finished drops the completed rows (view only)."""
     if remaining:
-        return (f"Removed {removed} from the list. "
-                f"{remaining} still shown. Remember to sync Anki!")
-    return "All cleared from the list. Remember to sync Anki!"
+        return (f"Removed {removed} finished card(s). {remaining} still need filling — "
+                f"still selected, so Complete Selected picks them up. "
+                f"Remember to sync Anki!")
+    return "All finished cards cleared from the list. Remember to sync Anki!"
 
 
 class BackfillDialog(_BatchDialogMixin, QDialog):
@@ -1129,6 +1150,7 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
         self.setMinimumHeight(380)
         self._worker = None
         self._rows = {}
+        self._finished = set()      # 跑完一批後重讀欄位算出來的「已補齊」note id
         self._setup_ui()
         self._scan()
 
@@ -1140,6 +1162,7 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
         if self._batch_active():
             return
         self._clear_rows()
+        self._finished = set()
         self.remove_btn.setVisible(False)
         self.select_all.setChecked(False)
         self._scan()
@@ -1183,10 +1206,10 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
         self.run_btn = QPushButton("Complete Selected (0)")
         self.run_btn.setEnabled(False)
         self.run_btn.clicked.connect(self._on_run)
-        self.remove_btn = QPushButton("Remove Selected (0)")
+        self.remove_btn = QPushButton("Remove Finished (0)")
         self.remove_btn.setEnabled(False)
         self.remove_btn.setVisible(False)     # only appears after a batch finishes
-        self.remove_btn.clicked.connect(self._on_remove_selected)
+        self.remove_btn.clicked.connect(self._on_remove_finished)
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
         btns.addWidget(self.run_btn)
@@ -1260,7 +1283,12 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
         n = sum(1 for r in self._rows.values() if r.is_checked())
         self.run_btn.setText(f"Complete Selected ({n})")
         self.run_btn.setEnabled(n > 0)
-        self.remove_btn.setText(f"Remove Selected ({n})")
+
+    def _update_remove_button(self):
+        """Remove Finished 只算補齊的卡,跟打勾無關 —— 開窗預設全選,綁勾選等於
+        「按一下清空整個清單」,連還沒補完的也看不到了。"""
+        n = len(self._finished & self._rows.keys())
+        self.remove_btn.setText(f"Remove Finished ({n})")
         self.remove_btn.setEnabled(n > 0)
 
     def _on_select_all(self, state=None):
@@ -1336,17 +1364,20 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
                                 f"didn't come back, try those again. Remember to sync Anki!")
         else:
             self.status.setText(f"Done — {done} card(s) completed. Remember to sync Anki!")
-        # keep the boxes checked so the finished cards stay selected — the user then
-        # clicks Remove Selected to clear them from the list (view only, cards stay in Anki)
+        # 重讀每一列的欄位算出誰補齊了 —— Remove Finished 只拿掉這些,沒補完的留在
+        # 清單上而且勾還在,額度回來直接再按 Complete Selected 續跑。
+        self._finished = _finished_ids(list(self._rows), _live_note)
         self.select_all.setEnabled(True)
         self.remove_btn.setVisible(True)
         self._update_selection()
+        self._update_remove_button()
         self._end_batch()
 
-    def _on_remove_selected(self):
-        """Drop the checked rows from this list — view only. The cards were just
-        completed and stay in Anki; this only clears them off the dialog."""
-        to_remove = [nid for nid, r in self._rows.items() if r.is_checked()]
+    def _on_remove_finished(self):
+        """Drop the rows that came back complete — view only. Those cards stay in Anki;
+        this only clears them off the dialog. Rows still missing fields stay listed
+        and stay checked, so the next Complete Selected picks them up without a rescan."""
+        to_remove = [nid for nid in self._rows if nid in self._finished]
         if not to_remove:
             return
         for nid in to_remove:                        # Qt side: drop the row widgets
@@ -1355,12 +1386,13 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
             row.setParent(None)
             row.deleteLater()
         self._pending_notes = _drop_notes(self._pending_notes, to_remove)
-        self.select_all.setChecked(False)
+        self._finished -= set(to_remove)
         self.status.setText(_removal_status(len(to_remove), len(self._rows)))
         if not self._rows:                           # list emptied → retire the button
             self.remove_btn.setVisible(False)
             self.select_all.setEnabled(False)
         self._update_selection()
+        self._update_remove_button()
 
 
 # ── find duplicates dialog ─────────────────────────────────────────────────────

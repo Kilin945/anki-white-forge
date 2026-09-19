@@ -247,12 +247,13 @@ def _():
     globals()["DLG1"] = dlg
     return f"status: {dlg.status.text()!r}"
 
-@check("⌘S: 收尾狀態 = 全部完成、批次權已釋放、Remove Selected 出現")
+@check("⌘S: 收尾狀態 = 全部完成、批次權已釋放、Remove Finished 出現")
 def _():
     dlg = DLG1
     assert dlg.status.text().startswith("Done — 3 card(s) completed"), dlg.status.text()
     assert addon._batch_busy() is None, f"批次權沒釋放：{addon._batch_busy()}"
-    assert dlg.remove_btn.isVisible(), "Remove Selected 沒出現"
+    assert dlg.remove_btn.isVisible(), "Remove Finished 沒出現"
+    assert dlg.remove_btn.text() == "Remove Finished (3)", dlg.remove_btn.text()
     assert not dlg.progress_bar.isVisible(), "進度條沒收起來"
     assert mw.col.calls["save"] >= 1 and mw.resets >= 1, "沒有 col.save()/mw.reset()"
     return f"save={mw.col.calls['save']} reset={mw.resets}"
@@ -289,6 +290,43 @@ print(f"  INFO  finished 送達時 worker.isRunning() = {FIN_RUNNING}"
       "  （競態，取決於 main loop 何時取件；_force_close 的必要性改在第 3 組驗）")
 
 DLG1.close(); _app.processEvents()
+
+# Remove Finished 的判定必須是「重讀欄位」而不是 worker 的 card_done —— 欄位生失敗時
+# helper 靜默回空字串、不中斷,照樣 emit card_done。這裡讓其中一張的翻譯回空字串,
+# 驗半成品不會被當成完成而從清單上消失。
+@check("⌘S: Remove Finished 只算補齊的卡（半成品留在清單、勾還在）")
+def _():
+    seed(3)
+    fail_word = NAMES[1]
+    orig_translate = addon.Worker._groq_translate
+    addon.Worker._groq_translate = (
+        lambda self, w, s, _f=fail_word: "" if w == _f else "字義")
+    finished_hits, done_ids = [], []
+    try:
+        dlg = open_backfill()
+        select_all_rows(dlg)
+        orig_fin, orig_done = dlg._on_finished, dlg._on_card_done
+        def fin(res):
+            finished_hits.append(1); orig_fin(res)
+        def done(nid):
+            done_ids.append(nid); orig_done(nid)
+        dlg._on_finished, dlg._on_card_done = fin, done
+        QTest.mouseClick(dlg.run_btn, Qt.MouseButton.LeftButton)
+        pump(lambda: bool(finished_hits), 30, "partial batch finished")
+    finally:
+        addon.Worker._groq_translate = orig_translate
+    nid_fail = NID_BASE + 1
+    assert nid_fail in done_ids, "前提不成立:半成品那張根本沒 emit card_done"
+    assert nid_fail not in dlg._finished, "翻譯沒補到的卡被算成完成"
+    assert dlg.remove_btn.text() == "Remove Finished (2)", dlg.remove_btn.text()
+    QTest.mouseClick(dlg.remove_btn, Qt.MouseButton.LeftButton)   # 真的按下去
+    assert list(dlg._rows) == [nid_fail], f"清單剩下 {list(dlg._rows)}"
+    assert dlg._rows[nid_fail].is_checked(), "剩下的列勾被取消 → 還要手動重勾才能續跑"
+    assert dlg.run_btn.text() == "Complete Selected (1)", dlg.run_btn.text()
+    assert not dlg.remove_btn.isEnabled(), "沒有補齊的卡可移除,按鈕還亮著"
+    assert "1 still need filling" in dlg.status.text(), dlg.status.text()
+    dlg._force_close(0); _app.processEvents()
+    return "2 張補齊被移除、1 張半成品留著且仍勾選"
 
 # ═══ 2. 批次互斥 ════════════════════════════════════════════════════════════
 print("\n2) 批次互斥（_batch_acquire / _blocked_by_batch）")

@@ -1,7 +1,7 @@
-"""手動測試 Complete Missing Cards 對話框(Remove Selected 等)用的測試卡工具。
+"""手動測試 Complete Missing Cards 對話框(Remove Finished 等)用的測試卡工具。
 
 建出「只有 Front + Association、其他欄位全空」的裸卡 → 它們會被 dialog 認成
-「缺欄位」而出現在清單,讓你勾選、Complete、測 Remove Selected。全部打上專屬
+「缺欄位」而出現在清單,讓你勾選、Complete、測 Remove Finished。全部打上專屬
 tag,清除靠 tag 一鍵刪,不留痕跡,也不會誤刪你真正的單字卡。
 
 Anki 要開著並啟用 AnkiConnect。用法:

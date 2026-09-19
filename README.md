@@ -145,6 +145,10 @@ uv run python regen_audio.py
 4. Mac Anki 同步，選「上傳到 AnkiWeb」
 5. 手機同步，完整卡片出現
 
+跑完一批之後，視窗下方會多一顆 Remove Finished。它只把已經補齊的卡從清單上拿掉，不會刪卡片。
+
+撞到雲端額度上限時，通常會有幾張沒補完。按 Remove Finished 清掉補好的那幾張，沒補完的會留在清單上、而且勾還在。等額度恢復，直接按 Complete Selected 續跑就好。
+
 ---
 
 ## 卡片配色
