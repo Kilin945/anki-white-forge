@@ -26,6 +26,7 @@ Anki 自動化單字系統，牌組 `My Daily English`、筆記類型 `English_W
 - ⌘A（Add）和 ⌘S（Complete）都會生成全部欄位含 `Translation`，共用 `Worker._groq_translate()`
 - ⌘S 按 Complete 時 `_on_run` 會用 `_note_snapshot()` **重新讀最新欄位**（不是 `_pending_notes` 這種開窗時的快照）；佔位符**絕不覆蓋非空真句子**（生成失敗時該不該寫佔位符是純函式 `_sentence_to_write`，None＝保留原句）——事故根因：舊版用開窗快照判斷「還缺什麼」，撞限重跑會把已生成的真句子蓋成佔位符。停批政策：`_dispatcher.wall_secs()` 量到的牆 ≤ `SHORT_WALL_WAIT`(2s) 就原地等掉續跑，更長才停批回報（雙 provider 常見秒級小牆，不值得整批中止）。批次/LLM 事件（failover、429、斷路器 OPEN、撞限停批、佔位符守門觸發）集中記錄到 `logs/addon_llm.log`（已 gitignore，`RotatingFileHandler` 1MB×3 輪替，經 `_lld.get_logger()`）。句音由 `_need_sentence_audio` 決定：佔位符不配音、句子重寫強制重生
 - **句子不可用（空/佔位符）→ 依賴句意的下游全部跳過**（Image、Translation、Sentence_CN、句音；Front_Audio 與句子無關照做），亮橘等下次 ⌘S 連同句子一起重做——事故根因：句子生成失敗仍照跑下游，`Sentence_CN` 變成「佔位符的翻譯」這種欄位彼此不一致的髒卡。判斷是純函式 addon `_sentence_usable` / core `sentence_usable`（KEEP-IN-SYNC），閘門接在 **⌘A `Worker.run`、⌘S `_process_one`、CLI `backfill_words.py`** 三處，改一處要檢查另兩處
+- **LLM 洩漏兩道防線（`Sentence` 欄位存進思考過程的事故，2026-09-22）**：①**源頭**：Gemini 開 thinking 時 `parts` 會夾帶思考段落（該 part 帶 `"thought": true`）→ `_extract_gemini_text` **只收非 thought 的 part**，絕不可盲取 `parts[0]`（core `core/providers.py` / addon `_llm_dispatch.py` 兩份 KEEP-IN-SYNC）。②**守門**：造句結果要過純函式 `sentence_acceptable`（core `core/text.py`）／`_sentence_acceptable`（addon，KEEP-IN-SYNC）——**大寫開頭 ＋ 字數 ≤ `MAX_SENTENCE_WORDS`(25) ＋ 無換行**，三條都是「合規句子必然通過」的結構條件故零誤殺（注意 `We need to ...` 是牌組裡的正常句型，**不可**用思考語氣關鍵字偵測，會誤殺）。它取代原本的 `len(result) > 10`，接在 addon `_llm_sentence`、core `llm_sentence`、`llm_sentence_and_query`（兩處）——新增任何造句路徑都要接上。事故根因：模型的思考中段與被回吐的 prompt 寫進 `Sentence`，非空非佔位符 → `_sentence_usable` 放行 → `Sentence_CN` 拿它去翻必含 3+ 英文詞被驗證擋掉，而句子「看起來合法」所以 ⌘S 不重生 → 使用者重跑幾次都修不好。回歸測試 `test_reasoning_leak.py` 釘住兩個真實汙染樣本
 - LLM 呼叫的 `effort` 參數（預設 `"low"`）：**造句傳 `"medium"`**（多條件約束任務），翻譯/拼字等查詢式短呼叫維持 low。對映：Groq `reasoning_effort` 直吃；Gemini 只有 low/high 兩檔（minimal 被 API 拒）→ low 以上一律 high。思考餘裕跟著走：low=`REASONING_HEADROOM`(512)、更高=`REASONING_HEADROOM_DEEP`(1024)，兩份 KEEP-IN-SYNC
 - 非英文字元用共用 `_looks_english()` 擋：⌘A 建立前擋、⌘S 掃描時略過非英文卡片（手機/Anki 內建新增繞過 ⌘A，故 ⌘S 是最後關卡 → 驗證要兩邊都做、邏輯共用）
 - ⌘A 拼字另用 Groq `_groq_spellcheck()`（回 OK／更正字／NONWORD），斷網退 `_validate_helper.py` 離線拼字
@@ -70,7 +71,7 @@ Anki 自動化單字系統，牌組 `My Daily English`、筆記類型 `English_W
 
 ## Running
 
-所有 script：`uv run python <script>.py`，需 Anki 開著並啟用 AnkiConnect。模板部署：`uv run python update_template.py`。
+所有 script：`uv run python <script>.py`，需 Anki 開著並啟用 AnkiConnect。**Anki 的「瀏覽」視窗選著哪張卡，那張卡就寫不進去**——編輯器持有該 note 的欄位快照，外部寫入後它會把記憶體裡的舊狀態寫回，把結果整個擦掉。所有層都回報成功：`backfill_words.py` 印「✓ Updated」、`anki('updateNoteFields')` 回 `error: null`、當下讀也讀得到值——**十幾秒後才變空**，重跑幾次都一樣，症狀很像 CLI 或 AnkiConnect 壞掉。**別叫使用者關視窗**（重開 Anki 會還原上次的瀏覽視窗，關過一次不代表安全），從外面處理：`guiSelectedNotes` 查現在選著哪些 nid → 撞到要改的卡就 `guiBrowse` 把 query 換成 `nid:1` 之類的空結果、把選取移開，再寫入。寫完一定要隔 15 秒以上重讀驗證，t+0 讀到值不算數（2026-09-22 實測：t+0 有值、t+10 全空）。模板部署：`uv run python update_template.py`。
 
 ## Pre-push Checklist
 

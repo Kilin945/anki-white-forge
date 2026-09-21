@@ -4,6 +4,7 @@ from core.dispatcher import AllProvidersLimited, Dispatcher
 from core.providers import (GROQ_KEY_PATH, GROQ_MODEL, GeminiProvider,
                             GroqProvider, _load_groq_client)  # GROQ_MODEL/GROQ_KEY_PATH/_load_groq_client 純 re-export — test_backfill.py 依賴,勿刪
 from core.rate_limiter import RateLimitReached
+from core.text import sentence_acceptable
 
 _dispatcher = Dispatcher(
     [p for p in (GroqProvider.load(), GeminiProvider.load()) if p])
@@ -76,7 +77,7 @@ def _sentence_instructions(word, association=""):
 def llm_sentence(word, association=""):
     prompt = _sentence_instructions(word, association) + "\n\nOutput only the sentence. No explanation, no quotes."
     result = llm(prompt, effort="medium")     # 造句是多條件約束任務 → 較高思考等級
-    return result if len(result) > 10 else ""
+    return result if sentence_acceptable(result) else ""
 
 
 def llm_translate(word, sentence=""):
@@ -108,10 +109,12 @@ def llm_sentence_and_query(word, association="", sentence=""):
     if len(lines) >= 2:
         sent = lines[0].strip('"\'')
         query = lines[1].strip('"\'')
-        if len(sent) > 10:
+        if sentence_acceptable(sent):
             return sent, query
-    if len(lines) == 1 and len(lines[0]) > 10:
-        return lines[0].strip('"\''), f"{word} {association} photo" if association else f"{word} illustration"
+    if len(lines) == 1:
+        sent = lines[0].strip('"\'')
+        if sentence_acceptable(sent):
+            return sent, f"{word} {association} photo" if association else f"{word} illustration"
     return "", f"{word} {association} photo" if association else f"{word} illustration"
 
 

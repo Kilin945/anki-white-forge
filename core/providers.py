@@ -239,11 +239,20 @@ class GroqProvider:
 
 
 def _extract_gemini_text(data):
-    """generateContent 回應 → 文字；形狀不對回 ''（呼叫端視為失敗）。"""
+    """generateContent 回應 → 文字；形狀不對回 ''（呼叫端視為失敗）。
+    thinkingConfig 開著時 parts 會夾帶思考段落（該 part 帶 "thought": true）——盲取
+    parts[0] 會把模型的自言自語或被回吐的 prompt 當成答案。事故：Anki 卡片的
+    Sentence 欄位存進 'cause to collapse/stop functioning) ... But wait,' 這種思考
+    中段，看起來像合法句子（非空、非佔位符）→ 閘門放行 → 下游翻譯永遠被驗證擋掉，
+    重跑幾次都修不好。只收非 thought 的 part。
+    KEEP IN SYNC: core/providers.py 與 addon/_llm_dispatch.py 各一份。"""
     try:
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        parts = data["candidates"][0]["content"]["parts"]
+        texts = [p["text"] for p in parts
+                 if not p.get("thought") and isinstance(p.get("text"), str)]
     except (KeyError, IndexError, TypeError):
         return ""
+    return "\n".join(texts).strip()
 
 
 def _gemini_retry_secs(body, default=30.0):
