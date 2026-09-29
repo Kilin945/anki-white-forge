@@ -41,7 +41,7 @@ def install_fake_aqt():
     qt = types.ModuleType("aqt.qt")
     for name in ["QAction", "QDialog", "QVBoxLayout", "QHBoxLayout", "QFormLayout",
                  "QLabel", "QLineEdit", "QPushButton", "QProgressBar", "QScrollArea",
-                 "QTreeWidget", "QTreeWidgetItem", "QWidget", "QFrame", "QCheckBox",
+                 "QWidget", "QFrame", "QCheckBox",
                  "QKeySequenceEdit", "QKeySequence", "QMessageBox", "QThread",
                  "pyqtSignal", "Qt"]:
         setattr(qt, name, _Any)

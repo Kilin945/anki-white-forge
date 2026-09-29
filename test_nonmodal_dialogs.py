@@ -177,10 +177,9 @@ class TestAnkiShutdown:
 # ── Anki 內建 dialog manager ──────────────────────────────────────────────────
 
 class TestDialogManagerRegistration:
-    def test_all_four_batch_dialogs_are_registered(self):
+    def test_all_three_batch_dialogs_are_registered(self):
         assert set(addon._DM_NAMES) == {
-            addon.AddWordDialog, addon.BackfillDialog,
-            addon.FindDuplicatesDialog, addon.BatchOperationsDialog,
+            addon.AddWordDialog, addon.BackfillDialog, addon.BatchOperationsDialog,
         }
 
     def test_registry_names_are_unique_and_namespaced(self):
@@ -209,7 +208,7 @@ class TestDialogManagerRegistration:
 
     def test_rescanning_dialogs_expose_reopen(self):
         # 單例被叫回前面時 DialogManager 會呼叫 reopen() → 重掃,不然清單是舊的
-        for cls in (addon.BackfillDialog, addon.FindDuplicatesDialog):
+        for cls in (addon.BackfillDialog, addon.BatchOperationsDialog):
             assert hasattr(cls, "reopen"), f"{cls.__name__} 缺 reopen(),叫回來會是舊清單"
 
 

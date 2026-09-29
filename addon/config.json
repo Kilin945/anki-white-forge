@@ -2,7 +2,6 @@
   "shortcuts": {
     "add": "Ctrl+A",
     "complete": "Ctrl+S",
-    "find_duplicates": "Ctrl+D",
     "backfill_cn": "Ctrl+F"
   }
 }

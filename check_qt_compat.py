@@ -5,7 +5,7 @@
 `_Any`(`AddWordDialog.__mro__` 裡根本沒有 `QDialog`)→ 它們驗的是純邏輯,對「這一版
 Qt 還能不能用」提供零保證。全綠不代表 GUI 沒事。
 
-這支補的就是那塊:載入 **Anki.app 裡實際在用的那份** PyQt6 與 aqt,用真 Qt 建構四個
+這支補的就是那塊:載入 **Anki.app 裡實際在用的那份** PyQt6 與 aqt,用真 Qt 建構三個
 對話框、掛真的快捷鍵、走一遍 `aqt.dialogs` 的單例與 `closeAll()`。
 
 不需要 Anki 開著,只需要 Anki.app 存在;offscreen 執行,不會有視窗跳出來。
@@ -167,12 +167,12 @@ def main():
         return _report()
 
     print("\nQt 名稱")
-    @check("aqt.qt 的 21 個名稱都還在")
+    @check("aqt.qt 的 19 個名稱都還在")
     def _():
         import aqt.qt as q
         names = ["QAction", "QDialog", "QVBoxLayout", "QHBoxLayout", "QFormLayout",
                  "QLabel", "QLineEdit", "QPushButton", "QProgressBar", "QScrollArea",
-                 "QTreeWidget", "QTreeWidgetItem", "QWidget", "QFrame", "QCheckBox",
+                 "QWidget", "QFrame", "QCheckBox",
                  "QKeySequenceEdit", "QKeySequence", "QMessageBox", "QThread",
                  "pyqtSignal", "Qt"]
         missing = [n for n in names if not hasattr(q, n)]
@@ -186,8 +186,7 @@ def main():
         return "pytest 的假 aqt 驗不到這件事"
 
     print("\n對話框建構（含 __init__ 裡的掃描）")
-    for cls_name in ("AddWordDialog", "BackfillDialog",
-                     "FindDuplicatesDialog", "BatchOperationsDialog"):
+    for cls_name in ("AddWordDialog", "BackfillDialog", "BatchOperationsDialog"):
         @check(f"{cls_name} 建構 + 掃描")
         def _(cls_name=cls_name):
             dlg = getattr(addon, cls_name)(mw)
@@ -195,7 +194,7 @@ def main():
             return None
 
     print("\n快捷鍵")
-    @check("四組快捷鍵都綁上且互不重複")
+    @check("三組快捷鍵都綁上且互不重複")
     def _():
         got = {k: a.shortcut().toString() for k, a in addon.ACTIONS.items()}
         assert set(got) == set(addon.DEFAULT_SHORTCUTS), got
@@ -204,7 +203,7 @@ def main():
         return ", ".join(f"{k}={v}" for k, v in sorted(got.items()))
 
     print("\naqt.dialogs 契約")
-    @check("四個視窗都登記進真的 DialogManager")
+    @check("三個視窗都登記進真的 DialogManager")
     def _():
         names = list(addon._DM_NAMES.values())
         missing = [n for n in names if n not in aqt.dialogs._dialogs]

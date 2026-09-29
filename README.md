@@ -69,7 +69,7 @@ uv sync   # 自動安裝所有依賴
 
 ### 方式一：Anki UI（推薦）
 
-四個功能視窗（`⌘A` / `⌘S` / `⌘D` / `⌘F`）都不會鎖住 Anki。生成跑很久的時候，可以把視窗移開或縮小，回到 Anki 繼續背卡。
+三個功能視窗（`⌘A` / `⌘S` / `⌘F`）都不會鎖住 Anki。生成跑很久的時候，可以把視窗移開或縮小，回到 Anki 繼續背卡。
 
 同一個視窗只會有一個。視窗已經開著時再按同一個快捷鍵，是把它叫回最前面，不是開第二個。
 
@@ -93,7 +93,7 @@ uv sync   # 自動安裝所有依賴
 
 #### 批量操作：`⌘F` 或 Tools → Batch Operations…
 
-一個面板，由上而下四塊，之後有新批量功能就往下加。
+一個面板，由上而下五塊，之後有新批量功能就往下加。
 
 **Backfill Sentence Translations（批次補整句翻譯）**
 專門補 `Sentence_CN`。開啟時先顯示共幾筆、預估幾分鐘。選一個時間盒（1、2、5、10 分鐘）或直接跑完，翻譯節奏控制在 Groq 速率內（約每分鐘 25 句）。隨時可以按 Stop，下次打開從沒翻的地方繼續。
@@ -103,17 +103,24 @@ uv sync   # 自動安裝所有依賴
 
 為什麼繞這一圈：手機的卡片模板寫不了欄位，紅旗是手機上唯一能做的記號。
 
+**Find Duplicate Words（找重複單字）**
+列出同一個單字有兩張以上的卡。比對時不分大小寫、也忽略 HTML。
+
+手機新增的卡不經過 ⌘A 的重複檢查，所以重複只會從手機漏進來。
+
+每張卡一個勾選框，旁邊顯示它的例句，用來分辨是哪一張。勾要刪的卡，按 Delete Checked。
+
+同一個字至少要留一張，全勾會被擋下。刪卡沒辦法用 ⌘S 生回來，所以刪除前會再問一次。
+
+建議留複習過的舊卡、刪新的那張，這樣複習紀錄不會歸零。
+
 **Rebuild Long Sentences（重建過長例句）**
 舊卡的例句生成得比「6-12 字」規則進 prompt 更早，常常過長。填一個字數門檻（預設 20 字），按 Rescan 列出超標的卡，顯示「單字(字數)」、字數多的排前面。按 Clear N Sentences 會清空例句、整句翻譯、句子語音、單字翻譯和圖，只保留單字和單字發音。換了句子就等於全部重建，翻譯和圖都該跟著重來。清空同樣瞬間完成、不重新生成。清完一鍵跳 ⌘S 重生短句；量大時改走 CLI。
 
 **Test Cards（測試卡）**
 開發、測試輔助。填 Count（預設 7）按 Add Test Cards，產生只有 Front + Association 的裸卡。這些卡會出現在 Complete Missing Cards，可以拿來測補卡流程。Clean Test Cards 一鍵刪光。它和 CLI 的 `make_test_cards.py`（`add [N]`、`clean`）用同一個 tag，兩邊建的可以互相清。
 
-#### 找重複單字：`⌘D`
-
-把正規化後 Front 相同的卡片分組列出，抓得到手機漏進來的 HTML 或大小寫變體。勾選要刪的卡（每組至少保留一張），確認後刪除。
-
-> ⌘A、⌘S、⌘D、⌘F 都可以在 **Tools → My Word Adder Settings…** 直接按組合鍵重新設定，即時生效，不用改 JSON；清除設定就等於關閉該快捷鍵。
+> ⌘A、⌘S、⌘F 都可以在 **Tools → My Word Adder Settings…** 直接按組合鍵重新設定，即時生效，不用改 JSON；清除設定就等於關閉該快捷鍵。
 >
 > 對話框的 UI 文字一律英文（統一語言）。
 
@@ -250,7 +257,7 @@ Anki/
 
 | 檔案 | 說明 |
 |------|------|
-| `addon/__init__.py` | Anki 插件主程式，symlink 到 `~/Library/.../addons21/my_word_adder/`。⌘A、⌘S、⌘D、⌘F 四個功能的實作都在這裡，用法見上面「日常使用」。LLM 走 `addon/_llm_dispatch.py` 以 urllib 直呼（Groq + Gemini 分流鏡像），TTS 和圖片透過 subprocess，補卡 BackfillWorker 3 路並發。改完需重啟 Anki |
+| `addon/__init__.py` | Anki 插件主程式，symlink 到 `~/Library/.../addons21/my_word_adder/`。⌘A、⌘S、⌘F 三個功能的實作都在這裡，用法見上面「日常使用」。LLM 走 `addon/_llm_dispatch.py` 以 urllib 直呼（Groq + Gemini 分流鏡像），TTS 和圖片透過 subprocess，補卡 BackfillWorker 3 路並發。改完需重啟 Anki |
 
 ### 設定與測試
 

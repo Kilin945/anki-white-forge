@@ -18,7 +18,7 @@ from aqt import mw
 from aqt.qt import (
     QAction, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QPushButton, QProgressBar, QScrollArea,
-    QTreeWidget, QTreeWidgetItem, QWidget, QFrame, QCheckBox,
+    QWidget, QFrame, QCheckBox,
     QKeySequenceEdit, QKeySequence,
     QMessageBox,
     Qt, QThread, pyqtSignal,
@@ -518,7 +518,7 @@ def _blocked_by_batch(show_message):
 
 def _live_note(note_id):
     """note 還在就回它，已被刪掉回 None。
-    非阻塞視窗開著時卡片可能被別處刪掉（⌘F Clean Test Cards、⌘D 刪重複、Browse），
+    非阻塞視窗開著時卡片可能被別處刪掉（⌘F Clean Test Cards / 刪重複、Browse），
     `mw.col.get_note()` 會拋 NotFoundError → 呼叫端跳過，而不是讓例外冒到 Anki。"""
     try:
         return mw.col.get_note(note_id)
@@ -1420,112 +1420,6 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
         self._update_remove_button()
 
 
-# ── find duplicates dialog ─────────────────────────────────────────────────────
-
-class FindDuplicatesDialog(_BatchDialogMixin, QDialog):
-    """Find cards whose Front is the same after normalization (HTML/case-insensitive),
-    and let the user pick which to delete. Catches dupes that slipped in via mobile."""
-
-    _DM_NAME = "WhiteForgeDuplicates"
-    _BATCH_LABEL = "Find Duplicate Words"
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Find Duplicate Words")
-        self.setMinimumWidth(540)
-        self.setMinimumHeight(420)
-        self._setup_ui()
-        self._scan()
-
-    def reopen(self):
-        self._scan()        # _scan() 自己會先 tree.clear()
-
-    def _setup_ui(self):
-        root = QVBoxLayout(self)
-        root.addWidget(QLabel("Duplicate cards with the same Front after normalization. Check the ones to delete (keep at least one per group):"))
-        self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Word / Card", "Sentence"])
-        self.tree.setColumnWidth(0, 220)
-        root.addWidget(self.tree)
-
-        self.status = QLabel("")
-        root.addWidget(self.status)
-
-        btns = QHBoxLayout()
-        self.del_btn = QPushButton("Delete Selected")
-        self.del_btn.setEnabled(False)
-        self.del_btn.clicked.connect(self._on_delete)
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
-        btns.addWidget(self.del_btn)
-        btns.addWidget(close_btn)
-        root.addLayout(btns)
-
-    def _scan(self):
-        from collections import defaultdict
-        self.tree.clear()
-
-        groups = defaultdict(list)
-        for nid in _deck_note_ids():
-            note = mw.col.get_note(nid)
-            key = _clean_text(note["Front"], lower=True)
-            if key:
-                groups[key].append((nid, note))
-        dup_groups = {k: v for k, v in groups.items() if len(v) > 1}
-
-        total = 0
-        for key, items in sorted(dup_groups.items()):
-            parent = QTreeWidgetItem(self.tree, [f"{key}  ({len(items)} cards)", ""])
-            parent.setFlags(parent.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
-            parent.setExpanded(True)
-            for nid, note in items:
-                sentence = _clean_text(note["Sentence"]) if "Sentence" in note else ""
-                child = QTreeWidgetItem(parent, [_clean_text(note["Front"]) or key, sentence[:70]])
-                child.setFlags(child.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                child.setCheckState(0, Qt.CheckState.Unchecked)
-                child.setData(0, Qt.ItemDataRole.UserRole, nid)
-                total += 1
-
-        if dup_groups:
-            self.status.setText(f"Found {len(dup_groups)} duplicate group(s), {total} card(s) total.")
-            self.del_btn.setEnabled(True)
-        else:
-            self.status.setText("No duplicate cards.")
-            self.del_btn.setEnabled(False)
-
-    def _on_delete(self):
-        if _blocked_by_batch(self.status.setText):   # 別在批次寫卡時把卡刪掉
-            return
-        to_delete = []
-        for i in range(self.tree.topLevelItemCount()):
-            parent = self.tree.topLevelItem(i)
-            checked = [parent.child(j).data(0, Qt.ItemDataRole.UserRole)
-                       for j in range(parent.childCount())
-                       if parent.child(j).checkState(0) == Qt.CheckState.Checked]
-            if checked and len(checked) == parent.childCount():
-                self.status.setText(f"All cards in '{parent.text(0)}' are checked; keep at least one per group.")
-                return
-            to_delete.extend(checked)
-
-        if not to_delete:
-            self.status.setText("No cards selected.")
-            return
-
-        reply = QMessageBox.question(
-            self, "Confirm Deletion",
-            f"Delete the {len(to_delete)} selected card(s)? This cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        mw.col.remove_notes(to_delete)
-        mw.col.save()
-        mw.reset()
-        self._scan()
-        self.status.setText(f"Deleted {len(to_delete)} card(s). Remember to sync Anki!")
-
-
 # ── 批次回填整句翻譯（Sentence_CN）—— burst 引擎 + 時間盒選單 ───────────────────
 
 SENTENCE_CN_RPM = 25          # 約略每分鐘筆數（Groq 12000 token/分 ÷ ~480/句 ≈ 25）；僅用於預估顯示
@@ -1886,6 +1780,146 @@ class ClearFlaggedSection(QWidget):
         self._panel.accept()
 
 
+
+def _duplicate_groups(items):
+    """[(nid, raw Front)] → [(key, [nid, …])] for keys shared by 2+ notes, sorted by key.
+    key = Front after HTML strip + lowercase, so mobile-added HTML / case variants of
+    the same word land in one group. Blank Fronts are ignored."""
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for nid, front in items:
+        key = _clean_text(front or "", lower=True)
+        if key:
+            groups[key].append(nid)
+    return sorted((k, v) for k, v in groups.items() if len(v) > 1)
+
+
+def _fully_checked_group(groups, checked):
+    """First group key whose every card is in `checked`, else None.
+    Deleting a whole group would remove the word entirely — the guard behind
+    "keep at least one per group"."""
+    for key, nids in groups:
+        if all(n in checked for n in nids):
+            return key
+    return None
+
+
+class DuplicatesSection(QWidget):
+    """Batch Operations section: list cards whose Front is the same after
+    normalization (catches dupes that slipped in via mobile, which bypasses ⌘A's
+    check) and delete the checked ones.
+    Each row is a real QCheckBox, not a QTreeWidget item check indicator — the item
+    indicator rendered invisible and ignored clicks inside the running Anki (2026-09-27,
+    not reproducible outside it), while QCheckBox is what ⌘S uses and works there.
+    Unlike the other sections, delete keeps a confirm dialog: cleared fields can be
+    regenerated by ⌘S, a deleted card (and its review history) cannot."""
+
+    def __init__(self, panel, parent=None):
+        super().__init__(parent)
+        self._panel = panel
+        self._groups = []            # [(key, [nid, …])]
+        self._boxes = []             # [(nid, QCheckBox)]
+        self._setup_ui()
+        self._scan()
+
+    def _setup_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(_section_title("Find Duplicate Words"))
+
+        desc = QLabel("Cards with the same word (ignoring case and HTML). Check the ones "
+                      "to delete; keep at least one per word.")
+        desc.setWordWrap(True)
+        root.addWidget(desc)
+
+        self.list_w = QWidget()
+        self.list_layout = QVBoxLayout(self.list_w)
+        self.list_layout.setContentsMargins(4, 4, 4, 4)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self.list_w)
+        scroll.setMinimumHeight(70)
+        root.addWidget(scroll)
+
+        self.status = QLabel("")
+        self.status.setWordWrap(True)
+        self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status.setStyleSheet("color:#16a34a; font-weight:600;")
+        self.status.setVisible(False)
+        root.addWidget(self.status)
+
+        row = QHBoxLayout()
+        row.addStretch()
+        self.del_btn = QPushButton("Delete Checked")
+        self.del_btn.setEnabled(False)
+        self.del_btn.clicked.connect(self._on_delete)
+        row.addWidget(self.del_btn)
+        root.addLayout(row)
+
+    def _clear_list(self):
+        while self.list_layout.count():
+            w = self.list_layout.takeAt(0).widget()
+            if w is not None:
+                w.deleteLater()
+        self._boxes = []
+
+    def _scan(self):
+        self._clear_list()
+        notes = {nid: mw.col.get_note(nid) for nid in _deck_note_ids()}
+        self._groups = _duplicate_groups((nid, n["Front"]) for nid, n in notes.items())
+        if not self._groups:
+            self.list_layout.addWidget(QLabel("No duplicate cards."))
+            self.del_btn.setEnabled(False)
+            return
+        for key, nids in self._groups:
+            head = QLabel(f"{key}  ({len(nids)} cards)")
+            head.setStyleSheet("font-weight:600; color:#1E293B;")
+            self.list_layout.addWidget(head)
+            for nid in nids:
+                sentence = _clean_text(notes[nid]["Sentence"])[:70] or "(no sentence)"
+                # 縮排交給外層 layout，勾選框本身不套 stylesheet（同 ⌘S 的 FieldRow）——
+                # 套 margin 時，實際 Anki 裡方框畫的位置與可點的位置錯開，點方框沒反應
+                row = QWidget()
+                row_lay = QHBoxLayout(row)
+                row_lay.setContentsMargins(16, 0, 0, 0)
+                box = QCheckBox(sentence)
+                row_lay.addWidget(box)
+                row_lay.addStretch()
+                self.list_layout.addWidget(row)
+                self._boxes.append((nid, box))
+        self.del_btn.setEnabled(True)
+
+    def _checked(self):
+        return [nid for nid, box in self._boxes if box.isChecked()]
+
+    def _say(self, text):
+        self.status.setText(text)
+        self.status.setVisible(True)
+
+    def _on_delete(self):
+        if _blocked_by_batch(self._say):     # 別在批次寫卡時把卡刪掉
+            return
+        to_delete = self._checked()
+        if not to_delete:
+            self._say("No cards checked.")
+            return
+        whole = _fully_checked_group(self._groups, set(to_delete))
+        if whole is not None:
+            self._say(f"Every '{whole}' card is checked; keep at least one.")
+            return
+        reply = QMessageBox.question(
+            self, "Confirm Deletion",
+            f"Delete the {len(to_delete)} checked card(s)? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        mw.col.remove_notes(to_delete)
+        mw.col.save()
+        mw.reset()
+        self._scan()
+        self._say(f"✓ Deleted {len(to_delete)} card(s). Remember to sync Anki!")
+
 # Test-card helper — bare cards for manually testing the dialogs. KEEP IN SYNC with
 # make_test_cards.py (CLI): same tag + same word list, so a card made by one tool is
 # cleaned by the other. (addon cannot import the CLI/core module.)
@@ -2158,9 +2192,9 @@ class TestCardsSection(QWidget):
 
 
 class BatchOperationsDialog(_BatchDialogMixin, QDialog):
-    """Unified batch panel: sentence-translation backfill on top, clear-flagged
-    in the upper-middle, rebuild long sentences in the lower-middle, test-card
-    helper at the bottom, separated by dividers. Built from stacked self-contained
+    """Unified batch panel, top to bottom: sentence-translation backfill,
+    clear-flagged, find duplicates, rebuild long sentences, test-card helper,
+    separated by dividers. Built from stacked self-contained
     section widgets so more batch operations can be added as new blocks."""
 
     _DM_NAME = "WhiteForgeBatchOps"
@@ -2169,7 +2203,7 @@ class BatchOperationsDialog(_BatchDialogMixin, QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Batch Operations")
-        self.setMinimumSize(660, 760)      # 四個 section 疊起來已超過小視窗 → 給足高度
+        self.setMinimumSize(660, 760)      # 五個 section 疊起來已超過小視窗 → 給足高度
 
         # sections 放進可捲動的內容區:每個 section 保有自然高度、不再互相擠壓
         # (曾經四塊硬塞固定視窗 → 說明文字被裁、按鈕疊到清單上)
@@ -2178,12 +2212,16 @@ class BatchOperationsDialog(_BatchDialogMixin, QDialog):
         body.setContentsMargins(0, 0, 8, 0)   # 右緣留給捲軸
         self._translate = TranslateSection(self, parent=content)
         clear_flagged  = ClearFlaggedSection(self, parent=content)
+        duplicates     = DuplicatesSection(self, parent=content)
         long_sentences = LongSentencesSection(self, parent=content)
         test_cards     = TestCardsSection(self, parent=content)
-        self._sections = [self._translate, clear_flagged, long_sentences, test_cards]
+        self._sections = [self._translate, clear_flagged, duplicates,
+                          long_sentences, test_cards]
         body.addWidget(self._translate)
         body.addWidget(_hline())
         body.addWidget(clear_flagged)
+        body.addWidget(_hline())
+        body.addWidget(duplicates)
         body.addWidget(_hline())
         body.addWidget(long_sentences)
         body.addWidget(_hline())
@@ -2230,7 +2268,6 @@ class BatchOperationsDialog(_BatchDialogMixin, QDialog):
 _DM_NAMES = {
     AddWordDialog:          AddWordDialog._DM_NAME,
     BackfillDialog:         BackfillDialog._DM_NAME,
-    FindDuplicatesDialog:   FindDuplicatesDialog._DM_NAME,
     BatchOperationsDialog:  BatchOperationsDialog._DM_NAME,
 }
 
@@ -2256,14 +2293,10 @@ def open_dialog():
 def open_backfill_dialog():
     _show_nonmodal(BackfillDialog)
 
-def open_duplicates_dialog():
-    _show_nonmodal(FindDuplicatesDialog)
-
 def open_batch_operations_dialog():
     _show_nonmodal(BatchOperationsDialog)
 
-DEFAULT_SHORTCUTS = {"add": "Ctrl+A", "complete": "Ctrl+S", "find_duplicates": "Ctrl+D",
-                     "backfill_cn": "Ctrl+F"}
+DEFAULT_SHORTCUTS = {"add": "Ctrl+A", "complete": "Ctrl+S", "backfill_cn": "Ctrl+F"}
 ACTIONS = {}  # key -> QAction, so the settings dialog can re-bind shortcuts live
 
 
@@ -2289,7 +2322,6 @@ class SettingsDialog(QDialog):
     LABELS = [
         ("add", "Add English Word"),
         ("complete", "Complete Missing Cards"),
-        ("find_duplicates", "Find Duplicate Words"),
         ("backfill_cn", "Batch Operations"),
     ]
 
@@ -2355,7 +2387,6 @@ def open_settings_dialog():
 
 _add_menu_action("Add English Word…", "add", open_dialog)
 _add_menu_action("Complete Missing Cards…", "complete", open_backfill_dialog)
-_add_menu_action("Find Duplicate Words…", "find_duplicates", open_duplicates_dialog)
 _add_menu_action("Batch Operations…", "backfill_cn", open_batch_operations_dialog)
 
 _settings_action = QAction("My Word Adder Settings…", mw)

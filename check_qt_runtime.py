@@ -2,7 +2,7 @@
 """Anki / Qt 升級後的 addon **執行期**檢查（姊妹檔:check_qt_compat.py）。
 
 分工:
-  check_qt_compat.py   建得起來嗎 —— import、Qt 名稱、四個對話框建構、快捷鍵綁定、
+  check_qt_compat.py   建得起來嗎 —— import、Qt 名稱、三個對話框建構、快捷鍵綁定、
                        aqt.dialogs 的登記 / 單例 / closeAll
   check_qt_runtime.py  跑得起來嗎 —— 本檔。QThread 跑完整批、pyqtSignal 跨執行緒送達、
                        批次互斥、跑批中關窗的三條路徑、QMessageBox 自訂 ButtonRole、
@@ -361,21 +361,11 @@ def _():
     assert addon._batch_busy() == "Complete Missing Cards", "被非持有者解鎖了"
     return "訊息：" + addon._batch_busy_message()
 
-@check("⌘D Find Duplicates 的 Delete 在跑批中被擋（卡片沒被刪）")
-def _():
-    before = mw.col.calls["remove_notes"]
-    d = addon.FindDuplicatesDialog(mw); d.show(); _app.processEvents()
-    d._on_delete()
-    assert "batch is already running" in d.status.text(), d.status.text()
-    assert mw.col.calls["remove_notes"] == before, "竟然刪了卡"
-    d.close(); _app.processEvents()
-    return d.status.text()
-
-@check("⌘F 四個 section 的動作在跑批中全被擋（沒有任何寫入）")
+@check("⌘F 五個 section 的動作在跑批中全被擋（沒有任何寫入）")
 def _():
     snap = dict(mw.col.calls)
     panel = addon.BatchOperationsDialog(mw); panel.show(); _app.processEvents()
-    tr, flag, long_, test = panel._sections
+    tr, flag, dup, long_, test = panel._sections
     assert tr._notes, "TranslateSection 沒掃到缺翻譯的卡，擋不擋無從測"
     assert flag._flagged, "ClearFlaggedSection 沒掃到紅旗卡"
     assert long_._hits, "LongSentencesSection 沒掃到長句"
@@ -384,6 +374,8 @@ def _():
     assert tr._worker is None or not tr._worker.isRunning(), "第二個 worker 起來了"
     flag._on_clear()
     assert "batch is already running" in flag.status.text(), flag.status.text()
+    dup._on_delete()
+    assert "batch is already running" in dup.status.text(), dup.status.text()
     long_._on_clear()
     assert "batch is already running" in long_.status.text(), long_.status.text()
     test._on_add()
@@ -392,7 +384,7 @@ def _():
     assert "batch is already running" in test.status.text(), test.status.text()
     assert dict(mw.col.calls) == snap, f"有寫入發生：{snap} -> {mw.col.calls}"
     panel.close(); _app.processEvents()
-    return "translate / clear-flagged / long-sentences / test-cards 五個入口全擋下"
+    return "translate / clear-flagged / duplicates / long-sentences / test-cards 六個入口全擋下"
 
 @check("⌘A Add 在跑批中被擋（不會起第二個 Worker）")
 def _():
@@ -490,7 +482,6 @@ def _():
     GATE.clear()
     dlg = addon._show_nonmodal(addon.BackfillDialog)
     addon._show_nonmodal(addon.BatchOperationsDialog)
-    addon._show_nonmodal(addon.FindDuplicatesDialog)
     select_all_rows(dlg)
     QTest.mouseClick(dlg.run_btn, Qt.MouseButton.LeftButton)
     pump(lambda: addon._batch_busy() is not None, 10, "batch acquired")
@@ -503,7 +494,7 @@ def _():
     assert not left, f"沒收乾淨：{left}"
     assert addon._batch_busy() is None, "批次權沒釋放"
     assert not dlg._worker.isRunning(), "worker 還活著"
-    return "三個視窗（其中一個正在跑批）全部收掉"
+    return "兩個視窗（其中一個正在跑批）全部收掉"
 
 # ═══ 4. QMessageBox：三個自訂 ButtonRole + clickedButton() ═══════════════════
 print("\n4) QMessageBox 自訂按鈕角色")
@@ -625,7 +616,7 @@ def _():
     bf.close(); _app.processEvents()
     return "空清單:不勾、不啟用"
 
-@check("四組快捷鍵（Ctrl+A/S/D/F）真按下去會觸發各自的 handler")
+@check("三組快捷鍵（Ctrl+A/S/F）真按下去會觸發各自的 handler")
 def _():
     fired = []
     for key, act in addon.ACTIONS.items():
@@ -633,8 +624,7 @@ def _():
         mw.addAction(act)                 # 測試環境沒有真的 menubar → 掛到 mw 上收鍵
     mw.show(); _app.processEvents()
     QTest.qWaitForWindowExposed(mw, 2000)
-    keymap = {"add": Qt.Key.Key_A, "complete": Qt.Key.Key_S,
-              "find_duplicates": Qt.Key.Key_D, "backfill_cn": Qt.Key.Key_F}
+    keymap = {"add": Qt.Key.Key_A, "complete": Qt.Key.Key_S, "backfill_cn": Qt.Key.Key_F}
     opened = {}
     for name, k in keymap.items():
         QTest.keyClick(mw, k, Qt.KeyboardModifier.ControlModifier)
@@ -648,10 +638,10 @@ def _():
     missing = [n for n in keymap if n not in fired]
     assert not missing, f"沒被觸發：{missing}（收到 {fired}）"
     want = {"add": "WhiteForgeAddWord", "complete": "WhiteForgeBackfill",
-            "find_duplicates": "WhiteForgeDuplicates", "backfill_cn": "WhiteForgeBatchOps"}
+            "backfill_cn": "WhiteForgeBatchOps"}
     for n, w in want.items():
         assert opened[n] == [w], f"{n} 開出來的是 {opened[n]}，預期 {w}"
-    return "Ctrl+A/S/D/F 各自開出正確視窗：" + ", ".join(
+    return "Ctrl+A/S/F 各自開出正確視窗：" + ", ".join(
         f"{n}->{opened[n][0]}" for n in keymap)
 
 # ═══ 6. ⌘A 完整一輪（Enter → 預設鈕 → Worker → 寫卡） ═══════════════════════
@@ -744,8 +734,8 @@ def _():
     dlg.close(); _app.processEvents()
     return txt
 
-# ═══ 8. ⌘F Batch Operations 四個 section 真的動起來 ═════════════════════════
-print("\n8) ⌘F Batch Operations 四個 section 的實際動作")
+# ═══ 8. ⌘F Batch Operations 五個 section 真的動起來 ═════════════════════════
+print("\n8) ⌘F Batch Operations 五個 section 的實際動作")
 
 def fresh_panel():
     p = addon.BatchOperationsDialog(mw); p.show(); _app.processEvents()
@@ -807,7 +797,7 @@ def _():
 @check("ClearFlaggedSection：清 6 欄 + 拔旗，Front / Association 保留")
 def _():
     seed(0, flagged=2)
-    panel, tr, flag, long_, test = fresh_panel()
+    panel, tr, flag, dup, long_, test = fresh_panel()
     assert len(flag._flagged) == 2, flag._flagged
     assert flag.clear_btn.text() == "Clear 2 Cards", flag.clear_btn.text()
     QTest.mouseClick(flag.clear_btn, Qt.MouseButton.LeftButton)
@@ -826,7 +816,7 @@ def _():
 @check("LongSentencesSection：門檻掃描 + 清 5 欄，Front_Audio 保留")
 def _():
     seed(0, longsent=2)
-    panel, tr, flag, long_, test = fresh_panel()
+    panel, tr, flag, dup, long_, test = fresh_panel()
     assert len(long_._hits) == 2, long_._hits
     assert long_._hits[0]["count"] == 40, long_._hits[0]
     long_.threshold_input.setText("50"); QTest.mouseClick(
@@ -851,7 +841,7 @@ def _():
 @check("TestCardsSection：Add 建裸卡（打 tag）、Clean 依 tag 全刪")
 def _():
     seed(0)
-    panel, tr, flag, long_, test = fresh_panel()
+    panel, tr, flag, dup, long_, test = fresh_panel()
     test.count_input.setText("3")
     QTest.mouseClick(test.add_btn, Qt.MouseButton.LeftButton); _app.processEvents()
     assert mw.col.calls["add_note"] == 3, mw.col.calls
@@ -865,6 +855,61 @@ def _():
     assert "Deleted 3 test card(s)" in test.status.text(), test.status.text()
     panel.close(); _app.processEvents()
     return test.status.text()
+
+def click_checkbox(box):
+    """點勾選框本身（不是整列中間）：QCheckBox 只有方框＋文字那塊吃點擊。
+    找得到可點的位置、而且它落在列的最左側，才代表方框真的在畫面上的位置。"""
+    from PyQt6.QtCore import QPoint
+    y = box.height() // 2
+    x = next((x for x in range(box.width()) if box.hitButton(QPoint(x, y))), None)
+    assert x is not None and x < 60, f"勾選框沒有可點的位置（x={x}）"
+    QTest.mouseClick(box, Qt.MouseButton.LeftButton, pos=QPoint(x + 4, y))
+    _app.processEvents()
+
+def seed_dups():
+    seed(0)
+    mw.col.add(NID_BASE + 700, Front="across", Sentence="The bridge stretches across the river.")
+    mw.col.add(NID_BASE + 701, Front="<b>Across</b>", Sentence="TEST duplicate card.")
+    mw.col.add(NID_BASE + 702, Front="unique", Sentence="Only one of me.")
+
+@check("DuplicatesSection：真的點得到勾選框，刪掉的只有勾的那張")
+def _():
+    # 2026-09-27 事故：舊 ⌘D 的 QTreeWidget 勾選框在 Anki 裡看不見也點不到，
+    # 按刪除永遠 "No cards selected."。這項用真實滑鼠點擊驗「勾得起來」
+    seed_dups()
+    panel, tr, flag, dup, long_, test = fresh_panel()
+    assert dup._groups == [("across", [NID_BASE + 700, NID_BASE + 701])], dup._groups
+    assert len(dup._boxes) == 2, "應該每張重複卡一個勾選框"
+    target = dict(dup._boxes)[NID_BASE + 701]
+    assert target.isVisible(), "勾選框沒顯示"
+    click_checkbox(target)
+    assert target.isChecked(), "點了沒勾起來"
+    assert dup._checked() == [NID_BASE + 701], dup._checked()
+    hit = click_modal_button("Yes")
+    QTest.mouseClick(dup.del_btn, Qt.MouseButton.LeftButton); _app.processEvents()
+    assert hit, "刪除前的確認視窗沒出現"
+    assert NID_BASE + 701 not in mw.col._notes, "勾的那張沒被刪"
+    assert NID_BASE + 700 in mw.col._notes and NID_BASE + 702 in mw.col._notes, "刪到別張"
+    assert "Deleted 1 card(s)" in dup.status.text(), dup.status.text()
+    assert dup._groups == [] and not dup.del_btn.isEnabled(), "刪完沒重掃"
+    panel.close(); _app.processEvents()
+    return dup.status.text()
+
+@check("DuplicatesSection：整組都勾 → 擋下；確認視窗按 No → 不刪")
+def _():
+    seed_dups()
+    panel, tr, flag, dup, long_, test = fresh_panel()
+    for _nid, box in dup._boxes:
+        click_checkbox(box)
+    QTest.mouseClick(dup.del_btn, Qt.MouseButton.LeftButton); _app.processEvents()
+    assert "keep at least one" in dup.status.text(), dup.status.text()
+    assert mw.col.calls["remove_notes"] == 0, "整組被刪光了"
+    click_checkbox(dup._boxes[0][1])                                  # 取消一張
+    hit = click_modal_button("No")
+    QTest.mouseClick(dup.del_btn, Qt.MouseButton.LeftButton); _app.processEvents()
+    assert hit and mw.col.calls["remove_notes"] == 0, "按 No 還是刪了"
+    panel.close(); _app.processEvents()
+    return "整組全勾被擋、確認按 No 沒刪"
 
 # ── 收尾 ────────────────────────────────────────────────────────────────────
 aqt.dialogs.closeAll(lambda: None)
