@@ -60,6 +60,7 @@ NID_BASE = 1758000000123          # 13 digits > 2**31 → exercises 64-bit ids
 class FakeNote(dict):
     def __init__(self, nid, **f):
         super().__init__(f); self.id = nid; self.tags = []
+    def card_ids(self): return [self.id * 10]
 
 FIELDS = ["Front","Association","Sentence","Sentence_CN","Image_Prompt",
           "Audio","Front_Audio","Translation"]
@@ -73,6 +74,7 @@ class FakeCol:
         self.media  = types.SimpleNamespace(dir=lambda: MEDIA_DIR)
         self._next = NID_BASE + 900
         self.flagged = set()
+        self.card_stats = {}          # nid -> {"reps", "ivl"}（重複卡顯示複習紀錄用）
     def add(self, nid, **f):
         base = {k:"" for k in FIELDS}; base.update(f)
         self._notes[nid] = FakeNote(nid, **base); return self._notes[nid]
@@ -88,7 +90,8 @@ class FakeCol:
         if "flag:1" in q:
             return [nid*10 for nid in self.flagged if nid in self._notes]
         return []
-    def get_card(self, cid): return types.SimpleNamespace(nid=cid//10)
+    def get_card(self, cid):
+        return types.SimpleNamespace(nid=cid//10, **self.card_stats.get(cid//10, {"reps": 0, "ivl": 0}))
     def get_note(self, nid):
         if nid not in self._notes: raise KeyError(f"note {nid} gone")
         return self._notes[nid]
@@ -190,7 +193,7 @@ NAMES = ["probealpha","probebravo","probecharlie","probedelta","probeecho",
 
 
 def seed(n=3, flagged=0, longsent=0):
-    mw.col._notes.clear(); mw.col.flagged.clear()
+    mw.col._notes.clear(); mw.col.flagged.clear(); mw.col.card_stats.clear()
     for k in mw.col.calls: mw.col.calls[k] = 0
     for i in range(n):
         mw.col.add(NID_BASE + i, Front=NAMES[i], Association="hint")
@@ -894,6 +897,40 @@ def _():
     assert dup._groups == [] and not dup.del_btn.isEnabled(), "刪完沒重掃"
     panel.close(); _app.processEvents()
     return dup.status.text()
+
+@check("DuplicatesSection：每列顯示建立日期、複習紀錄、只列不同的欄位、縮圖點開放大")
+def _():
+    from PyQt6.QtGui import QPixmap, QColor
+    from PyQt6.QtWidgets import QLabel, QDialog
+    seed(0)
+    big = QPixmap(940, 627); big.fill(QColor("steelblue"))
+    big.save(os.path.join(MEDIA_DIR, "dup_big.png"))            # 橫的大圖，跟真卡同尺寸
+    old_nid, new_nid = 1780029401467, 1790522641481              # 2026-05-29 / 2026-09-27
+    mw.col.add(old_nid, Front="dull", Sentence="The lecture was so dull I fell asleep.",
+               Translation="乏味", Sentence_CN="講座太無聊了，我睡著了。",
+               Image_Prompt='<img src="dup_big.png"><div>credit</div>')
+    mw.col.add(new_nid, Front="dull", Sentence="The lecture was so dull I fell asleep.",
+               Translation="枯燥乏味", Sentence_CN="講座太沉悶，我睡著了。", Image_Prompt="")
+    mw.col.card_stats[old_nid] = {"reps": 5, "ivl": 124}
+    panel, tr, flag, dup, long_, test = fresh_panel()
+    texts = [w.text() for w in dup.list_w.findChildren(QLabel)]
+    joined = " | ".join(texts)
+    assert "added 2026-05-29 · 5 reviews · 124-day interval" in joined, joined
+    assert "added 2026-09-27 · never reviewed" in joined, joined
+    assert any("Translation: 乏味" in t and "Sentence_CN" in t for t in texts), joined
+    assert not any("Association" in t for t in texts), "相同的欄位不該列出"
+    assert "no image" in texts, "沒圖的卡沒顯示佔位"
+    thumbs = [b for b in dup.list_w.findChildren(QPushButton) if b.toolTip() == "Click to enlarge"]
+    assert len(thumbs) == 1, len(thumbs)
+    assert thumbs[0].iconSize().width() == addon.DUPLICATE_THUMB_PX
+    QTest.mouseClick(thumbs[0], Qt.MouseButton.LeftButton); _app.processEvents()
+    pv = dup._preview
+    assert isinstance(pv, QDialog) and pv.isVisible(), "點縮圖沒開大圖"
+    shown = pv.findChild(QLabel).pixmap()
+    assert max(shown.width(), shown.height()) == addon.DUPLICATE_PREVIEW_PX, shown.size()
+    assert abs(shown.width() / shown.height() - 940 / 627) < 0.01, "大圖比例跑掉"
+    pv.close(); panel.close(); _app.processEvents()
+    return f"大圖 {shown.width()}x{shown.height()}；" + texts[-1]
 
 @check("DuplicatesSection：整組都勾 → 擋下；確認視窗按 No → 不刪")
 def _():

@@ -95,7 +95,7 @@ class TestFinishedIds:
         assert addon._finished_ids([1], lookup) == set()
 
     def test_deleted_card_counts_as_finished(self):
-        # 視窗開著時卡片被別處刪掉(⌘D/Browse)→ 既補不了也不用補,留在清單上只是雜訊
+        # 視窗開著時卡片被別處刪掉(刪重複/Browse)→ 既補不了也不用補,留在清單上只是雜訊
         assert addon._finished_ids([1], {}.get) == {1}
 
     def test_mixed_list_keeps_the_unfinished_ones(self):

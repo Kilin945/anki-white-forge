@@ -39,3 +39,41 @@ class TestFullyCheckedGroup:
 
     def test_nothing_checked(self):
         assert addon._fully_checked_group(self.GROUPS, set()) is None
+
+
+class TestDifferingFields:
+    def test_only_fields_that_differ(self):
+        a = {"Translation": "乏味", "Sentence_CN": "講座太無聊了", "Association": ""}
+        b = {"Translation": "枯燥乏味", "Sentence_CN": "講座太無聊了", "Association": ""}
+        assert addon._differing_fields([a, b]) == ["Translation"]
+
+    def test_html_only_difference_is_not_a_difference(self):
+        a = {"Translation": "<b>乏味</b>", "Sentence_CN": "", "Association": ""}
+        b = {"Translation": "乏味", "Sentence_CN": "", "Association": ""}
+        assert addon._differing_fields([a, b]) == []
+
+    def test_missing_field_counts_as_empty(self):
+        a = {"Translation": "乏味"}
+        b = {"Translation": "乏味", "Association": "boring"}
+        assert addon._differing_fields([a, b]) == ["Association"]
+
+
+class TestReviewSummary:
+    def test_never_reviewed(self):
+        assert addon._review_summary(0, 0) == "never reviewed"
+
+    def test_one_review_no_interval(self):
+        assert addon._review_summary(1, 0) == "1 review"
+
+    def test_reviews_with_interval(self):
+        assert addon._review_summary(5, 124) == "5 reviews · 124-day interval"
+
+
+class TestImageFilename:
+    def test_real_field(self):
+        v = '<img src="dull_img_1790187098.jpg"><div style="font-size:10px">credit</div>'
+        assert addon._image_filename(v) == "dull_img_1790187098.jpg"
+
+    def test_no_image(self):
+        assert addon._image_filename("") is None
+        assert addon._image_filename("<div>leftover</div>") is None

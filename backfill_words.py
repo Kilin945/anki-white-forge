@@ -37,8 +37,8 @@ def _do_word_audio(word):
 
 def note_complete(n):
     """True if a note has every auto-filled field.
-    Sentence_CN is intentionally NOT checked here — it's filled only by ⌘D and the
-    dedicated paced backfill (backfill_sentence_cn.py), never by this 'fill everything'
+    Sentence_CN is intentionally NOT checked here — it's filled by ⌘A, ⌘S and the
+    dedicated paced backfill (backfill_sentence_cn.py), never by this CLI 'fill everything'
     path, so bulk runs don't trigger un-throttled translation."""
     f = n["fields"]
     sentence = strip_html(f["Sentence"]["value"])

@@ -18,7 +18,7 @@ from aqt import mw
 from aqt.qt import (
     QAction, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QPushButton, QProgressBar, QScrollArea,
-    QWidget, QFrame, QCheckBox,
+    QWidget, QFrame, QCheckBox, QPixmap, QIcon, QSize,
     QKeySequenceEdit, QKeySequence,
     QMessageBox,
     Qt, QThread, pyqtSignal,
@@ -46,9 +46,9 @@ VALIDATE_SCRIPT = os.path.join(_REPO, "_validate_helper.py")
 VOICE_WORD     = "en-US-AndrewNeural"
 VOICE_SENTENCE = "en-US-AvaNeural"
 
-# field progress boxes. Both ⌘D Add and ⌘S Complete show all five — ⌘S now fills
+# field progress boxes. Both ⌘A Add and ⌘S Complete show all five — ⌘S now fills
 # Sentence_CN too (the everyday small case: cards added on mobile / via Anki's built-in
-# Add bypass ⌘D, so ⌘S is where they get completed). Large bulk fills still go through
+# Add bypass ⌘A, so ⌘S is where they get completed). Large bulk fills still go through
 # the dedicated 批次回填 menu, which is paced against the rate limit.
 # Order matches the processing/completion order: Sentence is generated first (everything
 # else depends on it), Audio second (TTS needs the finished sentence), then Image / Meaning /
@@ -77,7 +77,7 @@ ENGLISH_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\- ]*")
 
 def _looks_english(word):
     """True if plausibly English (letters + space / - / '); rejects CJK, digits, symbols.
-    Shared charset gate for both ⌘D (add) and ⌘S (complete)."""
+    Shared charset gate for both ⌘A (add) and ⌘S (complete)."""
     return bool(ENGLISH_WORD_RE.fullmatch((word or "").strip()))
 
 
@@ -1804,6 +1804,49 @@ def _fully_checked_group(groups, checked):
     return None
 
 
+# 重複卡的比較欄位（Sentence 是每列的主文字，一定顯示，不在這裡）
+DUPLICATE_COMPARE_FIELDS = ["Translation", "Sentence_CN", "Association"]
+DUPLICATE_THUMB_PX = 64          # 清單縮圖的方框邊長
+DUPLICATE_PREVIEW_PX = 480       # 點縮圖放大時的最長邊
+
+
+def _differing_fields(notes, fields=DUPLICATE_COMPARE_FIELDS):
+    """Fields whose cleaned value is not the same on every note of a duplicate group,
+    in `fields` order. Same-on-all fields are left out so the rows show only what
+    tells the cards apart."""
+    out = []
+    for f in fields:
+        values = {_clean_text((n[f] if f in n else "") or "") for n in notes}
+        if len(values) > 1:
+            out.append(f)
+    return out
+
+
+def _review_summary(reps, ivl):
+    """reps = total reviews, ivl = interval in days → short text for a duplicate row."""
+    if not reps:
+        return "never reviewed"
+    text = f"{reps} review" + ("" if reps == 1 else "s")
+    if ivl and ivl > 0:
+        text += f" · {ivl}-day interval"
+    return text
+
+
+def _image_filename(value):
+    """First <img src="…"> filename in a field, or None (no image / leftover HTML)."""
+    m = re.search(r'<img[^>]*\bsrc="([^"]+)"', value or "")
+    return m.group(1) if m else None
+
+
+def _review_stats(note):
+    """(total reviews, longest interval) over the note's cards; (0, 0) if unreadable."""
+    try:
+        cards = [mw.col.get_card(cid) for cid in note.card_ids()]
+        return sum(c.reps for c in cards), max((c.ivl for c in cards), default=0)
+    except Exception:
+        return 0, 0
+
+
 class DuplicatesSection(QWidget):
     """Batch Operations section: list cards whose Front is the same after
     normalization (catches dupes that slipped in via mobile, which bypasses ⌘A's
@@ -1838,7 +1881,7 @@ class DuplicatesSection(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(self.list_w)
-        scroll.setMinimumHeight(70)
+        scroll.setMinimumHeight(260)       # 一列含縮圖約 70px → 至少看得到一組兩張
         root.addWidget(scroll)
 
         self.status = QLabel("")
@@ -1871,23 +1914,90 @@ class DuplicatesSection(QWidget):
             self.list_layout.addWidget(QLabel("No duplicate cards."))
             self.del_btn.setEnabled(False)
             return
+        media_dir = mw.col.media.dir()
         for key, nids in self._groups:
             head = QLabel(f"{key}  ({len(nids)} cards)")
             head.setStyleSheet("font-weight:600; color:#1E293B;")
             self.list_layout.addWidget(head)
+            group_notes = [notes[nid] for nid in nids]
+            diff = _differing_fields(group_notes)
             for nid in nids:
-                sentence = _clean_text(notes[nid]["Sentence"])[:70] or "(no sentence)"
-                # 縮排交給外層 layout，勾選框本身不套 stylesheet（同 ⌘S 的 FieldRow）——
-                # 套 margin 時，實際 Anki 裡方框畫的位置與可點的位置錯開，點方框沒反應
-                row = QWidget()
-                row_lay = QHBoxLayout(row)
-                row_lay.setContentsMargins(16, 0, 0, 0)
-                box = QCheckBox(sentence)
-                row_lay.addWidget(box)
-                row_lay.addStretch()
-                self.list_layout.addWidget(row)
-                self._boxes.append((nid, box))
+                self.list_layout.addWidget(self._card_row(nid, notes[nid], diff, media_dir))
         self.del_btn.setEnabled(True)
+
+    def _card_row(self, nid, note, diff, media_dir):
+        """One card: thumbnail (click to enlarge) | checkbox with the sentence, then
+        added date + review history, then only the fields that differ in its group."""
+        # 縮排交給外層 layout，勾選框本身不套 stylesheet（同 ⌘S 的 FieldRow）——
+        # 套 margin 時，實際 Anki 裡方框畫的位置與可點的位置錯開，點方框沒反應
+        row = QWidget()
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(16, 2, 0, 2)
+        lay.addWidget(self._thumb(_image_filename(note["Image_Prompt"]), media_dir),
+                      0, Qt.AlignmentFlag.AlignTop)
+
+        text = QVBoxLayout()
+        text.setSpacing(1)
+        sentence = _clean_text(note["Sentence"])[:70] or "(no sentence)"
+        box = QCheckBox(sentence)
+        text.addWidget(box)
+        added = time.strftime("%Y-%m-%d", time.localtime(nid // 1000))
+        meta = QLabel(f"added {added} · {_review_summary(*_review_stats(note))}")
+        meta.setStyleSheet("color:#64748b;")
+        text.addWidget(meta)
+        if diff:
+            parts = [f"{f}: {_clean_text(note[f]) or '(empty)'}" for f in diff]
+            diff_lbl = QLabel(" · ".join(parts))
+            diff_lbl.setWordWrap(True)
+            diff_lbl.setStyleSheet("color:#475569;")
+            text.addWidget(diff_lbl)
+        lay.addLayout(text, 1)
+        self._boxes.append((nid, box))
+        return row
+
+    def _thumb(self, filename, media_dir):
+        """Fixed-size square: image scaled to fit (never cropped, never stretched),
+        or a 'no image' placeholder. A button, so one click opens the large view."""
+        px = DUPLICATE_THUMB_PX
+        path = os.path.join(media_dir, filename) if filename else None
+        pix = QPixmap(path) if path and os.path.exists(path) else QPixmap()
+        if pix.isNull():
+            lbl = QLabel("no image")
+            lbl.setFixedSize(px, px)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet("color:#94a3b8; font-size:10px; border:1px dashed #cbd5e1;")
+            return lbl
+        btn = QPushButton()
+        btn.setFlat(True)
+        btn.setFixedSize(px + 4, px + 4)
+        btn.setIconSize(QSize(px, px))
+        btn.setIcon(QIcon(pix.scaled(px, px, Qt.AspectRatioMode.KeepAspectRatio,
+                                     Qt.TransformationMode.SmoothTransformation)))
+        btn.setToolTip("Click to enlarge")
+        btn.clicked.connect(lambda _=False, p=path: self._show_image(p))
+        return btn
+
+    def _show_image(self, path):
+        """Large view of one card image: longest side DUPLICATE_PREVIEW_PX. Esc or the
+        window's close button returns to the list. Non-blocking, one at a time."""
+        pix = QPixmap(path)
+        if pix.isNull():
+            return
+        side = DUPLICATE_PREVIEW_PX
+        if max(pix.width(), pix.height()) > side:
+            pix = pix.scaled(side, side, Qt.AspectRatioMode.KeepAspectRatio,
+                             Qt.TransformationMode.SmoothTransformation)
+        old = getattr(self, "_preview", None)
+        if old is not None:
+            old.close()
+        dlg = QDialog(self.window())
+        dlg.setWindowTitle(os.path.basename(path))
+        lay = QVBoxLayout(dlg)
+        img = QLabel()
+        img.setPixmap(pix)
+        lay.addWidget(img)
+        self._preview = dlg
+        dlg.show()
 
     def _checked(self):
         return [nid for nid, box in self._boxes if box.isChecked()]

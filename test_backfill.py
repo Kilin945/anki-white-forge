@@ -319,7 +319,7 @@ class TestNoteComplete:
         assert bw.note_complete(_full_note()) is True
 
     def test_sentence_cn_not_checked(self):
-        # backfill_words ignores Sentence_CN (filled only by ⌘D / dedicated paced tool)
+        # backfill_words ignores Sentence_CN (filled by ⌘A / ⌘S / dedicated paced tool)
         assert bw.note_complete(_full_note(sentence_cn="")) is True
 
     def test_missing_translation_incomplete(self):

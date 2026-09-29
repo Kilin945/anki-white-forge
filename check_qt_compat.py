@@ -167,12 +167,12 @@ def main():
         return _report()
 
     print("\nQt 名稱")
-    @check("aqt.qt 的 19 個名稱都還在")
+    @check("aqt.qt 的 22 個名稱都還在")
     def _():
         import aqt.qt as q
         names = ["QAction", "QDialog", "QVBoxLayout", "QHBoxLayout", "QFormLayout",
                  "QLabel", "QLineEdit", "QPushButton", "QProgressBar", "QScrollArea",
-                 "QWidget", "QFrame", "QCheckBox",
+                 "QWidget", "QFrame", "QCheckBox", "QPixmap", "QIcon", "QSize",
                  "QKeySequenceEdit", "QKeySequence", "QMessageBox", "QThread",
                  "pyqtSignal", "Qt"]
         missing = [n for n in names if not hasattr(q, n)]

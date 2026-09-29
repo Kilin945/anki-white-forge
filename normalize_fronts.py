@@ -1,7 +1,7 @@
 """Normalize existing Front fields in My Daily English.
 
 Rule: always strip residual HTML; then lowercase the word, EXCEPT all-uppercase
-acronyms (e.g. ASAP, GDP) which keep their case. New words added via ⌘D / add_word.py
+acronyms (e.g. ASAP, GDP) which keep their case. New words added via ⌘A / add_word.py
 are already clean — this fixes legacy cards (mostly typed on AnkiMobile, which wraps
 content in <div>/<span> and doesn't lowercase).
 
