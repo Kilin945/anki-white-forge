@@ -46,11 +46,23 @@ def llm(prompt, effort="low"):
     return groq_generate(prompt, effort=effort)
 
 
-def _sentence_instructions(word, association=""):
+PHOTO_BLOCK_TEMPLATE = (
+    '\n\nA photo was already picked for this card. Photo description: "{photo}"\n'
+    'Use the photo only if it fits both the meaning AND the setting you picked. If you picked '
+    'the software-engineering sense, the sentence must stay in a code/tech situation, so use '
+    'the photo only if it shows software, computers or tech. If you picked an everyday or '
+    'hint-driven sense, use the photo if it shows that meaning. When you use it, set the '
+    'sentence in the scene of the photo, so the picture and the sentence match. Otherwise '
+    'ignore the photo. Never change the meaning or the setting to fit the photo.'
+)
+
+
+def _sentence_instructions(word, association="", photo=""):
     """Shared meaning-selection + sentence-quality rules for example-sentence prompts.
     Priority: hint (association) > software-engineering sense > most common everyday sense.
-    KEEP IN SYNC with addon/__init__.py::_sentence_prompt — the addon cannot import core,
-    so it keeps a deliberate duplicate. Change one → change both."""
+    photo（照片描述）非空時在結尾附 PHOTO_BLOCK_TEMPLATE：句子依圖造，但詞義優先序不變。
+    KEEP IN SYNC with addon/__init__.py::_sentence_prompt (含 photo block) — the addon cannot
+    import core, so it keeps a deliberate duplicate. Change one → change both."""
     hint = f'1. If a hint is given, use the sense the hint points to. Hint: "{association}"\n' if association else ""
     swe_n = "2." if association else "1."
     common_n = "3." if association else "2."
@@ -71,11 +83,12 @@ def _sentence_instructions(word, association=""):
         f'everyday sentence and do NOT force in software, teams, or tech. '
         f'Do NOT write a definition or a circular sentence (no "X means ...", "X is when ...", '
         f'"{word} is a kind of ..."); show the meaning through a real, concrete situation.'
+        + (PHOTO_BLOCK_TEMPLATE.format(photo=photo) if photo else "")
     )
 
 
-def llm_sentence(word, association=""):
-    prompt = _sentence_instructions(word, association) + "\n\nOutput only the sentence. No explanation, no quotes."
+def llm_sentence(word, association="", photo=""):
+    prompt = _sentence_instructions(word, association, photo) + "\n\nOutput only the sentence. No explanation, no quotes."
     result = llm(prompt, effort="medium")     # 造句是多條件約束任務 → 較高思考等級
     return result if sentence_acceptable(result) else ""
 
@@ -92,30 +105,6 @@ def llm_translate(word, sentence=""):
         f'no explanation.'
     )
     return _accept_word_translation(word, result)
-
-
-def llm_sentence_and_query(word, association="", sentence=""):
-    extra = f'\n(There is already an example sentence; keep the SAME meaning: "{sentence}")' if sentence else ""
-    prompt = (
-        _sentence_instructions(word, association) + extra +
-        "\n\nProvide exactly two lines:\n"
-        "Line 1: the example sentence.\n"
-        "Line 2: a 5-8 word Google image search query for a photo that visually represents "
-        "the meaning you used.\n\n"
-        "Output only the two lines, nothing else. No labels, no numbering."
-    )
-    result = llm(prompt, effort="medium")     # 造句是多條件約束任務 → 較高思考等級
-    lines = [l.strip() for l in result.strip().splitlines() if l.strip()]
-    if len(lines) >= 2:
-        sent = lines[0].strip('"\'')
-        query = lines[1].strip('"\'')
-        if sentence_acceptable(sent):
-            return sent, query
-    if len(lines) == 1:
-        sent = lines[0].strip('"\'')
-        if sentence_acceptable(sent):
-            return sent, f"{word} {association} photo" if association else f"{word} illustration"
-    return "", f"{word} {association} photo" if association else f"{word} illustration"
 
 
 SENTENCE_CN_PROMPT = (
@@ -173,20 +162,21 @@ def llm_translate_sentence(sentence, *, strict=False):
     return result if _looks_like_chinese_translation(result) else ""
 
 
-def llm_image_query(word, definition="", sentence=""):
-    context_parts = [f'the English word "{word}"']
-    if definition:
-        context_parts.append(f'which means "{definition}"')
-    if sentence:
-        context_parts.append(f'used in the sentence: "{sentence}"')
-    context = ", ".join(context_parts)
+def llm_image_query(word, definition=""):
+    """Stock-photo search query for the word's meaning — picked BEFORE the sentence
+    (句子依圖造，所以這裡不看句子)。詞義優先序與造句相同：提示 → SWE → 日常。"""
+    hint = f' The learner\'s hint for the meaning: "{definition}".' if definition else ""
     result = llm(
-        f"Given {context}, give me a short Google image search query (5-8 words max) "
-        f"to find a photo that clearly shows what this word means visually. "
-        f"Focus on the concrete, visual meaning. Output only the search query, nothing else."
+        f'Pick the meaning of the English word "{word}" to show in a photo, in this '
+        f'priority: the hint if given; otherwise its software-engineering sense if it has a '
+        f'common one; otherwise its most common everyday meaning.{hint} '
+        f'Give a short stock-photo search query (3-6 words) for a photo that clearly shows '
+        f'that meaning. If you picked the software-engineering sense, search for a computer '
+        f'or tech scene that shows it; otherwise prefer concrete, visible things. Output only the search query, '
+        f'nothing else.'
     )
     if result:
-        return result.strip('"\'')
+        return result.strip().strip('"\'')
     if definition:
         return f"{word} {definition} photo"
     return f"{word} illustration"

@@ -15,16 +15,17 @@ def main():
     parser.add_argument("word")
     parser.add_argument("filepath")
     parser.add_argument("--definition", default="")
-    parser.add_argument("--sentence", default="")
     args = parser.parse_args()
 
-    query = llm_image_query(args.word, args.definition, args.sentence)
+    query = llm_image_query(args.word, args.definition)
     print(f"QUERY: {query} [{engine_description()}]", file=sys.stderr)
 
     api_key = _load_pexels_key()
     if api_key:
-        ok, attribution = fetch_image(args.word, args.filepath, search_query=query)
+        ok, attribution, description = fetch_image(args.word, args.filepath, search_query=query)
         if ok:
+            if description:
+                print(f"ALT: {description}")
             if attribution:
                 print(f"ATTRIBUTION: {attribution}")
             sys.exit(0)

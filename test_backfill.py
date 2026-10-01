@@ -69,36 +69,6 @@ class TestHasImage:
         assert has_image('<img src="f.jpg"><div>Photo by X</div>')
 
 
-class TestLlmSentenceAndQuery:
-    @patch.object(llm_mod, 'llm')
-    def test_parses_two_lines(self, mock_llm):
-        mock_llm.return_value = "The audit revealed discrepancies.\nfinancial audit review documents"
-        sentence, query = llm_mod.llm_sentence_and_query("audit")
-        assert len(sentence) > 10
-        assert len(query) > 3
-
-    @patch.object(llm_mod, 'llm')
-    def test_single_line_fallback(self, mock_llm):
-        mock_llm.return_value = "The audit revealed discrepancies."
-        sentence, query = llm_mod.llm_sentence_and_query("audit")
-        assert len(sentence) > 10
-        assert "audit" in query
-
-    @patch.object(llm_mod, 'llm')
-    def test_empty_response_fallback(self, mock_llm):
-        mock_llm.return_value = ""
-        sentence, query = llm_mod.llm_sentence_and_query("audit")
-        assert sentence == ""
-        assert "audit" in query
-
-    @patch.object(llm_mod, 'llm')
-    def test_strips_quotes(self, mock_llm):
-        mock_llm.return_value = '"The audit was thorough."\n"financial audit documents"'
-        sentence, query = llm_mod.llm_sentence_and_query("audit")
-        assert not sentence.startswith('"')
-        assert not query.startswith('"')
-
-
 class TestLlm:
     @patch.object(llm_mod, 'groq_generate')
     def test_groq_result(self, mock_groq):

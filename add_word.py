@@ -11,6 +11,7 @@ from core.anki import anki, DECK_NAME, MODEL_NAME
 from core.llm import llm_sentence, llm_image_query, llm_translate, llm_translate_sentence, engine_description
 from core.tts import make_audio, VOICE_WORD, VOICE_SENTENCE
 from core.image import fetch_image
+from core.text import image_html
 
 MEDIA_DIR = os.path.expanduser("~/Library/Application Support/Anki2/Kilin/collection.media")
 spell = SpellChecker()
@@ -102,23 +103,22 @@ def main():
     if not confirm("  Proceed?"):
         sys.exit(0)
 
-    print(f"\n[1] Sentence…")
-    sentence = llm_sentence(word, association) or f"Please add an example sentence for '{word}'."
+    print(f"\n[1] Image…")
+    img_filename = f"{word}_img_{int(time.time())}.jpg"
+    img_query = llm_image_query(word, definition=association)
+    ok, attribution, description = fetch_image(word, os.path.join(MEDIA_DIR, img_filename), search_query=img_query)
+    image_field = image_html(img_filename, description, attribution) if ok else ""
+    print(f"  Image {'✓' if ok else '⚠️ not found'}")
+
+    print("[2] Sentence…")
+    sentence = llm_sentence(word, association, photo=description if ok else "") or f"Please add an example sentence for '{word}'."
     print(f"  {sentence[:80]}")
 
-    print("[2] Image + Audio + Translation (parallel)…")
-    img_filename = f"{word}_img_{int(time.time())}.jpg"
-    img_query = llm_image_query(word, definition=association, sentence=sentence)
-
-    image_result = [False, ""]
+    print("[3] Audio + Translation (parallel)…")
     translation_result = [""]
-    def do_image():
-        image_result[0], image_result[1] = fetch_image(word, os.path.join(MEDIA_DIR, img_filename), search_query=img_query)
     def do_translate():
         translation_result[0] = llm_translate(word, sentence)
-    img_thread = threading.Thread(target=do_image)
     trans_thread = threading.Thread(target=do_translate)
-    img_thread.start()
     trans_thread.start()
 
     audio_filename = f"{word}_tts.mp3"
@@ -127,12 +127,8 @@ def main():
     make_audio(word, os.path.join(MEDIA_DIR, front_audio_filename), voice=VOICE_WORD)
     print(f"  Audio ✓")
 
-    img_thread.join()
     trans_thread.join()
-    ok, attribution = image_result
     translation = translation_result[0]
-    image_field = (f'<img src="{img_filename}">' + attribution) if ok else ""
-    print(f"  Image {'✓' if ok else '⚠️ not found'}")
     print(f"  翻譯: {translation or '⚠️'}")
 
     # only translate / write Sentence_CN if the note type actually has the field
@@ -141,7 +137,7 @@ def main():
     if has_cn:
         print(f"  整句譯: {sentence_cn or '⚠️'}")
 
-    print("[3] Adding card…")
+    print("[4] Adding card…")
     try:
         fields = {
             "Front": word, "Association": association,

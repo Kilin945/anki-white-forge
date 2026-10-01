@@ -56,3 +56,18 @@ def sentence_acceptable(text):
 
 def has_image(value):
     return "<img" in value
+
+
+def image_html(filename, description="", attribution=""):
+    """Image_Prompt 欄位的 HTML。照片描述存在 alt —— 之後 ⌘S 重造句子時從這裡讀回
+    （不另開欄位）。KEEP IN SYNC with addon/__init__.py::_image_html。"""
+    desc = " ".join((description or "").split())
+    alt = f' alt="{html.escape(desc, quote=True)}"' if desc else ""
+    return f'<img src="{filename}"{alt}>' + (attribution or "")
+
+
+def image_alt(value):
+    """第一個 <img> 的 alt（照片描述），沒有回 ''。舊卡的圖沒有 alt → ''。
+    KEEP IN SYNC with addon/__init__.py::_image_alt。"""
+    m = re.search(r'<img[^>]*\balt="([^"]*)"', value or "")
+    return html.unescape(m.group(1)) if m else ""

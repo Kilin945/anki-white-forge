@@ -220,11 +220,24 @@ def _accept_word_translation(word, reply):
     return ""
 
 
-def _sentence_prompt(word, association=""):
+# KEEP IN SYNC with core/llm.PHOTO_BLOCK_TEMPLATE（逐字相同）
+_PHOTO_BLOCK_TEMPLATE = (
+    '\n\nA photo was already picked for this card. Photo description: "{photo}"\n'
+    'Use the photo only if it fits both the meaning AND the setting you picked. If you picked '
+    'the software-engineering sense, the sentence must stay in a code/tech situation, so use '
+    'the photo only if it shows software, computers or tech. If you picked an everyday or '
+    'hint-driven sense, use the photo if it shows that meaning. When you use it, set the '
+    'sentence in the scene of the photo, so the picture and the sentence match. Otherwise '
+    'ignore the photo. Never change the meaning or the setting to fit the photo.'
+)
+
+
+def _sentence_prompt(word, association="", photo=""):
     """Example-sentence prompt: pick sense (hint > SWE > everyday), short & clear, no
     definition/circular sentence.
     KEEP IN SYNC with core/llm._sentence_instructions — addon cannot import core, so this
-    is a deliberate duplicate. Change one → change both."""
+    is a deliberate duplicate. Change one → change both.
+    photo（照片描述）非空時附 _PHOTO_BLOCK_TEMPLATE：句子依圖造，詞義優先序不變。"""
     hint = f'1. If a hint is given, use the sense the hint points to. Hint: "{association}"\n' if association else ""
     swe_n = "2." if association else "1."
     common_n = "3." if association else "2."
@@ -244,8 +257,9 @@ def _sentence_prompt(word, association=""):
         f'situation is natural; if you chose an everyday or hint-driven sense, write a normal '
         f'everyday sentence and do NOT force in software, teams, or tech. '
         f'Do NOT write a definition or a circular sentence (no "X means ...", "X is when ...", '
-        f'"{word} is a kind of ..."); show the meaning through a real, concrete situation.\n\n'
-        f'Output only the sentence. No explanation, no quotes.'
+        f'"{word} is a kind of ..."); show the meaning through a real, concrete situation.'
+        + (_PHOTO_BLOCK_TEMPLATE.format(photo=photo) if photo else "")
+        + "\n\nOutput only the sentence. No explanation, no quotes."
     )
 
 
@@ -326,34 +340,34 @@ class Worker(QThread):
             word = self.word
             import threading
 
-            sentence, engine = self._llm_sentence(word, self.association)
+            # 圖先行：依「單字＋詞義」搜圖，再依照片描述造句（句子配圖）。圖不再依賴句子，
+            # 句子生成失敗圖照留。
+            image_field = self._fetch_image(word, definition=self.association)
+            self.step.emit("image", "ok" if image_field else "warn")
+            photo = _image_alt(image_field)
+
+            sentence, engine = self._llm_sentence(word, self.association, photo=photo)
             if not sentence:
                 sentence = f"Please add an example sentence for '{word}'."
             sentence_ok = _sentence_usable(sentence)
             self.step.emit("sentence", "ok" if sentence_ok else "warn")
 
-            # Image, Translation and Audio in parallel — but only when the sentence is
-            # usable: 依賴句意的下游（搜圖/翻譯/句音）拿佔位符當輸入會做出彼此不一致
+            # Translation and Audio in parallel — but only when the sentence is
+            # usable: 依賴句意的下游（翻譯/句音）拿佔位符當輸入會做出彼此不一致
             # 的髒卡（例：Sentence_CN 是佔位符的翻譯）→ 全部跳過亮橘，之後 ⌘S 連同
-            # 句子一起重做。Front_Audio（單字音）與句子無關，照做。
-            image_result = [None]
+            # 句子一起重做。Front_Audio（單字音）與句子無關，照做。圖已在上面先抓。
             translation_result = [""]
             sentence_cn_result = [""]
             audio_filename = f"{word}_tts.mp3" if sentence_ok else ""
             front_audio_filename = f"{word}_word.mp3"
 
-            def do_image():
-                image_result[0] = self._fetch_image(word, definition=self.association, sentence=sentence)
-
             def do_translate():
                 translation_result[0] = self._groq_translate(word, sentence)
                 sentence_cn_result[0] = self._groq_translate_sentence(sentence)
 
-            img_thread = trans_thread = None
+            trans_thread = None
             if sentence_ok:
-                img_thread = threading.Thread(target=do_image)
                 trans_thread = threading.Thread(target=do_translate)
-                img_thread.start()
                 trans_thread.start()
 
             audio_items = [
@@ -366,15 +380,11 @@ class Worker(QThread):
                 self._make_audio_batch(audio_items)
                 self.step.emit("audio", "ok" if sentence_ok else "warn")
             finally:
-                if img_thread:
-                    img_thread.join()      # always join so threads don't leak on audio failure
                 if trans_thread:
-                    trans_thread.join()
+                    trans_thread.join()    # always join so the thread doesn't leak on audio failure
 
-            self.step.emit("image", "ok" if image_result[0] else "warn")
             self.step.emit("translation", "ok" if translation_result[0] else "warn")
             self.step.emit("sentence_cn", "ok" if sentence_cn_result[0] else "warn")
-            image_field = image_result[0]
 
             self.finished.emit({
                 "word":        word,
@@ -391,13 +401,13 @@ class Worker(QThread):
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
-    def _groq_sentence(self, word, association=""):
+    def _groq_sentence(self, word, association="", photo=""):
         # 造句是多條件約束任務 → 較高思考等級（其餘呼叫維持預設 low）
-        return _groq_chat(_sentence_prompt(word, association), temperature=0.7,
+        return _groq_chat(_sentence_prompt(word, association, photo), temperature=0.7,
                           max_tokens=200, timeout=15, effort="medium")
 
-    def _llm_sentence(self, word, association=""):
-        result = self._groq_sentence(word, association)
+    def _llm_sentence(self, word, association="", photo=""):
+        result = self._groq_sentence(word, association, photo)
         if _sentence_acceptable(result):
             return result, "Groq"
         return "", "failed"        # Groq 失敗就回空 → 上層退 placeholder，等下次補（不再走地端）
@@ -433,28 +443,27 @@ class Worker(QThread):
             return ""
         return reply
 
-    def _fetch_image(self, word, definition="", sentence=""):
+    def _fetch_image(self, word, definition=""):
         filename = f"{word}_img_{int(__import__('time').time())}.jpg"
         filepath = os.path.join(self.media_dir, filename)
         cmd = [VENV_PYTHON, IMAGE_SCRIPT]
         if definition:
             cmd.extend(["--definition", definition])
-        if sentence:
-            cmd.extend(["--sentence", sentence])
         cmd.extend(["--", word, filepath])
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=60,
             )
         except Exception:               # timeout / spawn failure → no image; leave blank for ⌘S to retry
-            return ""                   # runs in do_image thread; must not raise or it crashes the thread
+            return ""                   # called synchronously; must not raise, a failure just leaves the image blank
         if result.returncode == 0:
-            html = f'<img src="{filename}">'
+            alt = attribution = ""
             for line in result.stdout.splitlines():
-                if line.startswith("ATTRIBUTION: "):
-                    html += line[len("ATTRIBUTION: "):]
-                    break
-            return html
+                if line.startswith("ALT: "):
+                    alt = line[len("ALT: "):]
+                elif line.startswith("ATTRIBUTION: "):
+                    attribution = line[len("ATTRIBUTION: "):]
+            return _image_html(filename, alt, attribution)
         return ""
 
     def _make_audio_batch(self, items):
@@ -956,10 +965,19 @@ class BackfillWorker(QThread):
             return f"skip {word}"
         fields = {}
 
+        assoc = _clean_text(note["fields"].get("Association", {}).get("value", ""))
+
+        # 圖先行：圖不依賴句子（依單字＋詞義搜），先補圖，句子再依照片描述造。
+        need_image = "<img" not in note["fields"]["Image_Prompt"]["value"]
+        if need_image:
+            image_html = self._w._fetch_image(word, definition=assoc)
+            fields["Image_Prompt"] = image_html or ""
+            self.step.emit(note_id, "image", "ok" if image_html else "warn")
+        photo = _image_alt(fields.get("Image_Prompt") or note["fields"]["Image_Prompt"]["value"])
+
         current = note["fields"]["Sentence"]["value"]
         if not current or any(p in current for p in PLACEHOLDERS):
-            assoc = _clean_text(note["fields"].get("Association", {}).get("value", ""))
-            sentence, _ = self._w._llm_sentence(word, assoc)
+            sentence, _ = self._w._llm_sentence(word, assoc, photo=photo)
             to_write = _sentence_to_write(current, sentence, word)
             if to_write is not None:
                 fields["Sentence"] = to_write
@@ -974,28 +992,25 @@ class BackfillWorker(QThread):
             sentence = _clean_text(current)
 
         import threading
-        need_image = "<img" not in note["fields"]["Image_Prompt"]["value"]
         need_audio = _need_sentence_audio(note["fields"]["Audio"]["value"],
                                           sentence, "Sentence" in fields)
         need_front = not note["fields"].get("Front_Audio", {}).get("value", "")
         need_translation = not note["fields"].get("Translation", {}).get("value", "")
         need_sentence_cn = not note["fields"].get("Sentence_CN", {}).get("value", "")
 
-        # 句子不可用（生成失敗）→ 依賴句意的下游全部跳過亮橘，下次 ⌘S 連同句子一起
-        # 重做——避免翻譯/搜圖拿佔位符當輸入的髒卡（句音由 _need_sentence_audio 自擋，
-        # Front_Audio 與句子無關照做）
+        # 句子不可用（生成失敗）→ 依賴句意的下游（翻譯/句中譯）全部跳過亮橘，下次 ⌘S
+        # 連同句子一起重做——避免拿佔位符當輸入的髒卡（句音由 _need_sentence_audio 自擋，
+        # Front_Audio 與句子無關照做；圖不依賴句子，上面已補）
         if not _sentence_usable(sentence):
-            for key, needed in (("image", need_image),
-                                ("translation", need_translation),
+            for key, needed in (("translation", need_translation),
                                 ("sentence_cn", need_sentence_cn)):
                 if needed:
                     self.step.emit(note_id, key, "warn")
-            need_image = need_translation = need_sentence_cn = False
+            need_translation = need_sentence_cn = False
 
-        image_result = [None]
         translation_result = [""]
         sentence_cn_result = [""]
-        img_thread = trans_thread = None
+        trans_thread = None
 
         if need_translation or need_sentence_cn:
             def do_translate(w=word, s=sentence):     # both Groq text calls share one thread
@@ -1005,13 +1020,6 @@ class BackfillWorker(QThread):
                     sentence_cn_result[0] = self._w._groq_translate_sentence(s)
             trans_thread = threading.Thread(target=do_translate)
             trans_thread.start()
-
-        if need_image:
-            association = _clean_text(note["fields"].get("Association", {}).get("value", ""))
-            def do_image(w=word, a=association, s=sentence):
-                image_result[0] = self._w._fetch_image(w, definition=a, sentence=s)
-            img_thread = threading.Thread(target=do_image)
-            img_thread.start()
 
         audio_batch = []
         if need_audio:
@@ -1027,14 +1035,9 @@ class BackfillWorker(QThread):
                 self._w._make_audio_batch(audio_batch)
                 self.step.emit(note_id, "audio", "ok")
         finally:
-            if img_thread:
-                img_thread.join()
             if trans_thread:
                 trans_thread.join()
 
-        if need_image:
-            fields["Image_Prompt"] = image_result[0] or ""
-            self.step.emit(note_id, "image", "ok" if image_result[0] else "warn")
         if need_translation:
             if translation_result[0]:
                 fields["Translation"] = translation_result[0]
@@ -1081,7 +1084,7 @@ REFILL_CLEAR_FIELDS = ["Sentence", "Sentence_CN", "Image_Prompt",
                        "Audio", "Front_Audio", "Translation"]
 
 # Rebuild Long Sentences 清除的欄位 — 換句=全重建:句子三欄(Audio 是句子語音)之外,
-# 連 Translation(依句中用法翻,換句可能換義)與 Image_Prompt(依句意搜的圖)也一起清;
+# 連 Translation(依句中用法翻,換句可能換義)與 Image_Prompt 也一起清(圖是依單字＋Association 在造句前搜的;清掉讓 ⌘S 重搜新圖,並依新圖寫新句子);
 # 只保留 Front/Association/Front_Audio(單字發音與句子無關)。使用者實測後定案。
 REBUILD_CLEAR_FIELDS = ["Sentence", "Sentence_CN", "Audio",
                         "Translation", "Image_Prompt"]
@@ -1830,6 +1833,21 @@ def _review_summary(reps, ivl):
     if ivl and ivl > 0:
         text += f" · {ivl}-day interval"
     return text
+
+
+def _image_html(filename, description="", attribution=""):
+    """Image_Prompt 欄位的 HTML。照片描述存在 alt（⌘S 重造句子時讀回）。
+    KEEP IN SYNC with core/text.py::image_html。"""
+    desc = " ".join((description or "").split())
+    alt = f' alt="{html.escape(desc, quote=True)}"' if desc else ""
+    return f'<img src="{filename}"{alt}>' + (attribution or "")
+
+
+def _image_alt(value):
+    """第一個 <img> 的 alt（照片描述），沒有回 ''。舊卡的圖沒有 alt → ''。
+    KEEP IN SYNC with core/text.py::image_alt。"""
+    m = re.search(r'<img[^>]*\balt="([^"]*)"', value or "")
+    return html.unescape(m.group(1)) if m else ""
 
 
 def _image_filename(value):

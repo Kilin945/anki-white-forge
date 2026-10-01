@@ -81,6 +81,15 @@ uv sync   # 自動安裝所有依賴
 
 按 `⌘A`，輸入單字，按 Enter。例句、圖片、雙語音、單字翻譯、整句翻譯全部自動生成。
 
+生成順序是先圖後句：
+
+1. 依單字和 Association 決定詞義，用這個詞義搜圖。
+2. 讀取這張照片的文字描述（Pexels 附的 alt）。
+3. 依照片描述造句，讓例句和圖對得上。照片和詞義不符時，例句忽略照片，詞義不會為了配圖而改。
+4. 例句完成後，才生成單字翻譯、整句翻譯和語音。
+
+照片描述存在 `Image_Prompt` 的 `<img alt="…">` 裡。之後重造例句時，會沿用同一張圖的描述。找不到圖時照常造句。
+
 輸入有三道防呆。非英文字元直接擋下。Groq 會檢查拼字，疑似拼錯時建議正確的字。重複的字也會擋，比對前先正規化，所以大小寫或 HTML 變體騙不過它。
 
 #### 補齊缺失卡片：`⌘S`
@@ -226,10 +235,10 @@ Anki/
 
 | 檔案 | 說明 |
 |------|------|
-| `core/llm.py` | LLM 統一入口。句子生成、圖片查詢、合併呼叫都在這裡 |
+| `core/llm.py` | LLM 統一入口。句子生成、圖片查詢都在這裡 |
 | `core/tts.py` | TTS 語音生成。edge-tts wrapper，定義 Andrew（正面）和 Ava（背面）語音 |
 | `core/image.py` | 圖片搜尋下載。Pexels API 優先，DuckDuckGo fallback |
-| `core/text.py` | 文字處理。strip_html、normalize、is_placeholder、has_image |
+| `core/text.py` | 文字處理。strip_html、normalize、is_placeholder、has_image、image_html／image_alt（圖片欄位與照片描述） |
 | `core/anki.py` | AnkiConnect API wrapper |
 
 ### 模板 `templates/`
@@ -287,7 +296,7 @@ A：確認 Anki 有開著（AnkiConnect 需要 Anki 在背景運行）
 A：media 檔案需要同步，桌機同步後等 `Syncing media…` 完成，再讓手機同步
 
 **Q：某個單字圖片不對？**
-A：在 Anki 瀏覽器刪除 `Image_Prompt` 欄位內容，再跑 `Ctrl+Shift+C` 重新搜圖
+A：在 Anki 瀏覽器刪除 `Image_Prompt` 欄位內容，再按 `⌘S` 重新搜圖。例句不會跟著改；要讓例句配新圖，把 `Sentence` 也一起清空。
 
 **Q：音檔唸的是 placeholder 文字？**
 A：跑 `uv run python regen_audio.py` 重新生成所有音檔

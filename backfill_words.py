@@ -6,8 +6,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from core.anki import anki, DECK_NAME
-from core.text import strip_html, is_placeholder, has_image, sentence_usable
-from core.llm import llm_sentence_and_query, llm_translate, engine_description
+from core.text import strip_html, is_placeholder, has_image, sentence_usable, image_alt, image_html
+from core.llm import llm_sentence, llm_image_query, llm_translate, engine_description
 from core.tts import make_audio, VOICE_WORD, VOICE_SENTENCE
 from core.image import fetch_image
 
@@ -16,11 +16,11 @@ MAX_WORKERS = 4
 _print_lock = threading.Lock()
 
 
-def _do_image(word, assoc, sentence, img_query):
+def _do_image(word, img_query):
     img_filename = f"{word}_img_{int(time.time())}.jpg"
     img_path = os.path.join(MEDIA_DIR, img_filename)
-    ok, attribution = fetch_image(word, img_path, search_query=img_query)
-    return img_filename, ok, attribution
+    ok, attribution, description = fetch_image(word, img_path, search_query=img_query)
+    return img_filename, ok, attribution, description
 
 
 def _do_sentence_audio(word, sentence):
@@ -76,35 +76,38 @@ def process_note(note):
     fields = {}
     need_sentence = not has_sentence
     need_img = not has_img
-    img_query = ""
-
-    if need_sentence or need_img:
-        sentence, img_query = llm_sentence_and_query(word, association=current_assoc, sentence=current_sentence)
-        if need_sentence:
-            if sentence:
-                lines.append(f"  Sentence : {sentence[:80]}")
-            else:
-                sentence = f"Please add an example sentence for '{word}'."
-                lines.append(f"  Sentence : ⚠ LLM failed")
-            fields["Sentence"] = sentence
+    # 先圖後句：圖依「單字+詞義」搜，句子再照照片描述寫（句子不再決定圖）。
+    # 已有圖時沿用其 alt 當照片描述；舊卡沒有 alt → ''，句子照常寫。
+    photo = image_alt(current_image)
+    if need_img:
+        img_query = llm_image_query(word, current_assoc)
+        img_filename, ok, attr, description = _do_image(word, img_query)
+        if ok:
+            fields["Image_Prompt"] = image_html(img_filename, description, attr)
+            photo = description
         else:
-            sentence = current_sentence
+            fields["Image_Prompt"] = ""
+        lines.append(f"  Image    : {'✓ ' + img_filename if ok else '⚠ not found'}")
+
+    if need_sentence:
+        sentence = llm_sentence(word, association=current_assoc, photo=photo)
+        if sentence:
+            lines.append(f"  Sentence : {sentence[:80]}")
+        else:
+            sentence = f"Please add an example sentence for '{word}'."
+            lines.append(f"  Sentence : ⚠ LLM failed")
+        fields["Sentence"] = sentence
     else:
         sentence = current_sentence
 
-    # 句子不可用（生成失敗）→ 依賴句意的下游（搜圖/翻譯/句音）全部跳過，下次再連同
-    # 句子一起重做——避免翻譯/搜圖拿佔位符當輸入的髒卡。Front_Audio 與句子無關照做。
+    # 句子不可用（生成失敗）→ 依賴句意的下游（翻譯/句音）跳過，下次再連同句子一起重做
+    # ——避免翻譯拿佔位符當輸入的髒卡。圖片已不依賴句子，不在此閘門內。Front_Audio 與句子無關照做。
     usable = sentence_usable(sentence)
-    if not usable:
-        if need_img:
-            lines.append("  Image    : ⚠ skipped (no usable sentence)")
-        if not has_translation:
-            lines.append("  翻譯     : ⚠ skipped (no usable sentence)")
+    if not usable and not has_translation:
+        lines.append("  翻譯     : ⚠ skipped (no usable sentence)")
 
     with ThreadPoolExecutor(max_workers=3) as pool:
         futures = {}
-        if need_img and usable:
-            futures["image"] = pool.submit(_do_image, word, current_assoc, sentence, img_query)
         # 佔位符不配音(KEEP-IN-SYNC: addon _need_sentence_audio 同一規則)——
         # 句子生成失敗時留空,等真句子來了才成對生成,避免「佔位符語音」髒音檔
         if (not has_audio or need_sentence) and usable:
@@ -113,11 +116,6 @@ def process_note(note):
             futures["front_audio"] = pool.submit(_do_word_audio, word)
         if not has_translation and usable:
             futures["translation"] = pool.submit(llm_translate, word, sentence)
-
-        if "image" in futures:
-            img_filename, ok, attr = futures["image"].result()
-            fields["Image_Prompt"] = (f'<img src="{img_filename}">' + attr) if ok else ""
-            lines.append(f"  Image    : {'✓ ' + img_filename if ok else '⚠ not found'}")
 
         if "audio" in futures:
             fields["Audio"] = f"[sound:{futures['audio'].result()}]"

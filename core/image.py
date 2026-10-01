@@ -20,6 +20,7 @@ def _load_pexels_key():
 
 
 def fetch_image(word, filepath, search_query=None):
+    """Download the first usable image. Returns (ok, attribution_html, description)."""
     query = search_query or f"{word} meaning illustration"
 
     api_key = _load_pexels_key()
@@ -44,7 +45,7 @@ def fetch_image(word, filepath, search_query=None):
                                 f'Photo by {photographer} on '
                                 f'<a href="{photo_url}" style="color:#999">Pexels</a></div>'
                             )
-                            return True, attribution
+                            return True, attribution, " ".join((photo.get("alt") or "").split())
                     except Exception:
                         continue
         except Exception:
@@ -57,7 +58,7 @@ def fetch_image(word, filepath, search_query=None):
                 if r.status_code == 200 and len(r.content) > 5000:
                     with open(filepath, "wb") as f:
                         f.write(r.content)
-                    return True, ""
+                    return True, "", " ".join((result.get("title") or "").split())
             except Exception:
                 continue
-    return False, ""
+    return False, "", ""

@@ -75,12 +75,6 @@ class TestSentenceEffort:
             llm_mod.llm_sentence("cat")
         assert fake.kwargs["effort"] == "medium"
 
-    def test_llm_sentence_and_query_uses_medium_effort(self):
-        fake = _FakeDispatcher(reply="A cat sat.\ncat photo")
-        with patch.object(llm_mod, "_dispatcher", fake):
-            llm_mod.llm_sentence_and_query("cat")
-        assert fake.kwargs["effort"] == "medium"
-
     def test_llm_translate_defaults_to_low_effort(self):
         fake = _FakeDispatcher(reply="貓")
         with patch.object(llm_mod, "_dispatcher", fake):

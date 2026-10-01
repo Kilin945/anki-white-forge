@@ -132,16 +132,16 @@ GATE = threading.Event(); GATE.set()      # held closed to keep a batch running
 WORKER_TIDS = set()
 HTTP_CALLS = []
 
-def stub_sentence(self, word, association=""):
+def stub_sentence(self, word, association="", photo=""):
     WORKER_TIDS.add(threading.get_ident())
     GATE.wait(timeout=30)
     return (f"The engineer used {word} in a short stub sentence.", "Stub")
 
 addon.Worker._llm_sentence            = stub_sentence
-addon.Worker._groq_sentence           = lambda self,w,a="": f"stub {w}"
+addon.Worker._groq_sentence           = lambda self,w,a="",photo="": f"stub {w}"
 addon.Worker._groq_translate          = lambda self,w,s: "字義"
 addon.Worker._groq_translate_sentence = lambda self,s,strict=False: "這是中文翻譯。"
-addon.Worker._fetch_image             = lambda self,w,definition="",sentence="": "<img src='stub.jpg'>"
+addon.Worker._fetch_image             = lambda self,w,definition="": "<img src='stub.jpg'>"
 addon.Worker._make_audio_batch        = lambda self,items: None
 addon._groq_spellcheck                = lambda w: ("ok", None)
 addon.subprocess = types.SimpleNamespace(
