@@ -22,6 +22,28 @@ class TestImageHtml:
     def test_no_description_no_alt_attr(self):
         assert image_html("d.jpg") == '<img src="d.jpg">'
 
+    def test_source_attribute_roundtrip(self):
+        from core.text import image_source
+        h = image_html("c.jpg", "A cat.", "<div>P</div>", source="wikimedia:123")
+        assert h.startswith('<img src="c.jpg" alt="A cat." data-source="wikimedia:123">')
+        assert image_source(h) == "wikimedia:123"
+        assert image_alt(h) == "A cat."
+
+    def test_source_without_description(self):
+        from core.text import image_source
+        h = image_html("c.jpg", source="pixabay:9")
+        assert h == '<img src="c.jpg" data-source="pixabay:9">'
+        assert image_source(h) == "pixabay:9"
+
+    def test_legacy_image_is_pexels_unknown_id(self):
+        from core.text import image_source
+        assert image_source('<img src="old.jpg"><div>Photo by X on Pexels</div>') == "pexels:"
+        assert image_source('<img src="old.jpg" alt="desc">') == "pexels:"
+
+    def test_no_image_no_source(self):
+        from core.text import image_source
+        assert image_source("") == "" and image_source(None) == "" and image_source("<div>x</div>") == ""
+
     def test_image_alt_missing(self):
         assert image_alt('<img src="old.jpg">') == ""
         assert image_alt("") == ""
@@ -29,23 +51,21 @@ class TestImageHtml:
 
 
 class TestFetchImageDescription:
-    def test_pexels_alt_returned(self, tmp_path, monkeypatch):
+    def test_pexels_alt_and_source_returned(self, tmp_path, monkeypatch):
         monkeypatch.setattr(image_mod, "_load_pexels_key", lambda: "k")
+        monkeypatch.setattr(image_mod, "SOURCES", [("pexels", image_mod._search_pexels)])
         search = MagicMock(status_code=200)
-        search.json.return_value = {"photos": [{
+        search.json.return_value = {"photos": [{"id": 1, 
             "src": {"large": "http://x/1.jpg"}, "alt": "Ladder against a wall.",
             "photographer": "P", "url": "http://pexels/1"}]}
         img = MagicMock(status_code=200, content=b"x" * 6000)
         with patch.object(image_mod.requests, "get", side_effect=[search, img]):
-            ok, attr, desc = image_mod.fetch_image("ladder", str(tmp_path / "a.jpg"), "ladder")
-        assert ok and "Pexels" in attr and desc == "Ladder against a wall."
+            ok, attr, desc, tag = image_mod.fetch_image("ladder", str(tmp_path / "a.jpg"), "ladder", rejects=[])
+        assert ok and "Pexels" in attr and desc == "Ladder against a wall." and tag == "pexels:1"
 
-    def test_failure_returns_three_tuple(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(image_mod, "_load_pexels_key", lambda: "")
-        ddgs = MagicMock()
-        ddgs.__enter__.return_value.images.return_value = []
-        with patch.object(image_mod, "DDGS", return_value=ddgs):
-            assert image_mod.fetch_image("x", str(tmp_path / "a.jpg"), "x") == (False, "", "")
+    def test_failure_returns_four_tuple(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(image_mod, "SOURCES", [("none", lambda q: [])])
+        assert image_mod.fetch_image("x", str(tmp_path / "a.jpg"), "x", rejects=[]) == (False, "", "", "")
 
 
 def _capture(fn, *args, **kw):
@@ -101,7 +121,7 @@ def _note(sentence="", image="", audio="", front_audio="[sound:w.mp3]", translat
 
 
 class TestBackfillWordsOrder:
-    def _run(self, note, fetch=(True, "", "Ladder against a wall."), sentence="The ladder leans on the wall."):
+    def _run(self, note, fetch=(True, "", "Ladder against a wall.", "pexels:1"), sentence="The ladder leans on the wall."):
         calls = {}
         def fake_sentence(word, association="", photo=""):
             calls["photo"] = photo
@@ -123,9 +143,10 @@ class TestBackfillWordsOrder:
         calls, fields = self._run(_note())
         assert calls["photo"] == "Ladder against a wall."
         assert 'alt="Ladder against a wall."' in fields["Image_Prompt"]
+        assert 'data-source="pexels:1"' in fields["Image_Prompt"]
 
     def test_image_fail_still_generates_sentence(self):
-        calls, fields = self._run(_note(), fetch=(False, "", ""))
+        calls, fields = self._run(_note(), fetch=(False, "", "", ""))
         assert calls["photo"] == ""
         assert fields["Sentence"] == "The ladder leans on the wall."
 

@@ -14,14 +14,22 @@ class TestKeepInSync:
                 llm_mod._sentence_instructions(*args)
                 + "\n\nOutput only the sentence. No explanation, no quotes.")
 
-    def test_alt_helpers_match_core(self):
-        for desc in ("", "A cat.", 'A "big" dog & <cat>\non grass'):
-            h = addon._image_html("f.jpg", desc, "<div>a</div>")
-            assert h == text_mod.image_html("f.jpg", desc, "<div>a</div>")
+    def test_image_helpers_match_core(self):
+        cases = [("", "", ""), ("A cat.", "<div>a</div>", ""), ('A "big" dog & <cat>\non grass', "", "wikimedia:12"),
+                 ("", "", "pixabay:9"), ("x", "<div>b</div>", 'q"uote:1')]
+        for desc, attr, src in cases:
+            h = addon._image_html("f.jpg", desc, attr, src)
+            assert h == text_mod.image_html("f.jpg", desc, attr, src)
             assert addon._image_alt(h) == text_mod.image_alt(h)
+            assert addon._image_source(h) == text_mod.image_source(h)
 
     def test_existing_image_without_alt_gives_no_photo(self):
         assert addon._image_alt('<img src="old.jpg"><div>Photo by X</div>') == ""
+
+    def test_legacy_image_source_is_pexels(self):
+        assert addon._image_source('<img src="old.jpg">') == "pexels:"
+        assert addon._image_source("") == ""
+        assert addon._image_source('<img src="n.jpg" alt="a" data-source="openverse:ab-1">') == "openverse:ab-1"
 
 
 class TestFetchImageParsesAlt:
@@ -33,6 +41,22 @@ class TestFetchImageParsesAlt:
         assert addon._image_alt(html) == "Ladder on a wall."
         assert html.endswith("<div>P</div>")
         assert "--sentence" not in run.call_args.args[0]
+
+    def test_source_line_parsed_into_data_source(self, tmp_path):
+        w = addon.Worker.__new__(addon.Worker); w.media_dir = str(tmp_path)
+        out = SimpleNamespace(returncode=0,
+                              stdout="ALT: Ladder on a wall.\nATTRIBUTION: <div>P</div>\nSOURCE: wikimedia:555\n")
+        with patch.object(addon.subprocess, "run", return_value=out):
+            html = w._fetch_image("ladder")
+        assert addon._image_source(html) == "wikimedia:555"
+        assert addon._image_alt(html) == "Ladder on a wall."
+
+    def test_missing_source_line_gives_legacy_pexels(self, tmp_path):
+        w = addon.Worker.__new__(addon.Worker); w.media_dir = str(tmp_path)
+        out = SimpleNamespace(returncode=0, stdout="ALT: x\n")
+        with patch.object(addon.subprocess, "run", return_value=out):
+            html = w._fetch_image("ladder")
+        assert 'data-source' not in html and addon._image_source(html) == "pexels:"
 
 
 class _Emit:

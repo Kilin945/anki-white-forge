@@ -58,12 +58,14 @@ def has_image(value):
     return "<img" in value
 
 
-def image_html(filename, description="", attribution=""):
+def image_html(filename, description="", attribution="", source=""):
     """Image_Prompt 欄位的 HTML。照片描述存在 alt —— 之後 ⌘S 重造句子時從這裡讀回
-    （不另開欄位）。KEEP IN SYNC with addon/__init__.py::_image_html。"""
+    （不另開欄位）；圖片來源存在 data-source（"來源:ID"）—— ⌘F 清紅旗卡時記成退圖。
+    KEEP IN SYNC with addon/__init__.py::_image_html。"""
     desc = " ".join((description or "").split())
     alt = f' alt="{html.escape(desc, quote=True)}"' if desc else ""
-    return f'<img src="{filename}"{alt}>' + (attribution or "")
+    src = f' data-source="{html.escape(source, quote=True)}"' if source else ""
+    return f'<img src="{filename}"{alt}{src}>' + (attribution or "")
 
 
 def image_alt(value):
@@ -71,3 +73,14 @@ def image_alt(value):
     KEEP IN SYNC with addon/__init__.py::_image_alt。"""
     m = re.search(r'<img[^>]*\balt="([^"]*)"', value or "")
     return html.unescape(m.group(1)) if m else ""
+
+
+def image_source(value):
+    """第一個 <img> 的 data-source（"來源:ID"）。舊卡沒有這個屬性 → 一律當 "pexels:"
+    （知道圖源、不知道哪一張）；沒有圖 → ''。
+    KEEP IN SYNC with addon/__init__.py::_image_source。"""
+    value = value or ""
+    if "<img" not in value:
+        return ""
+    m = re.search(r'<img[^>]*\bdata-source="([^"]*)"', value)
+    return html.unescape(m.group(1)) if m else "pexels:"

@@ -5,6 +5,8 @@ __pycache__/
 *.jpg
 *.png
 .pexels_key
+.pixabay_key
+image_rejects.json
 .groq_key
 .gemini_key
 .idea/

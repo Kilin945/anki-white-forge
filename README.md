@@ -10,7 +10,7 @@
 |------|------|------|
 | LLM | **Groq API + Gemini API**（容量感知分流，見下） | 生成例句 + 圖片搜尋關鍵字 |
 | TTS | **edge-tts** | 正面 Andrew 男聲唸單字、背面 Ava 女聲唸句子 |
-| 圖片 | **Pexels API**（DuckDuckGo fallback） | 下載單字插圖 |
+| 圖片 | **Pexels、Wikimedia Commons、Openverse、Pixabay** | 下載單字插圖，依序切換 |
 | Anki | AnkiConnect addon | 程式與 Anki 溝通 |
 
 > LLM 呼叫（`core/llm.py`）會依剩餘額度在 Groq 和 Gemini 之間自動分流，一家額度見底就切到另一家。沒設定 `.gemini_key` 就只用 Groq，功能不變。CLI、core 和 Anki Addon（⌘A、⌘S、批量面板）走的都是同一套分流。
@@ -27,7 +27,7 @@
 | `Front` | 單字 | 手動輸入 |
 | `Association` | 中文聯想（可選） | 手動輸入 |
 | `Sentence` | 英文例句 | 自動（Groq LLM） |
-| `Image_Prompt` | 插圖 | 自動（Pexels） |
+| `Image_Prompt` | 插圖 | 自動（四個圖源） |
 | `Audio` | 句子語音 (Ava) | 自動（edge-tts） |
 | `Front_Audio` | 單字發音 (Andrew) | 自動（edge-tts） |
 | `Translation` | 單字中文翻譯（背面點擊顯示） | 自動（Groq LLM） |
@@ -53,7 +53,13 @@ echo "your_key_here" > ~/Workspace/anki/.gemini_key
 
 # Pexels（免費，https://www.pexels.com/api）
 echo "your_key_here" > ~/Workspace/anki/.pexels_key
+
+# Pixabay（免費，https://pixabay.com/api/docs/ 登入後頁面顯示金鑰）
+# 在專案根目錄執行：
+echo "your_key_here" > .pixabay_key
 ```
+
+Wikimedia Commons 與 Openverse 不用金鑰。沒有金鑰的圖源會被略過，其他圖源照常運作。
 
 > Key 檔在 Anki 插件啟動時讀一次。新增或更換 key 後要重啟 Anki 才生效。CLI 腳本則是每次執行時讀。
 
@@ -84,13 +90,34 @@ uv sync   # 自動安裝所有依賴
 生成順序是先圖後句：
 
 1. 依單字和 Association 決定詞義，用這個詞義搜圖。
-2. 讀取這張照片的文字描述（Pexels 附的 alt）。
+2. 讀取這張照片的文字描述（例如 Pexels 附的 alt）。
 3. 依照片描述造句，讓例句和圖對得上。照片和詞義不符時，例句忽略照片，詞義不會為了配圖而改。
 4. 例句完成後，才生成單字翻譯、整句翻譯和語音。
 
 照片描述存在 `Image_Prompt` 的 `<img alt="…">` 裡。之後重造例句時，會沿用同一張圖的描述。找不到圖時照常造句。
 
 輸入有三道防呆。非英文字元直接擋下。Groq 會檢查拼字，疑似拼錯時建議正確的字。重複的字也會擋，比對前先正規化，所以大小寫或 HTML 變體騙不過它。
+
+#### 圖源與切換
+
+圖源有四家，依這個順序找：
+
+1. 先問 Pexels。
+2. Pexels 2 秒內沒回應，就一邊等它、一邊問 Wikimedia Commons。
+   Pexels 回 0 張或出錯，就直接改問 Wikimedia Commons。
+3. 再來依序是 Openverse、Pixabay，每家同樣等 2 秒。
+4. 誰先搜到圖就用誰。
+5. 四家都沒有，圖欄留空，例句照常生成。
+
+#### 換一張圖
+
+1. 手機上把那張卡標紅旗。
+2. Mac 按 `⌘F`，用 Clear Flagged Cards 清空。
+3. 清空時，系統把這張圖的圖源和這張圖本身，一起記在 `image_rejects.json`。
+4. 按 `⌘S` 重新生成。這次會先試其他圖源。
+5. 同一個圖源也不會再給同一張圖。
+
+每張圖在圖片欄位裡有一個看不見的來源記號（程式裡叫 `data-source`）。在這個功能之前加的舊卡沒有這個記號，系統一律當作 Pexels 的圖。
 
 #### 補齊缺失卡片：`⌘S`
 
@@ -108,7 +135,7 @@ uv sync   # 自動安裝所有依賴
 專門補 `Sentence_CN`。開啟時先顯示共幾筆、預估幾分鐘。選一個時間盒（1、2、5、10 分鐘）或直接跑完，翻譯節奏控制在 Groq 速率內（約每分鐘 25 句）。隨時可以按 Stop，下次打開從沒翻的地方繼續。
 
 **Clear Flagged Cards（清空紅旗卡）**
-手機複習時看到不理想的卡（例句不貼切、翻譯有誤），先用 Anki 內建的紅旗標起來。回到 Mac 開這個面板，它會列出所有紅旗英文卡。按 Clear N Cards 之後，卡片只留 Word 和 Association，其餘六欄（例句、兩個翻譯、圖、字音、句音）清空，旗子也拔掉。清空是瞬間完成的，不會重新生成。想馬上補，按 Open Complete Missing Cards 一鍵跳去 ⌘S；想之後再補就按 Done。只認紅旗（flag:1），非英文卡略過。
+手機複習時看到不理想的卡（例句不貼切、翻譯有誤），先用 Anki 內建的紅旗標起來。回到 Mac 開這個面板，它會列出所有紅旗英文卡。按 Clear N Cards 之後，卡片只留 Word 和 Association，其餘六欄（例句、兩個翻譯、圖、字音、句音）清空，旗子也拔掉。清空時，卡上目前的圖也會記成退掉的圖，下次不會再選到，見「換一張圖」。清空是瞬間完成的，不會重新生成。想馬上補，按 Open Complete Missing Cards 一鍵跳去 ⌘S；想之後再補就按 Done。只認紅旗（flag:1），非英文卡略過。
 
 為什麼繞這一圈：手機的卡片模板寫不了欄位，紅旗是手機上唯一能做的記號。
 
@@ -198,7 +225,7 @@ uv run python regen_audio.py
 Anki/
 ├── core/                    # 共用模組
 │   ├── anki.py              # AnkiConnect API
-│   ├── image.py             # Pexels + DuckDuckGo 圖片
+│   ├── image.py             # 四圖源搜尋下載（Pexels、Wikimedia、Openverse、Pixabay）
 │   ├── llm.py               # Groq LLM
 │   ├── rate_limiter.py      # 通用 429 偵測 / 批次節流
 │   ├── text.py              # strip_html, normalize, is_placeholder
@@ -224,6 +251,7 @@ Anki/
 ├── test_integration.py      # 整合測試
 ├── .groq_key                # API key (gitignored)
 ├── .pexels_key              # API key (gitignored)
+├── .pixabay_key             # API key (gitignored)
 └── pyproject.toml
 ```
 
@@ -237,7 +265,7 @@ Anki/
 |------|------|
 | `core/llm.py` | LLM 統一入口。句子生成、圖片查詢都在這裡 |
 | `core/tts.py` | TTS 語音生成。edge-tts wrapper，定義 Andrew（正面）和 Ava（背面）語音 |
-| `core/image.py` | 圖片搜尋下載。Pexels API 優先，DuckDuckGo fallback |
+| `core/image.py` | 四圖源搜尋下載。Pexels、Wikimedia Commons、Openverse、Pixabay 依序切換 |
 | `core/text.py` | 文字處理。strip_html、normalize、is_placeholder、has_image、image_html／image_alt（圖片欄位與照片描述） |
 | `core/anki.py` | AnkiConnect API wrapper |
 
@@ -281,6 +309,8 @@ Anki/
 |------|------|
 | `.groq_key` | Groq API 金鑰（gitignored） |
 | `.pexels_key` | Pexels API 金鑰（gitignored） |
+| `.pixabay_key` | Pixabay API 金鑰（gitignored） |
+| `image_rejects.json` | 退圖紀錄，記下被紅旗退掉的圖（gitignored） |
 | `test_backfill.py` | 單元測試（57 tests） |
 | `test_integration.py` | 整合測試（新增 3 字驗證） |
 | `pyproject.toml` | Python 依賴定義 |
@@ -296,7 +326,7 @@ A：確認 Anki 有開著（AnkiConnect 需要 Anki 在背景運行）
 A：media 檔案需要同步，桌機同步後等 `Syncing media…` 完成，再讓手機同步
 
 **Q：某個單字圖片不對？**
-A：在 Anki 瀏覽器刪除 `Image_Prompt` 欄位內容，再按 `⌘S` 重新搜圖。例句不會跟著改；要讓例句配新圖，把 `Sentence` 也一起清空。
+A：照上面「換一張圖」的步驟做。想自己動手也可以：在 Anki 瀏覽器刪除 `Image_Prompt` 欄位內容，再按 `⌘S` 重新搜圖。這樣不會記退圖，例句也不會跟著改。要讓例句配新圖，把 `Sentence` 也一起清空。
 
 **Q：音檔唸的是 placeholder 文字？**
 A：跑 `uv run python regen_audio.py` 重新生成所有音檔

@@ -106,8 +106,8 @@ def main():
     print(f"\n[1] Image…")
     img_filename = f"{word}_img_{int(time.time())}.jpg"
     img_query = llm_image_query(word, definition=association)
-    ok, attribution, description = fetch_image(word, os.path.join(MEDIA_DIR, img_filename), search_query=img_query)
-    image_field = image_html(img_filename, description, attribution) if ok else ""
+    ok, attribution, description, source = fetch_image(word, os.path.join(MEDIA_DIR, img_filename), search_query=img_query)
+    image_field = image_html(img_filename, description, attribution, source) if ok else ""
     print(f"  Image {'✓' if ok else '⚠️ not found'}")
 
     print("[2] Sentence…")

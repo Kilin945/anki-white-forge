@@ -803,8 +803,21 @@ def _():
     panel, tr, flag, dup, long_, test = fresh_panel()
     assert len(flag._flagged) == 2, flag._flagged
     assert flag.clear_btn.text() == "Clear 2 Cards", flag.clear_btn.text()
-    QTest.mouseClick(flag.clear_btn, Qt.MouseButton.LeftButton)
-    _app.processEvents()
+    for nid in mw.col.flagged:
+        mw.col._notes[nid]["Image_Prompt"] = '<img src="a.jpg" data-source="wikimedia:77">'
+    rej_dir = tempfile.mkdtemp()
+    rej_path = os.path.join(rej_dir, "image_rejects.json")
+    saved_rej = addon.IMAGE_REJECTS_PATH
+    addon.IMAGE_REJECTS_PATH = rej_path
+    try:
+        QTest.mouseClick(flag.clear_btn, Qt.MouseButton.LeftButton)
+        _app.processEvents()
+        with open(rej_path) as fh:
+            data = json.load(fh)
+    finally:
+        addon.IMAGE_REJECTS_PATH = saved_rej
+        import shutil; shutil.rmtree(rej_dir, ignore_errors=True)
+    assert all("wikimedia:77" in v for v in data.values()) and len(data) == 2, data
     for n in mw.col._notes.values():
         assert n["Front"], "Front 被清掉了"
         for f in addon.REFILL_CLEAR_FIELDS:

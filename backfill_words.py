@@ -19,8 +19,8 @@ _print_lock = threading.Lock()
 def _do_image(word, img_query):
     img_filename = f"{word}_img_{int(time.time())}.jpg"
     img_path = os.path.join(MEDIA_DIR, img_filename)
-    ok, attribution, description = fetch_image(word, img_path, search_query=img_query)
-    return img_filename, ok, attribution, description
+    ok, attribution, description, source = fetch_image(word, img_path, search_query=img_query)
+    return img_filename, ok, attribution, description, source
 
 
 def _do_sentence_audio(word, sentence):
@@ -81,9 +81,9 @@ def process_note(note):
     photo = image_alt(current_image)
     if need_img:
         img_query = llm_image_query(word, current_assoc)
-        img_filename, ok, attr, description = _do_image(word, img_query)
+        img_filename, ok, attr, description, source = _do_image(word, img_query)
         if ok:
-            fields["Image_Prompt"] = image_html(img_filename, description, attr)
+            fields["Image_Prompt"] = image_html(img_filename, description, attr, source)
             photo = description
         else:
             fields["Image_Prompt"] = ""
