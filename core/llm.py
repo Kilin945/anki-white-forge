@@ -138,12 +138,41 @@ def _accept_word_translation(word, reply):
     return ""
 
 
+# 整句翻譯裡「保留英文」是對的多字術語。驗證時先把它們拿掉再數英文字，
+# 否則「我現在正處理 null pointer exception。」會被當成 3 個英文字的廢話砍掉
+# （事故：dealing with 的 Sentence_CN 連按三次 ⌘S 都空的，2026-10-02）。
+# KEEP-IN-SYNC: addon/__init__.py::TRANSLATION_TERM_WHITELIST
+TRANSLATION_TERM_WHITELIST = [
+    "null pointer exception",
+    "race condition",
+    "pull request",
+    "merge request",
+    "code review",
+    "unit test",
+    "integration test",
+    "dependency injection",
+    "garbage collection",
+    "stack overflow",
+    "stack trace",
+    "connection pool",
+    "thread pool",
+    "message queue",
+    "load balancer",
+    "machine learning",
+    "command line",
+    "open source",
+]
+_TERM_RE = re.compile("|".join(re.escape(t) for t in TRANSLATION_TERM_WHITELIST), re.IGNORECASE)
+
+
 def _looks_like_chinese_translation(text):
+    """KEEP-IN-SYNC: addon/__init__.py::_looks_like_chinese_translation。"""
     if not text:
         return False
     if not re.search(r"[一-鿿]", text):                 # must contain Chinese
         return False
-    if len(re.findall(r"[A-Za-z]{2,}", text)) >= 3:     # 3+ English words = preamble/English prose;
+    rest = _TERM_RE.sub(" ", text)                      # whitelisted multi-word terms don't count
+    if len(re.findall(r"[A-Za-z]{2,}", rest)) >= 3:     # 3+ English words = preamble/English prose;
         return False                                    # a single embedded term (concurrency, Microsoft…) is kept
     return True
 
