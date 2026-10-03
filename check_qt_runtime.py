@@ -140,7 +140,7 @@ def stub_sentence(self, word, association="", photo=""):
 addon.Worker._llm_sentence            = stub_sentence
 addon.Worker._groq_sentence           = lambda self,w,a="",photo="": f"stub {w}"
 addon.Worker._groq_translate          = lambda self,w,s: "字義"
-addon.Worker._groq_translate_sentence = lambda self,s,strict=False: "這是中文翻譯。"
+addon.Worker._groq_translate_sentence = lambda self,s,strict=False,word="": "這是中文翻譯。"
 addon.Worker._fetch_image             = lambda self,w,definition="": "<img src='stub.jpg'>"
 addon.Worker._make_audio_batch        = lambda self,items: None
 addon._groq_spellcheck                = lambda w: ("ok", None)
@@ -776,7 +776,7 @@ def _():
                    Audio="[sound:x]", Front_Audio="[sound:y]",
                    Image_Prompt="<img src=a>", Translation="義", Sentence_CN="")
     slow = threading.Event()
-    def slow_tr(self, s, strict=False):
+    def slow_tr(self, s, strict=False, word=""):
         slow.wait(timeout=10); return "慢慢翻的中文。"
     saved = addon.Worker._groq_translate_sentence
     addon.Worker._groq_translate_sentence = slow_tr
@@ -960,6 +960,54 @@ def _():
     assert hit and mw.col.calls["remove_notes"] == 0, "按 No 還是刪了"
     panel.close(); _app.processEvents()
     return "整組全勾被擋、確認按 No 沒刪"
+
+@check("TranslationTermsDialog：Approve／Discard／Add／Manage 清單 Remove 都立刻存檔")
+def _():
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="whiteforge-terms-")) / "translation_terms.json"
+    saved = addon.TRANSLATION_TERMS_PATH
+    addon.TRANSLATION_TERMS_PATH = str(tmp)
+    try:
+        tmp.write_text(json.dumps({"terms": ["race condition"], "pending": [
+            {"term": "null pointer exception", "word": "dealing with", "translation": "我 null pointer exception。"},
+            {"term": "here is the translation", "word": "x", "translation": "Here is the translation: 我。"}]}),
+            encoding="utf-8")
+        dlg = addon.TranslationTermsDialog(mw)
+        assert dlg.windowTitle() == "Translation Terms" and dlg.minimumWidth() >= 560
+        QTest.mouseClick(dlg.approve_buttons["null pointer exception"], Qt.MouseButton.LeftButton)
+        _app.processEvents()
+        d = json.loads(tmp.read_text(encoding="utf-8"))
+        assert "null pointer exception" in d["terms"], d
+        assert [p["term"] for p in d["pending"]] == ["here is the translation"], d
+        QTest.mouseClick(dlg.discard_buttons["here is the translation"], Qt.MouseButton.LeftButton)
+        _app.processEvents()
+        d = json.loads(tmp.read_text(encoding="utf-8"))
+        assert d["pending"] == [] and "here is the translation" not in d["terms"], d
+        disk = lambda: json.loads(tmp.read_text(encoding="utf-8"))
+        assert dlg.count_label.text() == "Approved terms: 2", dlg.count_label.text()
+        assert not dlg.panel.isVisible() and dlg.manage_btn.text() == "Manage…"
+        dlg.add_edit.setText("  Foo   BAR ")
+        QTest.mouseClick(dlg.add_btn, Qt.MouseButton.LeftButton); _app.processEvents()
+        assert "foo bar" in disk()["terms"] and dlg.add_edit.text() == "", disk()
+        assert dlg.count_label.text() == "Approved terms: 3"
+        dlg.show(); _app.processEvents()
+        QTest.mouseClick(dlg.manage_btn, Qt.MouseButton.LeftButton); _app.processEvents()
+        assert dlg.panel.isVisible() and dlg.manage_btn.text() == "Hide"
+        assert set(dlg.remove_buttons) == {"race condition", "null pointer exception", "foo bar"}
+        dlg.search_edit.setText("NULL"); _app.processEvents()
+        assert set(dlg.remove_buttons) == {"null pointer exception"}, set(dlg.remove_buttons)
+        dlg.search_edit.setText(""); _app.processEvents()
+        _app.processEvents(); _app.processEvents()            # 新建的列要等 layout 排完才有高度可點
+        btn = dlg.remove_buttons["foo bar"]
+        assert btn.height() > 0, btn.geometry()
+        QTest.mouseClick(btn, Qt.MouseButton.LeftButton); _app.processEvents()
+        assert "foo bar" not in disk()["terms"] and dlg.count_label.text() == "Approved terms: 2"
+        QTest.mouseClick(dlg.manage_btn, Qt.MouseButton.LeftButton); _app.processEvents()
+        assert not dlg.panel.isVisible()
+        dlg.close()
+        return "Approve / Discard / Add / Remove 都立刻落檔"
+    finally:
+        addon.TRANSLATION_TERMS_PATH = saved
+        import shutil; shutil.rmtree(tmp.parent, ignore_errors=True)
 
 # ── 收尾 ────────────────────────────────────────────────────────────────────
 aqt.dialogs.closeAll(lambda: None)

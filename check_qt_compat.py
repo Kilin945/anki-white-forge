@@ -167,14 +167,14 @@ def main():
         return _report()
 
     print("\nQt 名稱")
-    @check("aqt.qt 的 22 個名稱都還在")
+    @check("aqt.qt 的 23 個名稱都還在")
     def _():
         import aqt.qt as q
         names = ["QAction", "QDialog", "QVBoxLayout", "QHBoxLayout", "QFormLayout",
                  "QLabel", "QLineEdit", "QPushButton", "QProgressBar", "QScrollArea",
                  "QWidget", "QFrame", "QCheckBox", "QPixmap", "QIcon", "QSize",
                  "QKeySequenceEdit", "QKeySequence", "QMessageBox", "QThread",
-                 "pyqtSignal", "Qt"]
+                 "pyqtSignal", "Qt", "QPlainTextEdit"]
         missing = [n for n in names if not hasattr(q, n)]
         assert not missing, f"缺少 {missing}"
         return f"{len(names)} 個"
@@ -186,7 +186,8 @@ def main():
         return "pytest 的假 aqt 驗不到這件事"
 
     print("\n對話框建構（含 __init__ 裡的掃描）")
-    for cls_name in ("AddWordDialog", "BackfillDialog", "BatchOperationsDialog"):
+    for cls_name in ("AddWordDialog", "BackfillDialog", "BatchOperationsDialog",
+                     "TranslationTermsDialog"):
         @check(f"{cls_name} 建構 + 掃描")
         def _(cls_name=cls_name):
             dlg = getattr(addon, cls_name)(mw)
@@ -194,7 +195,7 @@ def main():
             return None
 
     print("\n快捷鍵")
-    @check("三組快捷鍵都綁上且互不重複")
+    @check("四組快捷鍵都綁上且互不重複")
     def _():
         got = {k: a.shortcut().toString() for k, a in addon.ACTIONS.items()}
         assert set(got) == set(addon.DEFAULT_SHORTCUTS), got

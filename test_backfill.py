@@ -230,7 +230,7 @@ class TestRunBatch:
         updates = []
         lim = BatchLimiter(batch_limit=2)
         done, remaining = bf_cn.run_batch(
-            notes, translate=lambda s: "譯文", update=lambda nid, cn: updates.append(nid), limiter=lim)
+            notes, translate=lambda s, word="": "譯文", update=lambda nid, cn: updates.append(nid), limiter=lim)
         assert done == 2
         assert remaining == 3
         assert lim.stopped_reason == "batch_limit"
@@ -239,7 +239,7 @@ class TestRunBatch:
     def test_stops_on_rate_limit(self):
         notes = [_cn_note(i, f"Sentence {i}.") for i in range(5)]
         calls = {"n": 0}
-        def translate(s):
+        def translate(s, word=""):
             calls["n"] += 1
             if calls["n"] == 2:
                 raise RateLimitReached()
@@ -252,7 +252,7 @@ class TestRunBatch:
 
     def test_propagates_retry_after(self):
         notes = [_cn_note(i, f"Sentence {i}.") for i in range(3)]
-        def translate(s):
+        def translate(s, word=""):
             raise RateLimitReached(retry_after=18)
         lim = BatchLimiter(batch_limit=99)
         bf_cn.run_batch(notes, translate=translate, update=lambda nid, cn: None, limiter=lim)
@@ -263,7 +263,7 @@ class TestRunBatch:
         updates = []
         lim = BatchLimiter(batch_limit=99)
         done, remaining = bf_cn.run_batch(
-            notes, translate=lambda s: "" if s == "A cat." else "一隻狗。",
+            notes, translate=lambda s, word="": "" if s == "A cat." else "一隻狗。",
             update=lambda nid, cn: updates.append(nid), limiter=lim)
         assert done == 1
         assert updates == [2]

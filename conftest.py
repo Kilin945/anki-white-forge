@@ -42,7 +42,7 @@ def install_fake_aqt():
     for name in ["QAction", "QDialog", "QVBoxLayout", "QHBoxLayout", "QFormLayout",
                  "QLabel", "QLineEdit", "QPushButton", "QProgressBar", "QScrollArea",
                  "QWidget", "QFrame", "QCheckBox", "QPixmap", "QIcon", "QSize",
-                 "QKeySequenceEdit", "QKeySequence", "QMessageBox", "QThread",
+                 "QKeySequenceEdit", "QKeySequence", "QMessageBox", "QThread", "QPlainTextEdit",
                  "pyqtSignal", "Qt"]:
         setattr(qt, name, _Any)
     aqt.qt = qt
@@ -66,3 +66,16 @@ def _isolate_llm_log():
     logger.handlers = [logging.NullHandler()]   # 測試期間:log 丟進黑洞
     yield
     logger.handlers = saved                     # 測完還原
+
+
+# ── translation_terms.json 隔離 ───────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _isolate_terms_file_global(tmp_path, monkeypatch):
+    """被驗證丟掉的翻譯會自動記進 translation_terms.json —— 任何測試跑到 llm_translate_sentence
+    都可能寫檔。統一導到 tmp，絕不碰 repo 根目錄那份真的。"""
+    import core.llm
+    import addon
+    p = str(tmp_path / "translation_terms.json")
+    monkeypatch.setattr(core.llm, "TERMS_PATH", p)
+    monkeypatch.setattr(addon, "TRANSLATION_TERMS_PATH", p)

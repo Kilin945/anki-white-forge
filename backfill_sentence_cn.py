@@ -25,7 +25,9 @@ def pending_notes(notes):
 
 
 def run_batch(notes, translate, update, limiter):
-    """Translate pending notes until limiter stops. Returns (done, remaining)."""
+    """Translate pending notes until limiter stops. Returns (done, remaining).
+
+    translate(sentence, word=單字):word 讓被驗證丟掉的翻譯能記到 ⌘D 待審。"""
     pend = pending_notes(notes)
     done = 0
     for n in pend:
@@ -33,7 +35,8 @@ def run_batch(notes, translate, update, limiter):
             break
         sentence = strip_html(n["fields"]["Sentence"]["value"]).strip()
         try:
-            cn = translate(sentence)
+            word = strip_html(n["fields"].get("Front", {}).get("value", "")).strip().lower()
+            cn = translate(sentence, word=word)
         except RateLimitReached as e:
             limiter.record_rate_limited(e.retry_after)
             break
@@ -75,7 +78,7 @@ def main():
         limiter = BatchLimiter(batch_limit=None)   # no batch cap: run until 429 or done
         done, remaining = run_batch(
             notes,
-            translate=lambda s: llm_translate_sentence(s, strict=True),
+            translate=lambda s, word="": llm_translate_sentence(s, strict=True, word=word),
             update=update,
             limiter=limiter,
         )

@@ -75,7 +75,7 @@ def _worker(image_html, sentence):
         return (sentence, "Groq") if sentence else ("", "failed")
     w._llm_sentence = fake_sentence
     w._groq_translate = lambda word, s: "梯子"
-    w._groq_translate_sentence = lambda s: "梯子靠在牆上。"
+    w._groq_translate_sentence = lambda s, word="": "梯子靠在牆上。"
     w._make_audio_batch = lambda items: None
     return w, seen
 
@@ -135,7 +135,7 @@ def _run_s(note, image_html, sentence):
     w._fetch_image = fetch
     w._llm_sentence = llm_sentence
     w._groq_translate = lambda word, s: "梯子"
-    w._groq_translate_sentence = lambda s, strict=False: "梯子靠在牆上。"
+    w._groq_translate_sentence = lambda s, strict=False, word="": "梯子靠在牆上。"
     w._make_audio_batch = lambda items: None
     bw._w = w
     sent = {}

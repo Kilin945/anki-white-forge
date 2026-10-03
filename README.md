@@ -163,7 +163,29 @@ uv sync   # 自動安裝所有依賴
 **Test Cards（測試卡）**
 開發、測試輔助。填 Count（預設 7）按 Add Test Cards，產生只有 Front + Association 的裸卡。這些卡會出現在 Complete Missing Cards，可以拿來測補卡流程。Clean Test Cards 一鍵刪光。它和 CLI 的 `make_test_cards.py`（`add [N]`、`clean`）用同一個 tag，兩邊建的可以互相清。
 
-> ⌘A、⌘S、⌘F 都可以在 **Tools → My Word Adder Settings…** 直接按組合鍵重新設定，即時生效，不用改 JSON；清除設定就等於關閉該快捷鍵。
+#### 翻譯術語：`⌘D` 或 Tools → Translation Terms…
+
+整句翻譯有時會保留英文術語，例如 `null pointer exception`。系統看到句子裡有一串英文，會當成翻壞了，把翻譯丟掉。
+
+為了不誤殺，系統有一份術語清單。清單裡的術語可以留英文。
+
+流程：
+
+1. 按 `⌘S`，有翻譯被丟掉，狀態列提示去 Translation Terms。
+2. 按 `⌘D` 開視窗，看 Pending 區。每筆列出被丟掉的英文片語、單字和原本的翻譯。
+3. 是真的術語就按 Approve，進清單。
+4. 不是術語（例如 `here is the translation` 這種前言）就按 Discard，直接丟掉。
+5. 再按一次 `⌘S`。
+
+Discard 之後再按 `⌘S`，會重新翻一次，但例句不變。想連例句一起換，用紅旗加 `⌘F` 清空，再 `⌘S`。
+
+Pending 每一列有 Approve 和 Discard。
+下面有一個 Add 欄位，可以自己輸入術語加進清單。
+`Approved terms: N` 旁邊的 `Manage…` 會展開完整清單，可以搜尋，每個術語有 Remove。
+每個動作都立刻存檔，沒有 Save 鈕。
+清單存在專案根目錄的 `translation_terms.json`（gitignored）。
+
+> ⌘A、⌘S、⌘F、⌘D 都可以在 **Tools → Shortcuts…** 直接按組合鍵重新設定，即時生效，不用改 JSON；清除設定就等於關閉該快捷鍵。
 >
 > 對話框的 UI 文字一律英文（統一語言）。
 
@@ -301,7 +323,7 @@ Anki/
 
 | 檔案 | 說明 |
 |------|------|
-| `addon/__init__.py` | Anki 插件主程式，symlink 到 `~/Library/.../addons21/my_word_adder/`。⌘A、⌘S、⌘F 三個功能的實作都在這裡，用法見上面「日常使用」。LLM 走 `addon/_llm_dispatch.py` 以 urllib 直呼（Groq + Gemini 分流鏡像），TTS 和圖片透過 subprocess，補卡 BackfillWorker 3 路並發。改完需重啟 Anki |
+| `addon/__init__.py` | Anki 插件主程式，symlink 到 `~/Library/.../addons21/my_word_adder/`。⌘A、⌘S、⌘F、⌘D 四個功能的實作都在這裡，用法見上面「日常使用」。LLM 走 `addon/_llm_dispatch.py` 以 urllib 直呼（Groq + Gemini 分流鏡像），TTS 和圖片透過 subprocess，補卡 BackfillWorker 3 路並發。改完需重啟 Anki |
 
 ### 設定與測試
 
@@ -311,6 +333,7 @@ Anki/
 | `.pexels_key` | Pexels API 金鑰（gitignored） |
 | `.pixabay_key` | Pixabay API 金鑰（gitignored） |
 | `image_rejects.json` | 退圖紀錄，記下被紅旗退掉的圖（gitignored） |
+| `translation_terms.json` | 翻譯術語清單和待審項目，`⌘D` 視窗維護（gitignored） |
 | `test_backfill.py` | 單元測試（57 tests） |
 | `test_integration.py` | 整合測試（新增 3 字驗證） |
 | `pyproject.toml` | Python 依賴定義 |

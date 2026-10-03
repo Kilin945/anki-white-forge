@@ -8,6 +8,7 @@ import re
 import json
 import html
 import time
+import shutil
 import threading
 import subprocess
 import urllib.request
@@ -19,7 +20,7 @@ from aqt.qt import (
     QAction, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QPushButton, QProgressBar, QScrollArea,
     QWidget, QFrame, QCheckBox, QPixmap, QIcon, QSize,
-    QKeySequenceEdit, QKeySequence,
+    QKeySequenceEdit, QKeySequence, QPlainTextEdit,
     QMessageBox,
     Qt, QThread, pyqtSignal,
 )
@@ -78,8 +79,10 @@ ENGLISH_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\- ]*")
 # 整句翻譯裡「保留英文」是對的多字術語。驗證時先把它們拿掉再數英文字，
 # 否則「我現在正處理 null pointer exception。」會被當成 3 個英文字的廢話砍掉
 # （事故：dealing with 的 Sentence_CN 連按三次 ⌘S 都空的，2026-10-02）。
-# KEEP-IN-SYNC: core/llm.py::TRANSLATION_TERM_WHITELIST
-TRANSLATION_TERM_WHITELIST = [
+# 清單存在 repo 根目錄 translation_terms.json（gitignored，⌘D 視窗維護）；
+# 檔案不存在就用下面的預設，第一次寫入才建檔。
+# KEEP-IN-SYNC: core/llm.py::DEFAULT_TRANSLATION_TERMS
+DEFAULT_TRANSLATION_TERMS = [
     "null pointer exception",
     "race condition",
     "pull request",
@@ -99,18 +102,118 @@ TRANSLATION_TERM_WHITELIST = [
     "command line",
     "open source",
 ]
-_TERM_RE = re.compile("|".join(re.escape(t) for t in TRANSLATION_TERM_WHITELIST), re.IGNORECASE)
+TRANSLATION_TERMS_PATH = os.path.join(_REPO, "translation_terms.json")   # KEEP-IN-SYNC: core/llm.py::TERMS_PATH
+_PHRASE_RE = re.compile(r"[A-Za-z][A-Za-z'\-]*(?: [A-Za-z][A-Za-z'\-]*)+")
 
 
-def _looks_like_chinese_translation(text):
+def _clean_terms(terms):
+    """小寫、去頭尾空白、去空字串、去重（保序）。"""
+    out, seen = [], set()
+    for t in terms:
+        t = t.strip().lower()
+        if t and t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
+# ⌘S 的 ThreadPoolExecutor 會並行記錄 → 整段讀改寫要鎖;寫檔另走 tmp + os.replace(原子)
+_TERMS_LOCK = threading.RLock()
+
+
+def _backup_bad_terms_file(target):
+    """壞檔複製到 .bak(盡力而為,失敗忽略)。"""
+    try:
+        shutil.copyfile(target, target + ".bak")
+    except OSError:
+        pass
+
+
+def load_translation_terms(path=None):
+    """讀 translation_terms.json → {"terms": [...], "pending": [...]}。
+    缺檔／壞 JSON／欄位型別錯一律退回預設清單，不崩潰。
+    KEEP-IN-SYNC: core/llm.py::load_translation_terms。"""
+    default = {"terms": list(DEFAULT_TRANSLATION_TERMS), "pending": []}
+    target = path or TRANSLATION_TERMS_PATH
+    try:
+        with open(target, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return default
+    except (OSError, ValueError):
+        _backup_bad_terms_file(target)
+        return default
+    terms, pending = (data.get("terms"), data.get("pending", [])) if isinstance(data, dict) else (None, None)
+    if (not isinstance(terms, list) or not all(isinstance(t, str) for t in terms)
+            or not isinstance(pending, list)
+            or not all(isinstance(p, dict) and isinstance(p.get("term"), str) for p in pending)):
+        _backup_bad_terms_file(target)             # 手改壞了:留一份 .bak,免得下次存檔直接蓋掉
+        return default
+    return {"terms": terms, "pending": pending}
+
+
+def save_translation_terms(data, path=None):
+    """寫檔（terms 去重小寫去空白；pending 以 term 去重）。失敗回 False。
+    KEEP-IN-SYNC: core/llm.py::save_translation_terms。"""
+    pending, seen = [], set()
+    for p in data.get("pending", []):
+        key = p["term"].strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            pending.append({**p, "term": key})
+    out = {"terms": _clean_terms(data.get("terms", [])), "pending": pending}
+    target = path or TRANSLATION_TERMS_PATH
+    with _TERMS_LOCK:
+        tmp = target + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(out, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, target)                 # 原子取代:並行的 load 不會讀到半截檔
+            return True
+        except OSError as e:
+            _log.warning("translation_terms.json 寫入失敗: %s", e)
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return False
+
+
+def record_rejected_translation(word, translation, path=None):
+    """被驗證丟掉的翻譯 → 把裡面連續 ≥2 個英文字的片語記成待審（pending）。
+    回傳新加的 term 列表；沒有新片語就不寫檔。
+    KEEP-IN-SYNC: core/llm.py::record_rejected_translation。"""
+    with _TERMS_LOCK:                                   # 讀-改-寫整段互斥
+        data = load_translation_terms(path)
+        known = {t.strip().lower() for t in data["terms"]} | {p["term"] for p in data["pending"]}
+        added = []
+        for m in _PHRASE_RE.findall(translation or ""):
+            term = m.strip("'-").lower()
+            if term and " " in term and term not in known:
+                known.add(term)
+                added.append(term)
+                data["pending"].append({"term": term, "word": word, "translation": translation})
+        if added:
+            save_translation_terms(data, path)
+        return added
+
+
+def _looks_like_chinese_translation(text, terms=None):
     """整句翻譯驗證：要有中文，且扣掉白名單術語後英文字 < 3（3+ 視為前言／英文散文）。
+    terms 省略 → 每次重讀 translation_terms.json（不快取，⌘D 改完立即生效）。
     KEEP-IN-SYNC: core/llm.py::_looks_like_chinese_translation。"""
     if not text:
         return False
-    if not re.search(r"[一-鿿]", text):
+    if not re.search(r"[一-鿿]", text):                 # must contain Chinese
         return False
-    rest = _TERM_RE.sub(" ", text)
-    return len(re.findall(r"[A-Za-z]{2,}", rest)) < 3
+    if terms is None:
+        terms = load_translation_terms()["terms"]
+    terms = sorted((t for t in terms if t.strip()), key=len, reverse=True)   # 長的優先:unit test coverage 先於 unit test
+    rest = text
+    if terms:
+        rest = re.sub("|".join(re.escape(t) for t in terms), " ", text, flags=re.IGNORECASE)
+    return len(re.findall(r"[A-Za-z]{2,}", rest)) < 3  # 3+ English words = preamble/English prose;
+                                                       # a single embedded term (concurrency, Microsoft…) is kept
 
 
 def _looks_english(word):
@@ -401,7 +504,7 @@ class Worker(QThread):
 
             def do_translate():
                 translation_result[0] = self._groq_translate(word, sentence)
-                sentence_cn_result[0] = self._groq_translate_sentence(sentence)
+                sentence_cn_result[0] = self._groq_translate_sentence(sentence, word=word)
 
             trans_thread = None
             if sentence_ok:
@@ -463,7 +566,7 @@ class Worker(QThread):
         reply = _groq_chat(prompt, temperature=0.3, max_tokens=32, timeout=10)
         return _accept_word_translation(word, reply)
 
-    def _groq_translate_sentence(self, sentence, *, strict=False):
+    def _groq_translate_sentence(self, sentence, *, strict=False, word=""):
         """Traditional Chinese translation of a full sentence. '' on failure.
         strict=True raises _AddonRateLimited on 429 (for the 批次回填 burst engine)."""
         if not sentence:
@@ -475,7 +578,19 @@ class Worker(QThread):
                   f'no quotes.\n\nSentence: "{sentence}"')
         reply = _groq_chat(prompt, temperature=0.3, max_tokens=200, timeout=15,
                            strict=strict).strip().strip('"').strip()
-        return reply if _looks_like_chinese_translation(reply) else ""
+        if _looks_like_chinese_translation(reply):
+            return reply
+        if reply and re.search(r"[一-鿿]", reply):        # 只記「英文字太多」造成的誤殺;沒中文＝沒翻／洩漏,不記
+            return self._rejected_translation(word, reply)
+        return ""
+
+    def _rejected_translation(self, word, reply):
+        """記錄被丟掉的翻譯；新待審 term 累積到 self.new_pending_terms（⌘S 收尾提示用）。"""
+        added = record_rejected_translation(word, reply)
+        sink = getattr(self, "new_pending_terms", None)
+        if sink is not None:
+            sink.extend(added)
+        return ""
 
     def _fetch_image(self, word, definition=""):
         filename = f"{word}_img_{int(__import__('time').time())}.jpg"
@@ -976,6 +1091,8 @@ class BackfillWorker(QThread):
         self._stopped = False          # 使用者關窗/Anki 退出 → 做完手上這張就收工
         self.retry_after = 0
         self.limit_resets = {}         # 撞牆當下兩家的恢復秒數(對話框訊息用)
+        self.new_pending_terms = []    # 本輪翻譯被丟掉、新記進待審的術語(收尾提示用);
+        self._w.new_pending_terms = self.new_pending_terms   # 同一個 list,_w 在 worker 執行緒裡 extend
 
     def stop(self):
         """請 worker 收工：剩下的卡直接跳過（同 _hit_limit 的既有跳過機制）。"""
@@ -1053,7 +1170,7 @@ class BackfillWorker(QThread):
                 if need_translation:
                     translation_result[0] = self._w._groq_translate(w, s)
                 if need_sentence_cn:
-                    sentence_cn_result[0] = self._w._groq_translate_sentence(s)
+                    sentence_cn_result[0] = self._w._groq_translate_sentence(s, word=w)
             trans_thread = threading.Thread(target=do_translate)
             trans_thread.start()
 
@@ -1431,6 +1548,13 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
         # 重讀每一列的欄位算出誰補齊了 —— Remove Finished 只拿掉這些,沒補完的留在
         # 清單上而且勾還在,額度回來直接再按 Complete Selected 續跑。
         self._finished = _finished_ids(list(self._rows), _live_note)
+        new_terms = set(getattr(self._worker, "new_pending_terms", []))
+        if new_terms:                  # 翻譯被驗證丟掉的英文片語已記成待審 → 提示去審
+            sc = _shortcut("terms")
+            native = QKeySequence(sc).toString(QKeySequence.SequenceFormat.NativeText) if sc else ""
+            where = f" ({native})" if native else ""      # macOS 上顯示 ⌘D 而不是 Ctrl+D
+            self.status.setText(self.status.text() +
+                                f" {len(new_terms)} new term(s) to review in Translation Terms{where}.")
         self.select_all.setEnabled(True)
         self.remove_btn.setVisible(True)
         self._update_selection()
@@ -1506,7 +1630,8 @@ class SentenceCNWorker(QThread):
                     break
                 note = self.notes[i]
                 try:
-                    cn = self._w._groq_translate_sentence(note["sentence"], strict=True)
+                    cn = self._w._groq_translate_sentence(note["sentence"], strict=True,
+                                                          word=note.get("word", ""))
                 except _AddonRateLimited as e:
                     wait = e.retry_after
                     elapsed = time.monotonic() - start
@@ -1628,7 +1753,8 @@ class TranslateSection(QWidget):
                 continue                      # no real sentence to translate yet
             if n["Sentence_CN"].strip():
                 continue                      # already has a translation
-            notes.append({"noteId": nid, "sentence": sentence})
+            notes.append({"noteId": nid, "sentence": sentence,
+                          "word": _clean_text(n["Front"], lower=True)})
         self._notes = notes
         n = len(notes)
         if n == 0:
@@ -2504,7 +2630,8 @@ def open_backfill_dialog():
 def open_batch_operations_dialog():
     _show_nonmodal(BatchOperationsDialog)
 
-DEFAULT_SHORTCUTS = {"add": "Ctrl+A", "complete": "Ctrl+S", "backfill_cn": "Ctrl+F"}
+DEFAULT_SHORTCUTS = {"add": "Ctrl+A", "complete": "Ctrl+S", "backfill_cn": "Ctrl+F",
+                     "terms": "Ctrl+D"}
 ACTIONS = {}  # key -> QAction, so the settings dialog can re-bind shortcuts live
 
 
@@ -2524,6 +2651,206 @@ def _add_menu_action(title, key, handler):
     ACTIONS[key] = act
 
 
+class TranslationTermsDialog(QDialog):
+    """⌘D：維護整句翻譯的術語白名單。Pending = 被驗證丟掉的英文片語，Approve 進白名單、
+    Discard 丟掉；也能手動 Add、在 Manage 面板 Remove。所有動作立刻存檔，沒有草稿狀態。
+    是設定視窗不是批次視窗 → modal exec()，不走 _show_nonmodal。不 setStyleSheet（CLAUDE.md 的坑）。"""
+
+    LIST_MIN_HEIGHT = 260
+    LIST_MAX_HEIGHT = 360
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Translation Terms")
+        self.setMinimumWidth(640)
+        self.resize(700, 480)
+        self._data = load_translation_terms(TRANSLATION_TERMS_PATH)
+        self._setup_ui()
+        self._render_pending()
+        self._refresh_terms()
+
+    def _setup_ui(self):
+        root = QVBoxLayout(self)
+        root.addWidget(QLabel("Terms dropped by the translation check. Approve the real ones."))
+
+        self._pending_box = QVBoxLayout()
+        pending_wrap = QWidget()
+        pending_wrap.setLayout(self._pending_box)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(pending_wrap)
+        scroll.setMinimumHeight(200)
+        root.addWidget(scroll, 1)
+
+        root.addWidget(QLabel("Add a term:"))
+        add_row = QHBoxLayout()
+        self.add_edit = QLineEdit()
+        self.add_edit.setPlaceholderText("e.g. race condition")
+        self.add_edit.returnPressed.connect(self._on_add)
+        self.add_btn = QPushButton("Add")
+        self.add_btn.clicked.connect(self._on_add)
+        add_row.addWidget(self.add_edit, 1)
+        add_row.addWidget(self.add_btn)
+        root.addLayout(add_row)
+
+        count_row = QHBoxLayout()
+        self.count_label = QLabel("")
+        self.manage_btn = QPushButton("Manage…")
+        self.manage_btn.clicked.connect(self._toggle_manage)
+        count_row.addWidget(self.count_label)
+        count_row.addStretch()
+        count_row.addWidget(self.manage_btn)
+        root.addLayout(count_row)
+
+        # 展開面板:預設收起
+        self.panel = QWidget()
+        panel_box = QVBoxLayout(self.panel)
+        panel_box.setContentsMargins(0, 0, 0, 0)
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Search")
+        self.search_edit.textChanged.connect(lambda _=None: self._render_terms())
+        panel_box.addWidget(self.search_edit)
+        self._terms_box = QVBoxLayout()
+        terms_wrap = QWidget()
+        terms_wrap.setLayout(self._terms_box)
+        self._terms_scroll = QScrollArea()
+        self._terms_scroll.setWidgetResizable(True)
+        self._terms_scroll.setWidget(terms_wrap)
+        # 清單要有最小高度,否則展開時視窗不長高、清單被壓到只剩一列(2026-10-03 實測)
+        self._terms_scroll.setMinimumHeight(self.LIST_MIN_HEIGHT)
+        self._terms_scroll.setMaximumHeight(self.LIST_MAX_HEIGHT)
+        panel_box.addWidget(self._terms_scroll)
+        self.panel.setVisible(False)
+        root.addWidget(self.panel)
+
+        btns = QHBoxLayout()
+        btns.addStretch()
+        self.close_btn = QPushButton("Close")
+        self.close_btn.clicked.connect(self.reject)
+        btns.addWidget(self.close_btn)
+        root.addLayout(btns)
+
+    @staticmethod
+    def _clear_layout(box):
+        while box.count():
+            item = box.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.hide()                       # 不 setParent(None):按下的按鈕就在這列裡
+                w.deleteLater()
+
+    def _render_pending(self):
+        """依 self._data["pending"] 重畫 Pending 區。"""
+        self._clear_layout(self._pending_box)
+        self.approve_buttons, self.discard_buttons = {}, {}
+        if not self._data["pending"]:
+            self._pending_box.addWidget(QLabel("No pending terms."))
+            return
+        for p in self._data["pending"]:
+            term = p["term"]
+            col = QVBoxLayout()
+            col.setContentsMargins(6, 4, 6, 4)
+            col.setSpacing(2)
+            col.addWidget(QLabel(f"<b>{html.escape(term)}</b>"))
+            col.addWidget(QLabel(f"from: {html.escape(p.get('word', ''))}"))
+            tr = QLabel(f"「{html.escape(p.get('translation', ''))}」")
+            tr.setWordWrap(True)
+            col.addWidget(tr)
+            approve = QPushButton("Approve")
+            approve.clicked.connect(lambda _=False, t=term: self._on_approve(t))
+            discard = QPushButton("Discard")
+            discard.clicked.connect(lambda _=False, t=term: self._on_discard(t))
+            btn_row = QHBoxLayout()
+            btn_row.addStretch()
+            btn_row.addWidget(approve)
+            btn_row.addWidget(discard)
+            col.addLayout(btn_row)
+            wrap = QWidget()
+            wrap.setLayout(col)
+            self._pending_box.addWidget(_hline())
+            self._pending_box.addWidget(wrap)
+            self.approve_buttons[term] = approve
+            self.discard_buttons[term] = discard
+
+    def _refresh_terms(self):
+        self.count_label.setText(f"Approved terms: {len(self._data['terms'])}")
+        if self.panel.isVisible():
+            self._render_terms()
+
+    def _render_terms(self):
+        """依搜尋框過濾（不分大小寫子字串）、按字母排序重畫清單。"""
+        self._clear_layout(self._terms_box)
+        self.remove_buttons = {}
+        q = self.search_edit.text().strip().lower()
+        for term in sorted(t for t in self._data["terms"] if q in t.lower()):
+            row = QHBoxLayout()
+            row.setContentsMargins(6, 2, 6, 2)
+            row.addWidget(QLabel(html.escape(term)), 1)
+            rm = QPushButton("Remove")
+            rm.clicked.connect(lambda _=False, t=term: self._on_remove(t))
+            row.addWidget(rm)
+            wrap = QWidget()
+            wrap.setLayout(row)
+            self._terms_box.addWidget(wrap)
+            self._terms_box.addWidget(_hline())
+            self.remove_buttons[term] = rm
+        self._terms_box.addStretch()
+
+    def _toggle_manage(self):
+        show = not self.panel.isVisible()
+        self.panel.setVisible(show)
+        self.manage_btn.setText("Hide" if show else "Manage…")
+        if show:
+            self._render_terms()
+        # 展開要長高、收起要縮回:QDialog 不會自己跟著 layout 變
+        self.layout().activate()
+        self.resize(self.width(), self.sizeHint().height())
+
+    def _mutate(self, change):
+        """重讀檔案 → 套用 change(data) → 存檔，整段在鎖內（⌘S worker 可能同時在記新的待審）。
+        存檔失敗跳警告、不動畫面並回 False。"""
+        with _TERMS_LOCK:
+            data = load_translation_terms(TRANSLATION_TERMS_PATH)
+            change(data)
+            if not save_translation_terms(data, TRANSLATION_TERMS_PATH):
+                showWarning("Could not write translation_terms.json.")
+                return False
+            self._data = load_translation_terms(TRANSLATION_TERMS_PATH)
+        return True
+
+    def _on_approve(self, term):
+        def change(d):
+            d["pending"] = [p for p in d["pending"] if p["term"] != term]
+            if term not in d["terms"]:
+                d["terms"].append(term)
+        if self._mutate(change):
+            self._render_pending()
+            self._refresh_terms()
+
+    def _on_discard(self, term):
+        def change(d):
+            d["pending"] = [p for p in d["pending"] if p["term"] != term]
+        if self._mutate(change):
+            self._render_pending()
+
+    def _on_add(self):
+        term = " ".join(self.add_edit.text().lower().split())
+        if not term:
+            return
+        def change(d):
+            if term not in d["terms"]:
+                d["terms"].append(term)
+        if self._mutate(change):
+            self.add_edit.clear()
+            self._refresh_terms()
+
+    def _on_remove(self, term):
+        def change(d):
+            d["terms"] = [t for t in d["terms"] if t != term]
+        if self._mutate(change):
+            self._refresh_terms()
+
+
 class SettingsDialog(QDialog):
     """Friendly shortcut editor — press a key combo per action, no JSON, applies live."""
 
@@ -2531,11 +2858,12 @@ class SettingsDialog(QDialog):
         ("add", "Add English Word"),
         ("complete", "Complete Missing Cards"),
         ("backfill_cn", "Batch Operations"),
+        ("terms", "Translation Terms"),
     ]
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("My Word Adder — Shortcuts")
+        self.setWindowTitle("Shortcuts")
         self.setMinimumWidth(440)
         self._edits = {}
         self._setup_ui()
@@ -2589,6 +2917,10 @@ class SettingsDialog(QDialog):
         self.accept()
 
 
+def open_translation_terms_dialog():
+    TranslationTermsDialog(mw).exec()
+
+
 def open_settings_dialog():
     SettingsDialog(mw).exec()
 
@@ -2597,6 +2929,8 @@ _add_menu_action("Add English Word…", "add", open_dialog)
 _add_menu_action("Complete Missing Cards…", "complete", open_backfill_dialog)
 _add_menu_action("Batch Operations…", "backfill_cn", open_batch_operations_dialog)
 
-_settings_action = QAction("My Word Adder Settings…", mw)
+_add_menu_action("Translation Terms…", "terms", open_translation_terms_dialog)
+
+_settings_action = QAction("Shortcuts…", mw)
 _settings_action.triggered.connect(open_settings_dialog)
 mw.form.menuTools.addAction(_settings_action)

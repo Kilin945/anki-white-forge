@@ -1,10 +1,16 @@
+import json
+import os
 import re
+import shutil
+import threading
 
 from core.dispatcher import AllProvidersLimited, Dispatcher
 from core.providers import (GROQ_KEY_PATH, GROQ_MODEL, GeminiProvider,
                             GroqProvider, _load_groq_client)  # GROQ_MODEL/GROQ_KEY_PATH/_load_groq_client 純 re-export — test_backfill.py 依賴,勿刪
 from core.rate_limiter import RateLimitReached
 from core.text import sentence_acceptable
+
+_REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
 _dispatcher = Dispatcher(
     [p for p in (GroqProvider.load(), GeminiProvider.load()) if p])
@@ -141,8 +147,10 @@ def _accept_word_translation(word, reply):
 # 整句翻譯裡「保留英文」是對的多字術語。驗證時先把它們拿掉再數英文字，
 # 否則「我現在正處理 null pointer exception。」會被當成 3 個英文字的廢話砍掉
 # （事故：dealing with 的 Sentence_CN 連按三次 ⌘S 都空的，2026-10-02）。
-# KEEP-IN-SYNC: addon/__init__.py::TRANSLATION_TERM_WHITELIST
-TRANSLATION_TERM_WHITELIST = [
+# 清單存在 repo 根目錄 translation_terms.json（gitignored，⌘D 視窗維護）；
+# 檔案不存在就用下面的預設，第一次寫入才建檔。
+# KEEP-IN-SYNC: addon/__init__.py::DEFAULT_TRANSLATION_TERMS
+DEFAULT_TRANSLATION_TERMS = [
     "null pointer exception",
     "race condition",
     "pull request",
@@ -162,33 +170,137 @@ TRANSLATION_TERM_WHITELIST = [
     "command line",
     "open source",
 ]
-_TERM_RE = re.compile("|".join(re.escape(t) for t in TRANSLATION_TERM_WHITELIST), re.IGNORECASE)
+TERMS_PATH = os.path.join(_REPO, "translation_terms.json")   # KEEP-IN-SYNC: addon/__init__.py::TRANSLATION_TERMS_PATH
+_PHRASE_RE = re.compile(r"[A-Za-z][A-Za-z'\-]*(?: [A-Za-z][A-Za-z'\-]*)+")
 
 
-def _looks_like_chinese_translation(text):
-    """KEEP-IN-SYNC: addon/__init__.py::_looks_like_chinese_translation。"""
+def _clean_terms(terms):
+    """小寫、去頭尾空白、去空字串、去重（保序）。"""
+    out, seen = [], set()
+    for t in terms:
+        t = t.strip().lower()
+        if t and t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
+# ⌘S 的 ThreadPoolExecutor 會並行記錄 → 整段讀改寫要鎖;寫檔另走 tmp + os.replace(原子)
+_TERMS_LOCK = threading.RLock()
+
+
+def _backup_bad_terms_file(target):
+    """壞檔複製到 .bak(盡力而為,失敗忽略)。"""
+    try:
+        shutil.copyfile(target, target + ".bak")
+    except OSError:
+        pass
+
+
+def load_translation_terms(path=None):
+    """讀 translation_terms.json → {"terms": [...], "pending": [...]}。
+    缺檔／壞 JSON／欄位型別錯一律退回預設清單，不崩潰。
+    KEEP-IN-SYNC: addon/__init__.py::load_translation_terms。"""
+    default = {"terms": list(DEFAULT_TRANSLATION_TERMS), "pending": []}
+    target = path or TERMS_PATH
+    try:
+        with open(target, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return default
+    except (OSError, ValueError):
+        _backup_bad_terms_file(target)
+        return default
+    terms, pending = (data.get("terms"), data.get("pending", [])) if isinstance(data, dict) else (None, None)
+    if (not isinstance(terms, list) or not all(isinstance(t, str) for t in terms)
+            or not isinstance(pending, list)
+            or not all(isinstance(p, dict) and isinstance(p.get("term"), str) for p in pending)):
+        _backup_bad_terms_file(target)             # 手改壞了:留一份 .bak,免得下次存檔直接蓋掉
+        return default
+    return {"terms": terms, "pending": pending}
+
+
+def save_translation_terms(data, path=None):
+    """寫檔（terms 去重小寫去空白；pending 以 term 去重）。失敗回 False。
+    KEEP-IN-SYNC: addon/__init__.py::save_translation_terms。"""
+    pending, seen = [], set()
+    for p in data.get("pending", []):
+        key = p["term"].strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            pending.append({**p, "term": key})
+    out = {"terms": _clean_terms(data.get("terms", [])), "pending": pending}
+    target = path or TERMS_PATH
+    with _TERMS_LOCK:
+        tmp = target + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(out, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, target)                 # 原子取代:並行的 load 不會讀到半截檔
+            return True
+        except OSError:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return False
+
+
+def record_rejected_translation(word, translation, path=None):
+    """被驗證丟掉的翻譯 → 把裡面連續 ≥2 個英文字的片語記成待審（pending）。
+    回傳新加的 term 列表；沒有新片語就不寫檔。
+    KEEP-IN-SYNC: addon/__init__.py::record_rejected_translation。"""
+    with _TERMS_LOCK:                                   # 讀-改-寫整段互斥
+        data = load_translation_terms(path)
+        known = {t.strip().lower() for t in data["terms"]} | {p["term"] for p in data["pending"]}
+        added = []
+        for m in _PHRASE_RE.findall(translation or ""):
+            term = m.strip("'-").lower()
+            if term and " " in term and term not in known:
+                known.add(term)
+                added.append(term)
+                data["pending"].append({"term": term, "word": word, "translation": translation})
+        if added:
+            save_translation_terms(data, path)
+        return added
+
+
+def _looks_like_chinese_translation(text, terms=None):
+    """整句翻譯驗證：要有中文，且扣掉白名單術語後英文字 < 3（3+ 視為前言／英文散文）。
+    terms 省略 → 每次重讀 translation_terms.json（不快取，⌘D 改完立即生效）。
+    KEEP-IN-SYNC: addon/__init__.py::_looks_like_chinese_translation。"""
     if not text:
         return False
     if not re.search(r"[一-鿿]", text):                 # must contain Chinese
         return False
-    rest = _TERM_RE.sub(" ", text)                      # whitelisted multi-word terms don't count
-    if len(re.findall(r"[A-Za-z]{2,}", rest)) >= 3:     # 3+ English words = preamble/English prose;
-        return False                                    # a single embedded term (concurrency, Microsoft…) is kept
-    return True
+    if terms is None:
+        terms = load_translation_terms()["terms"]
+    terms = sorted((t for t in terms if t.strip()), key=len, reverse=True)   # 長的優先:unit test coverage 先於 unit test
+    rest = text
+    if terms:
+        rest = re.sub("|".join(re.escape(t) for t in terms), " ", text, flags=re.IGNORECASE)
+    return len(re.findall(r"[A-Za-z]{2,}", rest)) < 3  # 3+ English words = preamble/English prose;
+                                                       # a single embedded term (concurrency, Microsoft…) is kept
 
 
-def llm_translate_sentence(sentence, *, strict=False):
+def llm_translate_sentence(sentence, *, strict=False, word=""):
     """Traditional-Chinese translation of a full English sentence. '' on failure.
 
     strict=True surfaces Groq 429 as RateLimitReached (for batch jobs);
     otherwise uses the normal swallowing llm() path (single-add / per-card).
+    word labels the pending term recorded when the reply fails validation.
     """
     if not sentence:
         return ""
     prompt = SENTENCE_CN_PROMPT.format(sentence=sentence)
     result = groq_generate_strict(prompt) if strict else llm(prompt)
     result = result.strip().strip('"').strip()
-    return result if _looks_like_chinese_translation(result) else ""
+    if _looks_like_chinese_translation(result):
+        return result
+    if result and re.search(r"[一-鿿]", result):         # 只記「英文字太多」造成的誤殺;沒中文＝沒翻／洩漏,不記
+        # 被驗證丟掉 → 把英文片語記成待審術語
+        record_rejected_translation(word, result)
+    return ""
 
 
 def llm_image_query(word, definition=""):

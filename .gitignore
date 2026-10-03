@@ -16,3 +16,4 @@ logs/
 
 # session recap 不進版控（見個人 DOCS-INDEX.md 的索引行才是單一入口）
 docs/recap/
+translation_terms.json

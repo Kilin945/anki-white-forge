@@ -133,7 +133,7 @@ def main():
 
     # only translate / write Sentence_CN if the note type actually has the field
     has_cn = "Sentence_CN" in anki("modelFieldNames", modelName=MODEL_NAME)
-    sentence_cn = llm_translate_sentence(sentence) if has_cn else ""
+    sentence_cn = llm_translate_sentence(sentence, word=word) if has_cn else ""
     if has_cn:
         print(f"  整句譯: {sentence_cn or '⚠️'}")
 
