@@ -27,6 +27,7 @@ from aqt.qt import (
 from aqt.utils import showWarning, tooltip
 
 from . import _llm_dispatch as _lld
+from ._zh_chars import has_simplified, simplified_chars, to_traditional   # KEEP-IN-SYNC: core/zh_chars.py
 
 # 雙 provider 分流(KEEP-IN-SYNC 鏡像;無 .gemini_key 自動退化為單 Groq)
 _dispatcher = _lld.Dispatcher(
@@ -465,6 +466,15 @@ def _groq_spellcheck(word):
 
 # ── background worker ────────────────────────────────────────────────────────
 
+def _to_traditional_logged(word, reply):
+    """LLM 回簡體就先轉台灣繁體（再進驗證）並記一行 log。"""
+    reply = (reply or "").strip()
+    if has_simplified(reply):
+        _log.info("simplified → traditional for %s: %s", word, "".join(simplified_chars(reply)))
+        reply = to_traditional(reply)
+    return reply
+
+
 class Worker(QThread):
     step     = pyqtSignal(str, str)   # (field key, state: "ok" / "warn")
     finished = pyqtSignal(dict)
@@ -562,8 +572,11 @@ class Worker(QThread):
                   f'product / framework / library / tool proper noun (e.g. Spring, React, Docker, '
                   f'Hazelcast), do NOT translate it — output the English name as-is. Keep it short '
                   f'(usually 1-4 characters; a little longer only if a single term genuinely needs '
-                  f'it). Output only the Chinese, or for a proper noun the English name, no explanation.')
+                  f'it). Write Traditional Chinese as used in Taiwan; never use Simplified Chinese '
+                  f'characters. Output only the Chinese, or for a proper noun the English name, '
+                  f'no explanation.')
         reply = _groq_chat(prompt, temperature=0.3, max_tokens=32, timeout=10)
+        reply = _to_traditional_logged(word, reply)
         return _accept_word_translation(word, reply)
 
     def _groq_translate_sentence(self, sentence, *, strict=False, word=""):
@@ -574,10 +587,13 @@ class Worker(QThread):
         prompt = ('Translate this English sentence into natural, complete Traditional '
                   'Chinese. Keep product / framework / library / tool proper nouns (e.g. '
                   'Spring, React, Hazelcast) in English inside the translation; do not '
-                  'translate such names literally. Output only the translation. No explanation, '
+                  'translate such names literally. Write Traditional Chinese as used in Taiwan; '
+                  'never use Simplified Chinese characters. '
+                  'Output only the translation. No explanation, '
                   f'no quotes.\n\nSentence: "{sentence}"')
         reply = _groq_chat(prompt, temperature=0.3, max_tokens=200, timeout=15,
                            strict=strict).strip().strip('"').strip()
+        reply = _to_traditional_logged(word, reply)
         if _looks_like_chinese_translation(reply):
             return reply
         if reply and re.search(r"[一-鿿]", reply):        # 只記「英文字太多」造成的誤殺;沒中文＝沒翻／洩漏,不記

@@ -9,6 +9,7 @@ from core.providers import (GROQ_KEY_PATH, GROQ_MODEL, GeminiProvider,
                             GroqProvider, _load_groq_client)  # GROQ_MODEL/GROQ_KEY_PATH/_load_groq_client 純 re-export — test_backfill.py 依賴,勿刪
 from core.rate_limiter import RateLimitReached
 from core.text import sentence_acceptable
+from core.zh_chars import has_simplified, to_traditional
 
 _REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
@@ -99,6 +100,10 @@ def llm_sentence(word, association="", photo=""):
     return result if sentence_acceptable(result) else ""
 
 
+# KEEP-IN-SYNC: addon/__init__.py（_groq_translate 與 _groq_translate_sentence 的 prompt）
+_TW_RULE = "Write Traditional Chinese as used in Taiwan; never use Simplified Chinese characters. "
+
+
 def llm_translate(word, sentence=""):
     ctx = f' as it is used in this sentence: "{sentence}"' if sentence else ""
     result = llm(
@@ -107,9 +112,12 @@ def llm_translate(word, sentence=""):
         f'(e.g. never "水杯、茶杯"). If "{word}" is a product / framework / library / tool proper '
         f'noun (e.g. Spring, React, Docker, Hazelcast), do NOT translate it — output the English '
         f'name as-is. Keep it short (usually 1-4 characters; a little longer only if a single '
-        f'term genuinely needs it). Output only the Chinese, or for a proper noun the English name, '
+        f'term genuinely needs it). {_TW_RULE}Output only the Chinese, or for a proper noun the English name, '
         f'no explanation.'
     )
+    result = (result or "").strip()
+    if has_simplified(result):          # LLM 偶爾回簡體 → 先轉台灣繁體再驗證
+        result = to_traditional(result)
     return _accept_word_translation(word, result)
 
 
@@ -117,6 +125,7 @@ SENTENCE_CN_PROMPT = (
     "Translate this English sentence into natural, complete Traditional Chinese. "
     "Keep product / framework / library / tool proper nouns (e.g. Spring, React, Hazelcast) "
     "in English inside the translation; do not translate such names literally. "
+    "Write Traditional Chinese as used in Taiwan; never use Simplified Chinese characters. "
     "Output only the translation. No explanation, no quotes.\n\n"
     'Sentence: "{sentence}"'
 )
@@ -295,6 +304,8 @@ def llm_translate_sentence(sentence, *, strict=False, word=""):
     prompt = SENTENCE_CN_PROMPT.format(sentence=sentence)
     result = groq_generate_strict(prompt) if strict else llm(prompt)
     result = result.strip().strip('"').strip()
+    if has_simplified(result):          # 簡體先轉繁體，再進驗證
+        result = to_traditional(result)
     if _looks_like_chinese_translation(result):
         return result
     if result and re.search(r"[一-鿿]", result):         # 只記「英文字太多」造成的誤殺;沒中文＝沒翻／洩漏,不記

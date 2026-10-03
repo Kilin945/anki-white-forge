@@ -34,6 +34,10 @@
 | `Sentence_CN` | 整句中文翻譯（背面點擊顯示） | ⌘A 即時、⌘S 補齊、或 Batch Operations 面板批次（Groq LLM） |
 
 > 背面的 `Translation`（單字）與 `Sentence_CN`（整句）都是點一下才顯示的填空框。
+>
+> 兩個翻譯欄位一律是台灣繁體。LLM 偶爾回簡體，系統會自動轉成繁體。
+> 想查舊卡有沒有簡體，跑 `uv run python check_simplified.py`（只列出，不改）。
+> 加 `--fix` 才會寫回。
 
 ---
 
@@ -306,6 +310,7 @@ Anki/
 | `add_word.py` | CLI 新增單字。用法：`uv run python add_word.py <word> [association]` |
 | `backfill_words.py` | 批次補齊缺少欄位（例句、圖、音、單字翻譯，不含整句翻譯）。4 路並發。用法：`uv run python backfill_words.py` |
 | `backfill_sentence_cn.py` | 批次回填整句翻譯 `Sentence_CN`。撞速率上限自動等待續跑，可 Ctrl-C 結束，下次續跑。用法：`uv run python backfill_sentence_cn.py` |
+| `check_simplified.py` | 掃描 `Translation`／`Sentence_CN` 有沒有簡體字。預設只列出，加 `--fix` 才寫回。用法：`uv run python check_simplified.py` |
 | `regen_audio.py` | 重新生成所有音檔。用法：`uv run python regen_audio.py` |
 | `update_template.py` | 讀取 `templates/` 並更新 Anki 模板。用法：`uv run python update_template.py` |
 | `debug_audio.py` | 音檔除錯。用法：`uv run python debug_audio.py <word>` |

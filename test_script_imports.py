@@ -13,6 +13,7 @@ import pytest
     "_image_helper",
     "backfill_words",
     "backfill_sentence_cn",
+    "check_simplified",
 ])
 def test_script_imports(mod):
     importlib.import_module(mod)
