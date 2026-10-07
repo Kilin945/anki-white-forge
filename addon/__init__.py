@@ -2314,7 +2314,7 @@ class DuplicatesSection(QWidget):
         self._say(f"✓ Deleted {len(to_delete)} card(s).")
 
 # Test-card helper — bare cards for manually testing the dialogs. KEEP IN SYNC with
-# make_test_cards.py (CLI): same tag + same word list, so a card made by one tool is
+# tools/make_test_cards.py (CLI): same tag + same word list, so a card made by one tool is
 # cleaned by the other. (addon cannot import the CLI/core module.)
 TEST_CARD_TAG = "whiteforge_test"
 TEST_CARD_WORDS = [
@@ -2488,7 +2488,7 @@ class TestCardsSection(QWidget):
     """Batch Operations section: spawn / clean throwaway test cards (Front + Association
     only) so they show up in Complete Missing Cards for manual UI testing. Cards carry
     TEST_CARD_TAG so cleanup is one click. Synchronous — no worker/progress bar.
-    UI-side twin of make_test_cards.py (CLI)."""
+    UI-side twin of tools/make_test_cards.py (CLI)."""
 
     def __init__(self, panel, parent=None):
         super().__init__(parent)

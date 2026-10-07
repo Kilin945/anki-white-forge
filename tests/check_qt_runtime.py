@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Anki / Qt 升級後的 addon **執行期**檢查（姊妹檔:check_qt_compat.py）。
+"""Anki / Qt 升級後的 addon **執行期**檢查（姊妹檔:tests/check_qt_compat.py）。
 
 分工:
   check_qt_compat.py   建得起來嗎 —— import、Qt 名稱、三個對話框建構、快捷鍵綁定、
@@ -15,8 +15,8 @@
 所有對外呼叫(LLM / TTS / 圖片 / subprocess / AnkiConnect 的 urllib)全部被換成 stub,
 寫入只進到記憶體裡的假 collection。**不會碰到正在執行的 Anki,也不會動到真卡片。**
 
-    uv run python check_qt_runtime.py
-    ANKI_APP=/path/to/Anki.app uv run python check_qt_runtime.py
+    uv run python tests/check_qt_runtime.py
+    ANKI_APP=/path/to/Anki.app uv run python tests/check_qt_runtime.py
 
 覆蓋面只到「想得到的破法」為止。之後每遇到一種升級踩雷,就往這裡加一條。
 """
@@ -24,7 +24,7 @@ import json, logging, os, pathlib, sys, tempfile, threading, time, types, io
 
 APP = pathlib.Path(os.environ.get("ANKI_APP", "/Applications/Anki.app"))
 PKGS = APP / "Contents/Resources/app_packages"
-REPO = pathlib.Path(__file__).resolve().parent
+REPO = pathlib.Path(__file__).resolve().parent.parent   # tests/ → repo 根目錄
 sys.path.insert(0, str(PKGS))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 

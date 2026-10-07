@@ -13,7 +13,7 @@ import pytest
 
 _SPEC = importlib.util.spec_from_file_location(
     "addon_llm_dispatch",
-    pathlib.Path(__file__).parent / "addon" / "_llm_dispatch.py")
+    pathlib.Path(__file__).parent.parent / "addon" / "_llm_dispatch.py")
 lld = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(lld)
 

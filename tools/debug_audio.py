@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Debug TTS for a specific word. Usage: uv run python debug_audio.py <word>"""
+"""Debug TTS for a specific word. Usage: uv run python tools/debug_audio.py <word>"""
 import sys
 import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tools/ → repo 根目錄，才 import 得到 core
 from core.anki import anki
 from core.text import strip_html
 from core.tts import make_audio, VOICE_WORD, VOICE_SENTENCE

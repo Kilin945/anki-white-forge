@@ -10,8 +10,8 @@ Qt 還能不能用」提供零保證。全綠不代表 GUI 沒事。
 
 不需要 Anki 開著,只需要 Anki.app 存在;offscreen 執行,不會有視窗跳出來。
 
-    uv run python check_qt_compat.py
-    ANKI_APP=/path/to/Anki.app uv run python check_qt_compat.py
+    uv run python tests/check_qt_compat.py
+    ANKI_APP=/path/to/Anki.app uv run python tests/check_qt_compat.py
 
 覆蓋面只到「想得到的破法」為止。之後每遇到一種升級踩雷,就往這裡加一條——
 不加的話它會永遠停在今天的覆蓋面,還給人一種跑過了就沒事的錯覺。
@@ -22,7 +22,7 @@ import pathlib
 import sys
 import types
 
-REPO = pathlib.Path(__file__).resolve().parent
+REPO = pathlib.Path(__file__).resolve().parent.parent   # tests/ → repo 根目錄
 APP = pathlib.Path(os.environ.get("ANKI_APP", "/Applications/Anki.app"))
 PKGS = APP / "Contents/Resources/app_packages"
 

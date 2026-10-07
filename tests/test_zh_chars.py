@@ -54,7 +54,7 @@ def test_generator_check_passes():
            "tools/gen_zh_chars.py", "--check"]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=120,
-                           cwd=os.path.dirname(os.path.abspath(__file__)))
+                           cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tests/ → repo 根目錄
     except (OSError, subprocess.TimeoutExpired):
         pytest.skip("cannot run uv")
     if r.returncode != 0 and "DIFFERENT" not in r.stdout:

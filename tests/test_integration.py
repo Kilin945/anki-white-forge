@@ -49,7 +49,7 @@ def run_backfill():
     result = subprocess.run(
         ["uv", "run", "python", "backfill_words.py"],
         capture_output=True, text=True, timeout=120,
-        cwd=os.path.dirname(os.path.realpath(__file__)),
+        cwd=os.path.dirname(os.path.dirname(os.path.realpath(__file__))),   # tests/ → repo 根目錄
     )
     return result.stdout, result.stderr, result.returncode
 

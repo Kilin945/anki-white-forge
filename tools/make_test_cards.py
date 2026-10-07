@@ -5,12 +5,14 @@
 tag,清除靠 tag 一鍵刪,不留痕跡,也不會誤刪你真正的單字卡。
 
 Anki 要開著並啟用 AnkiConnect。用法:
-    uv run python make_test_cards.py add [N]   # 建 N 張裸卡(預設 7,上限見 WORDS)
-    uv run python make_test_cards.py clean     # 刪掉全部測試卡
+    uv run python tools/make_test_cards.py add [N]   # 建 N 張裸卡(預設 7,上限見 WORDS)
+    uv run python tools/make_test_cards.py clean     # 刪掉全部測試卡
 
 Front 用純字母假詞(zztest 前綴):_looks_english 會擋數字,故不能用 test01 這種。
 """
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tools/ → repo 根目錄，才 import 得到 core
 
 from core.anki import anki, DECK_NAME, MODEL_NAME
 
@@ -79,8 +81,8 @@ def main():
         clean()
     else:
         print("Usage:")
-        print("  uv run python make_test_cards.py add [N]   # 建 N 張裸卡(預設 7)")
-        print("  uv run python make_test_cards.py clean     # 刪掉全部測試卡")
+        print("  uv run python tools/make_test_cards.py add [N]   # 建 N 張裸卡(預設 7)")
+        print("  uv run python tools/make_test_cards.py clean     # 刪掉全部測試卡")
         return 1
     return 0
 

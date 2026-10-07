@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """掃描牌組裡 Translation／Sentence_CN 含簡體獨有字的卡（唯讀；`--fix` 才寫回）。
 
-    uv run python check_simplified.py          # 只列出，不改
-    uv run python check_simplified.py --fix    # 寫回繁體（瀏覽視窗選著的卡會略過）
+    uv run python tools/check_simplified.py          # 只列出，不改
+    uv run python tools/check_simplified.py --fix    # 寫回繁體（瀏覽視窗選著的卡會略過）
 
 判斷用 core.zh_chars 的「簡體獨有字」表，不是 OpenCC s2t（見 CLAUDE.md）。
 需 Anki 開著並啟用 AnkiConnect。
 """
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tools/ → repo 根目錄，才 import 得到 core
 import time
 
 import requests

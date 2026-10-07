@@ -13,3 +13,8 @@ dependencies = [
 dev = [
     "pytest>=9.0.3",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# "." 讓測試 import 得到 addon／core／根目錄的 CLI；"tools" 讓 test_script_imports 與 test_zh_chars import 得到 check_simplified
+pythonpath = [".", "tools"]

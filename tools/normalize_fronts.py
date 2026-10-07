@@ -10,10 +10,12 @@ Collision guard: if normalizing would make two cards share the same Front (e.g.
 resolve the real duplicate manually first.
 
 Usage:
-  uv run python normalize_fronts.py            # preview only (no writes)
-  uv run python normalize_fronts.py --apply    # actually apply the changes
+  uv run python tools/normalize_fronts.py            # preview only (no writes)
+  uv run python tools/normalize_fronts.py --apply    # actually apply the changes
 """
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tools/ → repo 根目錄，才 import 得到 core
 from collections import Counter
 
 from core.anki import anki

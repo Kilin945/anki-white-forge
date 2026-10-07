@@ -36,7 +36,7 @@
 > 背面的 `Translation`（單字）與 `Sentence_CN`（整句）都是點一下才顯示的填空框。
 >
 > 兩個翻譯欄位一律是台灣繁體。LLM 偶爾回簡體，系統會自動轉成繁體。
-> 想查舊卡有沒有簡體，跑 `uv run python check_simplified.py`（只列出，不改）。
+> 想查舊卡有沒有簡體，跑 `uv run python tools/check_simplified.py`（只列出，不改）。
 > 加 `--fix` 才會寫回。
 
 ---
@@ -165,7 +165,7 @@ uv sync   # 自動安裝所有依賴
 舊卡的例句生成得比「6-12 字」規則進 prompt 更早，常常過長。填一個字數門檻（預設 20 字），按 Rescan 列出超標的卡，顯示「單字(字數)」、字數多的排前面。按 Clear N Sentences 會清空例句、整句翻譯、句子語音、單字翻譯和圖，只保留單字和單字發音。換了句子就等於全部重建，翻譯和圖都該跟著重來。清空同樣瞬間完成、不重新生成。清完一鍵跳 ⌘S 重生短句；量大時改走 CLI。
 
 **Test Cards（測試卡）**
-開發、測試輔助。填 Count（預設 7）按 Add Test Cards，產生只有 Front + Association 的裸卡。這些卡會出現在 Complete Missing Cards，可以拿來測補卡流程。Clean Test Cards 一鍵刪光。它和 CLI 的 `make_test_cards.py`（`add [N]`、`clean`）用同一個 tag，兩邊建的可以互相清。
+開發、測試輔助。填 Count（預設 7）按 Add Test Cards，產生只有 Front + Association 的裸卡。這些卡會出現在 Complete Missing Cards，可以拿來測補卡流程。Clean Test Cards 一鍵刪光。它和 CLI 的 `tools/make_test_cards.py`（`add [N]`、`clean`）用同一個 tag，兩邊建的可以互相清。
 
 #### 翻譯術語：`⌘D` 或 Tools → Translation Terms…
 
@@ -263,36 +263,22 @@ Mac：⌘A、⌘S、⌘F 寫完卡片後會自動同步。沒登入 AnkiWeb 時�
 ## 專案結構
 
 ```
-Anki/
-├── core/                    # 共用模組
-│   ├── anki.py              # AnkiConnect API
-│   ├── image.py             # 四圖源搜尋下載（Pexels、Wikimedia、Openverse、Pixabay）
-│   ├── llm.py               # Groq LLM
-│   ├── rate_limiter.py      # 通用 429 偵測 / 批次節流
-│   ├── text.py              # strip_html, normalize, is_placeholder
-│   └── tts.py               # edge-tts (Andrew + Ava)
-├── templates/               # Anki 卡片模板
-│   ├── front.html
-│   ├── back.html
-│   └── style.css
-├── addon/                   # Anki 插件原始碼（symlink → Anki addons 資料夾）
-│   ├── __init__.py
-│   └── manifest.json
+anki/
+├── core/                    # 共用邏輯：LLM 分流、搜圖、語音、文字處理
+├── addon/                   # Anki 插件（symlink 到 Anki 的 addons21）
+├── templates/               # 卡片模板 front.html / back.html / style.css
+├── tests/                   # pytest 與 Anki/Qt 相容性檢查
+├── tools/                   # 偶爾才跑的工具
+├── docs/                    # README 用的圖、設計文件
 ├── add_word.py              # CLI 新增單字
 ├── backfill_words.py        # 批次補齊欄位（不含整句翻譯）
 ├── backfill_sentence_cn.py  # 批次回填整句翻譯 Sentence_CN
 ├── regen_audio.py           # 重生所有音檔
 ├── update_template.py       # 套用模板到 Anki
-├── debug_audio.py           # 音檔除錯
-├── normalize_fronts.py      # 正規化既有 Front（去 HTML / 轉小寫）
-├── _image_helper.py         # Addon subprocess: 圖片
-├── _gtts_helper.py          # Addon subprocess: TTS
-├── _validate_helper.py      # Addon subprocess: 拼字
-├── test_backfill.py         # 單元測試
-├── test_integration.py      # 整合測試
-├── .groq_key                # API key (gitignored)
-├── .pexels_key              # API key (gitignored)
-├── .pixabay_key             # API key (gitignored)
+├── _image_helper.py         # 插件用 subprocess 呼叫：圖片
+├── _gtts_helper.py          # 插件用 subprocess 呼叫：語音
+├── _validate_helper.py      # 插件用 subprocess 呼叫：拼字
+├── .groq_key / .gemini_key / .pexels_key / .pixabay_key   # API 金鑰（gitignored）
 └── pyproject.toml
 ```
 
@@ -325,11 +311,11 @@ Anki/
 | `add_word.py` | CLI 新增單字。用法：`uv run python add_word.py <word> [association]` |
 | `backfill_words.py` | 批次補齊缺少欄位（例句、圖、音、單字翻譯，不含整句翻譯）。4 路並發。用法：`uv run python backfill_words.py` |
 | `backfill_sentence_cn.py` | 批次回填整句翻譯 `Sentence_CN`。撞速率上限自動等待續跑，可 Ctrl-C 結束，下次續跑。用法：`uv run python backfill_sentence_cn.py` |
-| `check_simplified.py` | 掃描 `Translation`／`Sentence_CN` 有沒有簡體字。預設只列出，加 `--fix` 才寫回。用法：`uv run python check_simplified.py` |
+| `tools/check_simplified.py` | 掃描 `Translation`／`Sentence_CN` 有沒有簡體字。預設只列出，加 `--fix` 才寫回。用法：`uv run python tools/check_simplified.py` |
 | `regen_audio.py` | 重新生成所有音檔。用法：`uv run python regen_audio.py` |
 | `update_template.py` | 讀取 `templates/` 並更新 Anki 模板。用法：`uv run python update_template.py` |
-| `debug_audio.py` | 音檔除錯。用法：`uv run python debug_audio.py <word>` |
-| `normalize_fronts.py` | 正規化既有 Front：去殘留 HTML、轉小寫，全大寫縮寫（如 ASAP）保留。預設只預覽，加 `--apply` 才寫入 |
+| `tools/debug_audio.py` | 音檔除錯。用法：`uv run python tools/debug_audio.py <word>` |
+| `tools/normalize_fronts.py` | 正規化既有 Front：去殘留 HTML、轉小寫，全大寫縮寫（如 ASAP）保留。預設只預覽，加 `--apply` 才寫入 |
 
 ### Addon subprocess 模組
 
@@ -354,8 +340,8 @@ Anki/
 | `.pixabay_key` | Pixabay API 金鑰（gitignored） |
 | `image_rejects.json` | 退圖紀錄，記下被紅旗退掉的圖（gitignored） |
 | `translation_terms.json` | 翻譯術語清單和待審項目，`⌘D` 視窗維護（gitignored） |
-| `test_backfill.py` | 單元測試（57 tests） |
-| `test_integration.py` | 整合測試（新增 3 字驗證） |
+| `tests/` | pytest 全部在這裡，`uv run pytest` |
+| `tests/check_qt_compat.py`、`tests/check_qt_runtime.py` | Anki／Qt 升級後的相容性檢查 |
 | `pyproject.toml` | Python 依賴定義 |
 
 ---
