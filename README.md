@@ -218,8 +218,23 @@ uv run python regen_audio.py
 1. 手機 AnkiMobile 新增卡片，只填 Front + Association，然後同步
 2. Mac Anki 同步
 3. 按 `⌘S`（Complete Missing Cards）一鍵補完所有欄位，含整句翻譯。走 CLI 的話注意：`backfill_words.py` 不補整句翻譯，要另跑 `backfill_sentence_cn.py`
-4. Mac Anki 同步，選「上傳到 AnkiWeb」
+4. 補完後 Mac 會自動同步，不用按
 5. 手機同步，完整卡片出現
+
+### 自動同步
+
+Mac：⌘A、⌘S、⌘F 寫完卡片後會自動同步。沒登入 AnkiWeb 時不會同步。
+
+手機：AnkiMobile 不會自動同步。可以用 iPhone「捷徑」設定成打開 Anki 就同步：
+
+1. 打開「捷徑」App 的「自動化」，新增一個「App」觸發。
+2. 選 Anki，勾 Is Opened。
+3. 動作選 Open URLs，填 `anki://x-callback-url/sync`。
+4. Automation 打開，Notify 關掉。
+
+![iPhone 捷徑：打開 Anki 時自動同步](docs/images/ios-shortcut-sync.png)
+
+不要勾 Is Closed，可能會一直重開 Anki。
 
 跑完一批之後，視窗下方會多一顆 Remove Finished。它只把已經補齊的卡從清單上拿掉，不會刪卡片。
 

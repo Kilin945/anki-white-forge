@@ -51,9 +51,10 @@ class TestRemovalStatus:
         assert "cleared" in s.lower()
         assert "still need filling" not in s
 
-    def test_reminds_to_sync(self):
-        assert "sync" in addon._removal_status(1, 2).lower()
-        assert "sync" in addon._removal_status(1, 0).lower()
+    def test_no_sync_reminder(self):
+        # 批次跑完會自動同步（_sync_after_batch），不再叫使用者自己按
+        assert "sync" not in addon._removal_status(1, 2).lower()
+        assert "sync" not in addon._removal_status(1, 0).lower()
 
 
 # ── _finished_ids:跑完一批後,哪幾列該從清單上拿掉 ─────────────────────────────

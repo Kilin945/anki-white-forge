@@ -22,7 +22,7 @@ from aqt.qt import (
     QWidget, QFrame, QCheckBox, QPixmap, QIcon, QSize,
     QKeySequenceEdit, QKeySequence, QPlainTextEdit,
     QMessageBox,
-    Qt, QThread, pyqtSignal,
+    Qt, QThread, QTimer, pyqtSignal,
 )
 from aqt.utils import showWarning, tooltip
 
@@ -702,6 +702,45 @@ def _live_note(note_id):
         return None
 
 
+def _auto_sync_allowed(logged_in, media_syncing, progress_busy, batch_owner):
+    """批次寫完卡片後，現在能不能自動同步（純函式，測試在 test_auto_sync.py）。
+
+    - 沒登入 AnkiWeb：不同步，也不跳登入框（自動動作不該冒出要輸入密碼的視窗）。
+    - 媒體還在同步：此時按同步鍵 Anki 會改開「媒體同步紀錄」視窗，不是同步。
+    - 已有進度視窗（例如上一次同步還沒完）：等它，不疊第二個。
+    - 又有批次在跑：worker 正在寫卡，等它收尾時自己會再觸發一次同步。"""
+    return logged_in and not media_syncing and not progress_busy and batch_owner is None
+
+
+def _sync_after_batch():
+    """⌘A／⌘S／⌘F 寫完卡片後自動同步 AnkiWeb，Mac 這邊不用再手按同步。
+    （手機那邊 addon 管不到：AnkiMobile 沒有自動同步，見 README。）
+
+    「瀏覽」視窗開著也照同步，不用等它關：Anki 自己的同步收尾會呼叫 mw.reset()，
+    瀏覽視窗的編輯器因此從資料庫重新載入卡片，不會像 AnkiConnect 外部寫入那樣
+    被編輯器手上的舊內容蓋回去（Anki 26.09 原始碼 main.py `_sync_collection_and_media`
+    → browser.py `on_operation_did_execute`）。
+
+    排到事件迴圈下一輪才跑：呼叫端多半還在收尾（_end_batch 釋放批次權、可能正要關窗）。"""
+    QTimer.singleShot(0, _sync_now)
+
+
+def _sync_now():
+    try:
+        allowed = _auto_sync_allowed(
+            logged_in=bool(mw.pm.sync_auth()),
+            media_syncing=mw.media_syncer.is_syncing(),
+            progress_busy=mw.progress.busy(),
+            batch_owner=_batch_busy(),
+        )
+        if allowed:
+            mw.on_sync_button_clicked()
+        else:
+            _lld.get_logger().info("auto-sync skipped (not logged in, or busy)")
+    except Exception as e:            # 自動同步失敗不能打斷使用者；手按同步仍可用
+        _lld.get_logger().warning("auto-sync failed: %s", e)
+
+
 class _BatchDialogMixin:
     """批次視窗共用：Anki dialog-manager 契約 + 跑批中不關窗。
 
@@ -1022,6 +1061,7 @@ class AddWordDialog(_BatchDialogMixin, QDialog):
             mw.col.add_note(note, deck_id)
             mw.col.save()
             mw.reset()
+            _sync_after_batch()
 
             self._set_status(f"'{data['word']}' added!", "ok")
             self.word_input.clear()
@@ -1331,9 +1371,8 @@ def _removal_status(removed, remaining):
     """Status line after Remove Finished drops the completed rows (view only)."""
     if remaining:
         return (f"Removed {removed} finished card(s). {remaining} still need filling — "
-                f"still selected, so Complete Selected picks them up. "
-                f"Remember to sync Anki!")
-    return "All finished cards cleared from the list. Remember to sync Anki!"
+                f"still selected, so Complete Selected picks them up.")
+    return "All finished cards cleared from the list."
 
 
 class BackfillDialog(_BatchDialogMixin, QDialog):
@@ -1535,6 +1574,7 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
         self.progress_bar.setVisible(False)
         mw.col.save()
         mw.reset()
+        _sync_after_batch()
         # 已被刪掉的卡（非阻塞視窗開著時可能被別處刪除）兩邊都不算：不算「還缺」,
         # 也不算「已完成」——只從 total 扣掉。否則 3 張選取、跑到一半刪掉 1 張,
         # 會顯示「3 card(s) completed」而實際只做了 2 張。
@@ -1558,9 +1598,9 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
                     f"filling. Try again in ~{secs}s, then reselect.")
         elif left:
             self.status.setText(f"Completed {done}, {left} still need filling — some fields "
-                                f"didn't come back, try those again. Remember to sync Anki!")
+                                f"didn't come back, try those again.")
         else:
-            self.status.setText(f"Done — {done} card(s) completed. Remember to sync Anki!")
+            self.status.setText(f"Done — {done} card(s) completed.")
         # 重讀每一列的欄位算出誰補齊了 —— Remove Finished 只拿掉這些,沒補完的留在
         # 清單上而且勾還在,額度回來直接再按 Complete Selected 續跑。
         self._finished = _finished_ids(list(self._rows), _live_note)
@@ -1818,6 +1858,7 @@ class TranslateSection(QWidget):
     def _on_finished(self, done, remaining):
         mw.col.save()
         mw.reset()
+        _sync_after_batch()
         self.progress_bar.setVisible(False)
         self.stop_btn.setEnabled(False)
         blocked = getattr(self._worker, "blocked_secs", 0)
@@ -1826,7 +1867,7 @@ class TranslateSection(QWidget):
                 f"Translated {done}. Hit Groq's longer rate limit (need to wait ~{blocked}s, "
                 f"possibly the daily quota); please come back later. {remaining} left.")
         else:
-            self.status.setText(f"Translated {done} this run, {remaining} left. Remember to sync Anki!")
+            self.status.setText(f"Translated {done} this run, {remaining} left.")
         self._scan()       # refresh count + re-enable mode buttons for another round
         self._panel._end_batch()
 
@@ -1948,6 +1989,7 @@ class ClearFlaggedSection(QWidget):
             n += 1
         mw.col.save()
         mw.reset()
+        _sync_after_batch()
         self.word_list.setText("")
         self.clear_row_w.setVisible(False)
         self.status.setText(f"✓ Cleared {n} card(s) and removed their flags. "
@@ -2267,8 +2309,9 @@ class DuplicatesSection(QWidget):
         mw.col.remove_notes(to_delete)
         mw.col.save()
         mw.reset()
+        _sync_after_batch()
         self._scan()
-        self._say(f"✓ Deleted {len(to_delete)} card(s). Remember to sync Anki!")
+        self._say(f"✓ Deleted {len(to_delete)} card(s).")
 
 # Test-card helper — bare cards for manually testing the dialogs. KEEP IN SYNC with
 # make_test_cards.py (CLI): same tag + same word list, so a card made by one tool is
@@ -2424,6 +2467,7 @@ class LongSentencesSection(QWidget):
             n += 1
         mw.col.save()
         mw.reset()
+        _sync_after_batch()
         self._hits = []
         self.word_list.setText("")
         self.clear_row_w.setVisible(False)

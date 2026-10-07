@@ -4,6 +4,7 @@ __pycache__/
 *.mp3
 *.jpg
 *.png
+!docs/images/*.png
 .pexels_key
 .pixabay_key
 image_rejects.json

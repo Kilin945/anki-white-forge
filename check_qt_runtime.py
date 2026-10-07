@@ -117,7 +117,13 @@ class FakeMw(QWidget):
         self.addonManager = FakeAddonManager()
         self.col = FakeCol()
         self.resets = 0
+        self.syncs = 0
+        # 自動同步會讀的三個狀態：已登入、媒體沒在同步、沒有進度視窗
+        self.pm = types.SimpleNamespace(sync_auth=lambda: object())
+        self.media_syncer = types.SimpleNamespace(is_syncing=lambda: False)
+        self.progress = types.SimpleNamespace(busy=lambda: False)
     def reset(self): self.resets += 1
+    def on_sync_button_clicked(self): self.syncs += 1
 
 # 假 col.media.dir() 用的暫存目錄 — 不要建在 repo 裡
 MEDIA_DIR = tempfile.mkdtemp(prefix="whiteforge-qtcheck-")
@@ -260,6 +266,25 @@ def _():
     assert not dlg.progress_bar.isVisible(), "進度條沒收起來"
     assert mw.col.calls["save"] >= 1 and mw.resets >= 1, "沒有 col.save()/mw.reset()"
     return f"save={mw.col.calls['save']} reset={mw.resets}"
+
+@check("⌘S 跑完 → 事件迴圈下一輪自動同步一次（不是在收尾當下同步）")
+def _():
+    # 這是整支腳本第一個跑完的批次 → 到這裡應該剛好同步過 1 次
+    pump(lambda: mw.syncs >= 1, 5, "auto-sync fired")
+    _app.processEvents()
+    assert mw.syncs == 1, f"同步了 {mw.syncs} 次，應該 1 次"
+    return "syncs = 1"
+
+@check("自動同步遇到批次在跑 → 跳過（worker 收尾時會自己再觸發）")
+def _():
+    before = mw.syncs
+    assert addon._batch_acquire("Other Batch")
+    try:
+        addon._sync_now()
+    finally:
+        addon._batch_release("Other Batch")
+    assert mw.syncs == before, "批次在跑還是同步了"
+    return "skipped"
 
 @check("⌘S: 3 張卡各發出一次 AnkiConnect updateNoteFields（本輪被攔截，未真寫）")
 def _():
@@ -791,7 +816,8 @@ def _():
         pump(lambda: addon._batch_busy() is None, 20, "stopped")
         filled = sum(1 for n in mw.col._notes.values() if n["Sentence_CN"])
         assert filled < 8, f"Stop 沒作用，8 張全翻完了"
-        assert "left. Remember to sync" in tr.status.text(), tr.status.text()
+        assert tr.status.text().endswith("left."), tr.status.text()
+        assert "sync" not in tr.status.text().lower(), tr.status.text()
         panel.close(); _app.processEvents()
         return f"按下 Stop 後只翻了 {filled}/8 → {tr.status.text()}"
     finally:
