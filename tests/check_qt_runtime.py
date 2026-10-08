@@ -145,8 +145,8 @@ def stub_sentence(self, word, association="", photo=""):
 
 addon.Worker._llm_sentence            = stub_sentence
 addon.Worker._groq_sentence           = lambda self,w,a="",photo="": f"stub {w}"
-addon.Worker._groq_translate          = lambda self,w,s: "字義"
-addon.Worker._groq_translate_sentence = lambda self,s,strict=False,word="": "這是中文翻譯。"
+addon.Worker._groq_translate          = lambda self,w,s,reasons=None: "字義"
+addon.Worker._groq_translate_sentence = lambda self,s,strict=False,word="",reasons=None: "這是中文翻譯。"
 addon.Worker._fetch_image             = lambda self,w,definition="": "<img src='stub.jpg'>"
 addon.Worker._make_audio_batch        = lambda self,items: None
 addon._groq_spellcheck                = lambda w: ("ok", None)
@@ -242,8 +242,8 @@ def _():
     select_all_rows(dlg)
     assert dlg.run_btn.isEnabled(), "Complete Selected 沒被啟用"
     orig_step, orig_done, orig_fin = dlg._on_step, dlg._on_card_done, dlg._on_finished
-    def s(nid, f, st):
-        STEP_TIDS.add(threading.get_ident()); SEEN_IDS.append(nid); orig_step(nid, f, st)
+    def s(nid, f, st, reason=""):
+        STEP_TIDS.add(threading.get_ident()); SEEN_IDS.append(nid); orig_step(nid, f, st, reason)
     def d(nid):
         DONE_TIDS.add(threading.get_ident()); DONE_IDS.append(nid); orig_done(nid)
     def fin(res):
@@ -328,7 +328,7 @@ def _():
     fail_word = NAMES[1]
     orig_translate = addon.Worker._groq_translate
     addon.Worker._groq_translate = (
-        lambda self, w, s, _f=fail_word: "" if w == _f else "字義")
+        lambda self, w, s, reasons=None, _f=fail_word: "" if w == _f else "字義")
     finished_hits, done_ids = [], []
     try:
         dlg = open_backfill()
@@ -355,6 +355,38 @@ def _():
     assert "1 still need filling" in dlg.status.text(), dlg.status.text()
     dlg._force_close(0); _app.processEvents()
     return "2 張補齊被移除、1 張半成品留著且仍勾選"
+
+@check("⌘S: 翻譯被退的列，橘框旁顯示短原因（Meaning: got \"Linux\"）、懸停同句；補齊的列顯示 added!")
+def _():
+    seed(3)
+    fail_word = NAMES[1]
+    orig_translate = addon.Worker._groq_translate
+    def fake_translate(self, w, s, reasons=None, _f=fail_word):
+        if w == _f:                      # 走真實路徑的「被退」：reasons 由 _groq_translate 寫
+            if reasons is not None:
+                reasons["translation"] = 'got "Linux"'
+            return ""
+        return "字義"
+    addon.Worker._groq_translate = fake_translate
+    finished_hits = []
+    try:
+        dlg = open_backfill()
+        select_all_rows(dlg)
+        orig_fin = dlg._on_finished
+        def fin(res):
+            finished_hits.append(1); orig_fin(res)
+        dlg._on_finished = fin
+        QTest.mouseClick(dlg.run_btn, Qt.MouseButton.LeftButton)
+        pump(lambda: bool(finished_hits), 30, "batch finished")
+    finally:
+        addon.Worker._groq_translate = orig_translate
+    row_fail, row_ok = dlg._rows[NID_BASE + 1], dlg._rows[NID_BASE + 0]
+    assert row_fail.badge.text() == 'Meaning: got "Linux"', row_fail.badge.text()
+    assert row_fail._boxes["translation"].toolTip() == 'got "Linux"', row_fail._boxes["translation"].toolTip()
+    assert row_ok.badge.text().endswith("added!"), row_ok.badge.text()
+    assert row_ok._boxes["translation"].toolTip() == ""
+    dlg._force_close(0); _app.processEvents()
+    return f"fail row badge={row_fail.badge.text()!r}, ok row badge={row_ok.badge.text()!r}"
 
 # ═══ 2. 批次互斥 ════════════════════════════════════════════════════════════
 print("\n2) 批次互斥（_batch_acquire / _blocked_by_batch）")
@@ -801,7 +833,7 @@ def _():
                    Audio="[sound:x]", Front_Audio="[sound:y]",
                    Image_Prompt="<img src=a>", Translation="義", Sentence_CN="")
     slow = threading.Event()
-    def slow_tr(self, s, strict=False, word=""):
+    def slow_tr(self, s, strict=False, word="", reasons=None):
         slow.wait(timeout=10); return "慢慢翻的中文。"
     saved = addon.Worker._groq_translate_sentence
     addon.Worker._groq_translate_sentence = slow_tr

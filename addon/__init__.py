@@ -67,6 +67,24 @@ BOX_STYLE = {  # text is just the field label; state shown by colour only (no �
     "warn":    ("border:1.5px solid #ea580c; border-radius:6px; padding:6px 8px; color:#ea580c; font-weight:600;", "{}"),
 }
 _FIELD_LABEL = dict(FIELD_BOXES)
+_BADGE_OK_STYLE   = "color:#16a34a; font-weight:700; padding-left:8px;"
+_BADGE_WARN_STYLE = "color:#ea580c; font-weight:600; padding-left:8px;"
+
+
+def _sentence_reason_text(engine):
+    """`_llm_sentence` 第二值 → 畫面短句：沒回（撞限／斷線）與回了垃圾分開講。"""
+    return "no reply" if engine == "no-reply" else "no clean sentence"
+
+
+def _reasons_text(reasons):
+    """橘框旁的一小段：`Meaning: got "Linux"`，多個欄位用「; 」接。依 FIELD_BOXES 順序。
+    「skipped: …」是跟著別的欄位失敗才跳過的（例句失敗 → 翻譯／句音全跳），框已經橘了，
+    列尾只講根本原因，不把五段全列出來。"""
+    if all(k in reasons for k, _ in FIELD_BOXES):
+        return ""                                  # 五個全退＝LLM 整個沒回（撞限／斷線），狀態列會講，列尾不重複
+    real = {k: v for k, v in reasons.items() if not v.startswith("skipped")}
+    shown = real or reasons
+    return "; ".join(f"{_FIELD_LABEL[k]}: {shown[k]}" for k, _ in FIELD_BOXES if k in shown)
 
 
 def _clean_text(raw, *, lower=False):
@@ -362,6 +380,27 @@ def _accept_word_translation(word, reply):
     return ""
 
 
+def _short_reply(reply, limit=30):
+    reply = (reply or "").strip().replace("\n", " ")
+    return reply if len(reply) <= limit else reply[:limit - 1] + "…"
+
+
+def _translation_reject_reason(word, reply):
+    """`_accept_word_translation` 退掉時的「為什麼」→ (分類, 畫面短句)；收下則 ("", "")。
+    分類給 log（grep 用）、短句給畫面（橘框旁一小段，細節看 log）。判斷規則本身不在這裡，
+    只是把 _accept_word_translation 的每個 return "" 對應成一個名字。"""
+    if _accept_word_translation(word, reply):
+        return "", ""
+    reply = (reply or "").strip()
+    if not reply:
+        return "no-reply", "no reply"
+    if re.search(r"[一-鿿]", reply):
+        if len(re.findall(r"[一-鿿]", reply)) > 8:
+            return "too-long", "too long"                 # 引文在 log；畫面只放原因
+        return "preamble", "not a term"
+    return "english-not-the-word", f'got "{_short_reply(reply, 20)}"'   # 這個短，直接看到回了什麼最有用
+
+
 # KEEP IN SYNC with core/llm.PHOTO_BLOCK_TEMPLATE（逐字相同）
 _PHOTO_BLOCK_TEMPLATE = (
     '\n\nA photo was already picked for this card. Photo description: "{photo}"\n'
@@ -387,7 +426,9 @@ def _sentence_prompt(word, association="", photo=""):
         f'You are helping a software engineer learn the English word "{word}".\n\n'
         f'Pick the meaning to teach, in this priority:\n'
         f'{hint}'
-        f'{swe_n} If "{word}" has a common usage in software engineering / programming / tech, use that sense.\n'
+        f'{swe_n} If "{word}" is itself a standard software engineering / programming / tech term, use that sense. '
+        f'Do NOT stretch: slang, nicknames, mascots and jokes do not count (e.g. "penguin" is not Linux). '
+        f'When in doubt, use the everyday meaning.\n'
         f'{common_n} Otherwise use its most common everyday meaning.\n\n'
         f'Then write ONE example sentence that uses "{word}" naturally and makes its meaning '
         f'obvious — someone who does not know the word should be able to guess it from the '
@@ -476,7 +517,7 @@ def _to_traditional_logged(word, reply):
 
 
 class Worker(QThread):
-    step     = pyqtSignal(str, str)   # (field key, state: "ok" / "warn")
+    step     = pyqtSignal(str, str, str)   # (field key, state: "ok" / "warn", 退回原因短句，ok 時為 "")
     finished = pyqtSignal(dict)
     error    = pyqtSignal(str)
 
@@ -493,15 +534,18 @@ class Worker(QThread):
 
             # 圖先行：依「單字＋詞義」搜圖，再依照片描述造句（句子配圖）。圖不再依賴句子，
             # 句子生成失敗圖照留。
+            reasons = {}                      # field key → 畫面短句（完整原因在 log）
             image_field = self._fetch_image(word, definition=self.association)
-            self.step.emit("image", "ok" if image_field else "warn")
+            self.step.emit("image", "ok" if image_field else "warn",
+                           "" if image_field else "no image")
             photo = _image_alt(image_field)
 
             sentence, engine = self._llm_sentence(word, self.association, photo=photo)
             if not sentence:
                 sentence = f"Please add an example sentence for '{word}'."
             sentence_ok = _sentence_usable(sentence)
-            self.step.emit("sentence", "ok" if sentence_ok else "warn")
+            self.step.emit("sentence", "ok" if sentence_ok else "warn",
+                           "" if sentence_ok else _sentence_reason_text(engine))
 
             # Translation and Audio in parallel — but only when the sentence is
             # usable: 依賴句意的下游（翻譯/句音）拿佔位符當輸入會做出彼此不一致
@@ -513,8 +557,8 @@ class Worker(QThread):
             front_audio_filename = f"{word}_word.mp3"
 
             def do_translate():
-                translation_result[0] = self._groq_translate(word, sentence)
-                sentence_cn_result[0] = self._groq_translate_sentence(sentence, word=word)
+                translation_result[0] = self._groq_translate(word, sentence, reasons=reasons)
+                sentence_cn_result[0] = self._groq_translate_sentence(sentence, word=word, reasons=reasons)
 
             trans_thread = None
             if sentence_ok:
@@ -529,13 +573,18 @@ class Worker(QThread):
                     {"text": sentence, "filepath": os.path.join(self.media_dir, audio_filename), "voice": VOICE_SENTENCE})
             try:
                 self._make_audio_batch(audio_items)
-                self.step.emit("audio", "ok" if sentence_ok else "warn")
+                self.step.emit("audio", "ok" if sentence_ok else "warn",
+                               "" if sentence_ok else "skipped: no sentence")
             finally:
                 if trans_thread:
                     trans_thread.join()    # always join so the thread doesn't leak on audio failure
 
-            self.step.emit("translation", "ok" if translation_result[0] else "warn")
-            self.step.emit("sentence_cn", "ok" if sentence_cn_result[0] else "warn")
+            if not sentence_ok:
+                reasons["translation"] = reasons["sentence_cn"] = "skipped: no sentence"
+            self.step.emit("translation", "ok" if translation_result[0] else "warn",
+                           "" if translation_result[0] else reasons.get("translation", ""))
+            self.step.emit("sentence_cn", "ok" if sentence_cn_result[0] else "warn",
+                           "" if sentence_cn_result[0] else reasons.get("sentence_cn", ""))
 
             self.finished.emit({
                 "word":        word,
@@ -561,11 +610,14 @@ class Worker(QThread):
         result = self._groq_sentence(word, association, photo)
         if _sentence_acceptable(result):
             return result, "Groq"
-        return "", "failed"        # Groq 失敗就回空 → 上層退 placeholder，等下次補（不再走地端）
+        reason = "no-reply" if not (result or "").strip() else "not-a-clean-sentence"
+        _log.warning("sentence rejected word=%s reason=%s reply=%r", word, reason, result)
+        return "", reason          # 回空 → 上層退 placeholder，等下次補；第二值給畫面分「沒回」與「回了垃圾」
 
-    def _groq_translate(self, word, sentence):
+    def _groq_translate(self, word, sentence, reasons=None):
         """Traditional Chinese meaning of word AS USED IN the sentence ('' on failure).
-        Proper nouns (frameworks/products) stay in English."""
+        Proper nouns (frameworks/products) stay in English.
+        reasons：呼叫端給的 dict，被退時寫入 reasons["translation"]＝畫面短句（完整原因在 log）。"""
         prompt = (f'Give the Traditional Chinese meaning of "{word}" as it is used in this '
                   f'sentence: "{sentence}". Give ONE concise translation only — do NOT list '
                   f'synonyms or near-duplicate terms (e.g. never "水杯、茶杯"). If "{word}" is a '
@@ -577,11 +629,19 @@ class Worker(QThread):
                   f'no explanation.')
         reply = _groq_chat(prompt, temperature=0.3, max_tokens=32, timeout=10)
         reply = _to_traditional_logged(word, reply)
-        return _accept_word_translation(word, reply)
+        accepted = _accept_word_translation(word, reply)
+        if not accepted:
+            category, short = _translation_reject_reason(word, reply)
+            _log.warning("translation rejected word=%s reason=%s reply=%r sentence=%r",
+                         word, category, reply, sentence)
+            if reasons is not None:
+                reasons["translation"] = short
+        return accepted
 
-    def _groq_translate_sentence(self, sentence, *, strict=False, word=""):
+    def _groq_translate_sentence(self, sentence, *, strict=False, word="", reasons=None):
         """Traditional Chinese translation of a full sentence. '' on failure.
-        strict=True raises _AddonRateLimited on 429 (for the 批次回填 burst engine)."""
+        strict=True raises _AddonRateLimited on 429 (for the 批次回填 burst engine).
+        reasons：呼叫端給的 dict，被退時寫入 reasons["sentence_cn"]＝畫面短句（完整原因在 log）。"""
         if not sentence:
             return ""
         prompt = ('Translate this English sentence into natural, complete Traditional '
@@ -597,7 +657,15 @@ class Worker(QThread):
         if _looks_like_chinese_translation(reply):
             return reply
         if reply and re.search(r"[一-鿿]", reply):        # 只記「英文字太多」造成的誤殺;沒中文＝沒翻／洩漏,不記
+            _log.warning("sentence_cn rejected word=%s reason=too-much-english reply=%r sentence=%r",
+                         word, reply, sentence)
+            if reasons is not None:
+                reasons["sentence_cn"] = "too much English"      # 引文在 log；畫面只放原因
             return self._rejected_translation(word, reply)
+        _log.warning("sentence_cn rejected word=%s reason=%s reply=%r sentence=%r",
+                     word, "no-reply" if not reply else "no-chinese", reply, sentence)
+        if reasons is not None:
+            reasons["sentence_cn"] = "no reply" if not reply else "no Chinese"
         return ""
 
     def _rejected_translation(self, word, reply):
@@ -619,8 +687,12 @@ class Worker(QThread):
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=60,
             )
-        except Exception:               # timeout / spawn failure → no image; leave blank for ⌘S to retry
+        except Exception as e:          # timeout / spawn failure → no image; leave blank for ⌘S to retry
+            _log.warning("image rejected word=%s reason=helper-failed error=%r", word, e)
             return ""                   # called synchronously; must not raise, a failure just leaves the image blank
+        if result.returncode != 0:
+            _log.warning("image rejected word=%s reason=no-result stderr=%r", word,
+                         (result.stderr or "").strip()[-300:])
         if result.returncode == 0:
             alt = attribution = source = ""
             for line in result.stdout.splitlines():
@@ -859,6 +931,7 @@ class AddWordDialog(_BatchDialogMixin, QDialog):
 
         # per-field progress boxes — shown when adding, each flips to ✓ when done
         self._boxes = {}
+        self._reasons = {}                # field key → 退回原因短句（完整原因在 log）
         boxes_row = QHBoxLayout()
         boxes_row.setSpacing(8)           # gap between boxes
         boxes_row.addStretch()            # stretches centre the fixed-width group (no word col here)
@@ -895,15 +968,22 @@ class AddWordDialog(_BatchDialogMixin, QDialog):
         # dialog's default button, so Enter already triggers it; connecting returnPressed
         # as well fires _on_add twice → the spell-check/confirm dialog pops up twice.
 
-    def _set_box(self, key, state):
+    def _set_box(self, key, state, reason=""):
         box = self._boxes.get(key)
         if not box:
             return
         style, fmt = BOX_STYLE[state]
         box.setStyleSheet(style)
         box.setText(fmt.format(_FIELD_LABEL[key]))
+        if state == "warn" and reason:
+            self._reasons[key] = reason
+            box.setToolTip(reason)
+        else:
+            self._reasons.pop(key, None)
+            box.setToolTip("")
 
     def _start_boxes(self):
+        self._reasons = {}
         for key in self._boxes:
             self._boxes[key].setVisible(True)
             self._set_box(key, "working")
@@ -1063,7 +1143,10 @@ class AddWordDialog(_BatchDialogMixin, QDialog):
             mw.reset()
             _sync_after_batch()
 
-            self._set_status(f"'{data['word']}' added!", "ok")
+            if self._reasons:             # 有欄位被退：狀態列用短句講原因（細節在 log）
+                self._set_status(f"'{data['word']}' added — {_reasons_text(self._reasons)}", "warn")
+            else:
+                self._set_status(f"'{data['word']}' added!", "ok")
             self.word_input.clear()
             self.assoc_input.clear()
             tooltip(f"'{data['word']}' added to {DECK_NAME}", period=2000)
@@ -1089,6 +1172,7 @@ class FieldRow(QWidget):
         super().__init__(parent)
         self.word = word
         self._boxes = {}
+        self._reasons = {}                # field key → 退回原因短句（只顯示短句；細節在 log）；set_box 會用到，要在迴圈前
         lay = QHBoxLayout(self)
         lay.setContentsMargins(4, 2, 4, 2)
         self.checkbox = QCheckBox()       # left-most: pick which cards to complete (default unchecked)
@@ -1105,19 +1189,31 @@ class FieldRow(QWidget):
             lay.addWidget(box)
             self.set_box(key, "ok" if present.get(key) else "working")
         self.badge = QLabel("")
-        self.badge.setStyleSheet("color:#16a34a; font-weight:700; padding-left:8px;")
+        self.badge.setStyleSheet(_BADGE_OK_STYLE)
         lay.addWidget(self.badge)
         lay.addStretch()
 
-    def set_box(self, key, state):
+    def set_box(self, key, state, reason=""):
         box = self._boxes.get(key)
         if not box:
             return
         style, fmt = BOX_STYLE[state]
         box.setStyleSheet(style)
         box.setText(fmt.format(_FIELD_LABEL[key]))
+        if state == "warn" and reason:
+            self._reasons[key] = reason
+            box.setToolTip(reason)
+        else:
+            self._reasons.pop(key, None)
+            box.setToolTip("")
+        if self._reasons:
+            self.badge.setStyleSheet(_BADGE_WARN_STYLE)
+            self.badge.setText(_reasons_text(self._reasons))
 
     def set_done(self):
+        if self._reasons:                 # 有欄位被退就留著原因，不蓋成 added!
+            return
+        self.badge.setStyleSheet(_BADGE_OK_STYLE)
         self.badge.setText(f"'{self.word}' added!")
 
     def is_checked(self):
@@ -1131,7 +1227,7 @@ SHORT_WALL_WAIT = 2.0      # 秒。牆比這短就原地等掉續跑；更長才
 
 
 class BackfillWorker(QThread):
-    step      = pyqtSignal(object, str, str)   # (note_id, field, ...) — object: note ids exceed 32-bit int
+    step      = pyqtSignal(object, str, str, str)   # (note_id, field, state, 退回原因短句) — object: note ids exceed 32-bit int
     card_done = pyqtSignal(object)             # (note_id) 這張處理完了 —— 不等於補齊了
                                                # (欄位生失敗只會 emit step warn,不中斷)
     finished  = pyqtSignal(list)
@@ -1173,6 +1269,7 @@ class BackfillWorker(QThread):
             _log.warning("⌘S stopped: resets=%s", self.limit_resets)
             return f"skip {word}"
         fields = {}
+        reasons = {}                      # field key → 畫面短句（完整原因在 log）
 
         assoc = _clean_text(note["fields"].get("Association", {}).get("value", ""))
 
@@ -1181,21 +1278,23 @@ class BackfillWorker(QThread):
         if need_image:
             image_html = self._w._fetch_image(word, definition=assoc)
             fields["Image_Prompt"] = image_html or ""
-            self.step.emit(note_id, "image", "ok" if image_html else "warn")
+            self.step.emit(note_id, "image", "ok" if image_html else "warn",
+                           "" if image_html else "no image")
         photo = _image_alt(fields.get("Image_Prompt") or note["fields"]["Image_Prompt"]["value"])
 
         current = note["fields"]["Sentence"]["value"]
         if not current or any(p in current for p in PLACEHOLDERS):
-            sentence, _ = self._w._llm_sentence(word, assoc, photo=photo)
+            sentence, engine = self._w._llm_sentence(word, assoc, photo=photo)
             to_write = _sentence_to_write(current, sentence, word)
             if to_write is not None:
                 fields["Sentence"] = to_write
                 sentence = to_write
-                self.step.emit(note_id, "sentence",
-                               "ok" if not any(p in to_write for p in PLACEHOLDERS) else "warn")
+                ok = not any(p in to_write for p in PLACEHOLDERS)
+                self.step.emit(note_id, "sentence", "ok" if ok else "warn",
+                               "" if ok else _sentence_reason_text(engine))
             else:
                 sentence = _clean_text(current)   # keep the real sentence — don't overwrite with a placeholder
-                self.step.emit(note_id, "sentence", "warn")
+                self.step.emit(note_id, "sentence", "warn", _sentence_reason_text(engine))
                 _log.warning("%s: sentence gen failed, kept existing sentence", word)
         else:
             sentence = _clean_text(current)
@@ -1214,7 +1313,7 @@ class BackfillWorker(QThread):
             for key, needed in (("translation", need_translation),
                                 ("sentence_cn", need_sentence_cn)):
                 if needed:
-                    self.step.emit(note_id, key, "warn")
+                    self.step.emit(note_id, key, "warn", "skipped: no sentence")
             need_translation = need_sentence_cn = False
 
         translation_result = [""]
@@ -1224,9 +1323,9 @@ class BackfillWorker(QThread):
         if need_translation or need_sentence_cn:
             def do_translate(w=word, s=sentence):     # both Groq text calls share one thread
                 if need_translation:
-                    translation_result[0] = self._w._groq_translate(w, s)
+                    translation_result[0] = self._w._groq_translate(w, s, reasons=reasons)
                 if need_sentence_cn:
-                    sentence_cn_result[0] = self._w._groq_translate_sentence(s, word=w)
+                    sentence_cn_result[0] = self._w._groq_translate_sentence(s, word=w, reasons=reasons)
             trans_thread = threading.Thread(target=do_translate)
             trans_thread.start()
 
@@ -1242,7 +1341,7 @@ class BackfillWorker(QThread):
         try:
             if audio_batch:
                 self._w._make_audio_batch(audio_batch)
-                self.step.emit(note_id, "audio", "ok")
+                self.step.emit(note_id, "audio", "ok", "")
         finally:
             if trans_thread:
                 trans_thread.join()
@@ -1250,11 +1349,13 @@ class BackfillWorker(QThread):
         if need_translation:
             if translation_result[0]:
                 fields["Translation"] = translation_result[0]
-            self.step.emit(note_id, "translation", "ok" if translation_result[0] else "warn")
+            self.step.emit(note_id, "translation", "ok" if translation_result[0] else "warn",
+                           "" if translation_result[0] else reasons.get("translation", ""))
         if need_sentence_cn:
             if sentence_cn_result[0]:
                 fields["Sentence_CN"] = sentence_cn_result[0]
-            self.step.emit(note_id, "sentence_cn", "ok" if sentence_cn_result[0] else "warn")
+            self.step.emit(note_id, "sentence_cn", "ok" if sentence_cn_result[0] else "warn",
+                           "" if sentence_cn_result[0] else reasons.get("sentence_cn", ""))
 
         if fields:
             payload = json.dumps({
@@ -1382,7 +1483,7 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Complete Missing Cards")
-        self.setMinimumWidth(820)        # room for word col + 5 boxes + the '…added!' badge
+        self.setMinimumWidth(960)        # room for word col + 5 boxes + two short reject reasons on one row
         self.setMinimumHeight(380)
         self._worker = None
         self._rows = {}
@@ -1560,10 +1661,10 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
         self._worker.error.connect(lambda e: self.status.setText(f"Error: {e}"))
         self._worker.start()
 
-    def _on_step(self, note_id, field, state):
+    def _on_step(self, note_id, field, state, reason=""):
         row = self._rows.get(note_id)
         if row:
-            row.set_box(field, state)
+            row.set_box(field, state, reason)
 
     def _on_card_done(self, note_id):
         row = self._rows.get(note_id)

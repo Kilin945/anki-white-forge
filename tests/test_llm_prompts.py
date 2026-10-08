@@ -40,6 +40,20 @@ class TestSentencePrompt:
         assert "6-12 words" in p
         assert "do NOT force in software" in p
 
+    def test_swe_sense_only_for_real_tech_terms(self):
+        # 2026-10-09 事故：penguin 被硬套成 Linux 俚語 → 例句、圖、翻譯整條鏈錯。
+        # SWE 義只給「本身就是標準技術用語」的字；俚語、綽號、吉祥物不算，拿不準用日常義。
+        p = _capture(llm_mod.llm_sentence, "penguin")
+        assert "slang" in p and "mascots" in p
+        assert "When in doubt, use the everyday meaning" in p
+
+
+class TestImageQueryPrompt:
+    def test_swe_sense_only_for_real_tech_terms(self):
+        p = _capture(llm_mod.llm_image_query, "penguin")
+        assert "slang" in p and "mascots" in p
+        assert "when in doubt use the everyday meaning" in p
+
 
 class TestTranslatePrompt:
     def test_follows_sentence_sense(self):

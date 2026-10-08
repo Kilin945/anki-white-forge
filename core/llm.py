@@ -77,7 +77,9 @@ def _sentence_instructions(word, association="", photo=""):
         f'You are helping a software engineer learn the English word "{word}".\n\n'
         f'Pick the meaning to teach, in this priority:\n'
         f'{hint}'
-        f'{swe_n} If "{word}" has a common usage in software engineering / programming / tech, use that sense.\n'
+        f'{swe_n} If "{word}" is itself a standard software engineering / programming / tech term, use that sense. '
+        f'Do NOT stretch: slang, nicknames, mascots and jokes do not count (e.g. "penguin" is not Linux). '
+        f'When in doubt, use the everyday meaning.\n'
         f'{common_n} Otherwise use its most common everyday meaning.\n\n'
         f'Then write ONE example sentence that uses "{word}" naturally and makes its meaning '
         f'obvious — someone who does not know the word should be able to guess it from the '
@@ -320,8 +322,9 @@ def llm_image_query(word, definition=""):
     hint = f' The learner\'s hint for the meaning: "{definition}".' if definition else ""
     result = llm(
         f'Pick the meaning of the English word "{word}" to show in a photo, in this '
-        f'priority: the hint if given; otherwise its software-engineering sense if it has a '
-        f'common one; otherwise its most common everyday meaning.{hint} '
+        f'priority: the hint if given; otherwise its software-engineering sense only if the word is '
+        f'itself a standard tech term (slang, nicknames and mascots do not count; when in doubt use '
+        f'the everyday meaning); otherwise its most common everyday meaning.{hint} '
         f'Give a short stock-photo search query (3-6 words) for a photo that clearly shows '
         f'that meaning. If you picked the software-engineering sense, search for a computer '
         f'or tech scene that shows it; otherwise prefer concrete, visible things. Output only the search query, '

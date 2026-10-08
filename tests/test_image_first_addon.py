@@ -74,8 +74,8 @@ def _worker(image_html, sentence):
         seen["photo"] = photo
         return (sentence, "Groq") if sentence else ("", "failed")
     w._llm_sentence = fake_sentence
-    w._groq_translate = lambda word, s: "梯子"
-    w._groq_translate_sentence = lambda s, word="": "梯子靠在牆上。"
+    w._groq_translate = lambda word, s, **kw: "梯子"
+    w._groq_translate_sentence = lambda s, word="", **kw: "梯子靠在牆上。"
     w._make_audio_batch = lambda items: None
     return w, seen
 
