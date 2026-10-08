@@ -20,7 +20,7 @@ import requests
 _REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 PEXELS_KEY_PATH = os.path.join(_REPO, ".pexels_key")
 PIXABAY_KEY_PATH = os.path.join(_REPO, ".pixabay_key")
-REJECTS_PATH = os.path.join(_REPO, "image_rejects.json")   # KEEP-IN-SYNC: addon/__init__.py::IMAGE_REJECTS_PATH
+REJECTS_PATH = os.path.join(_REPO, "image_rejects.json")   # KEEP-IN-SYNC: addon/_config.py::IMAGE_REJECTS_PATH
 PEXELS_API = "https://api.pexels.com/v1/search"
 WIKIMEDIA_API = "https://commons.wikimedia.org/w/api.php"
 OPENVERSE_API = "https://api.openverse.org/v1/images/"

@@ -53,7 +53,7 @@ def llm(prompt, effort="low"):
     return groq_generate(prompt, effort=effort)
 
 
-# 例句裡沒出現單字時重問一次用的加註（KEEP-IN-SYNC addon/__init__.py::_WORD_MUST_APPEAR_TEMPLATE）
+# 例句裡沒出現單字時重問一次用的加註（KEEP-IN-SYNC addon/_llm.py::_WORD_MUST_APPEAR_TEMPLATE）
 WORD_MUST_APPEAR_TEMPLATE = (
     '\n\nThe sentence must contain the exact word "{word}", spelled exactly like that '
     '(not another form of it), so the card can highlight it.'
@@ -74,7 +74,7 @@ def _sentence_instructions(word, association="", photo="", must_contain=False):
     """Shared meaning-selection + sentence-quality rules for example-sentence prompts.
     Priority: hint (association) > software-engineering sense > most common everyday sense.
     photo（照片描述）非空時在結尾附 PHOTO_BLOCK_TEMPLATE：句子依圖造，但詞義優先序不變。
-    KEEP IN SYNC with addon/__init__.py::_sentence_prompt (含 photo block) — the addon cannot
+    KEEP IN SYNC with addon/_llm.py::_sentence_prompt (含 photo block) — the addon cannot
     import core, so it keeps a deliberate duplicate. Change one → change both."""
     hint = f'1. If a hint is given, use the sense the hint points to. Hint: "{association}"\n' if association else ""
     swe_n = "2." if association else "1."
@@ -112,7 +112,7 @@ def _ask_sentence(word, association="", photo="", must_contain=False):
 
 def llm_sentence(word, association="", photo=""):
     """例句；句子裡沒出現單字（卡片高亮不到）就帶 must_contain 重問一次，重問仍沒有也照收。
-    KEEP-IN-SYNC: addon/__init__.py::Worker._llm_sentence（同樣的重問邏輯）。"""
+    KEEP-IN-SYNC: addon/_workers.py::Worker._llm_sentence（同樣的重問邏輯）。"""
     result = _ask_sentence(word, association, photo)
     if result and not sentence_has_word(word, result):
         retry = _ask_sentence(word, association, photo, must_contain=True)
@@ -121,7 +121,7 @@ def llm_sentence(word, association="", photo=""):
     return result
 
 
-# KEEP-IN-SYNC: addon/__init__.py（_groq_translate 與 _groq_translate_sentence 的 prompt）
+# KEEP-IN-SYNC: addon/_workers.py（Worker._groq_translate 與 _groq_translate_sentence 的 prompt）
 _TW_RULE = "Write Traditional Chinese as used in Taiwan; never use Simplified Chinese characters. "
 
 
@@ -158,7 +158,7 @@ def _accept_word_translation(word, reply):
     input word (e.g. word 'spring' -> 'Spring Boot', 'kafka' -> 'Apache Kafka'). Reject
     refusals / preambles / junk that do not echo the word (e.g. 'None', 'I cannot translate').
     Returns the accepted reply, or '' to reject.
-    KEEP IN SYNC with addon/__init__.py::_accept_word_translation (addon cannot import core)."""
+    KEEP IN SYNC with addon/_text.py::_accept_word_translation (addon cannot import core)."""
     reply = (reply or "").strip()
     if not reply:
         return ""
@@ -179,7 +179,7 @@ def _accept_word_translation(word, reply):
 # （事故：dealing with 的 Sentence_CN 連按三次 ⌘S 都空的，2026-10-02）。
 # 清單存在 repo 根目錄 translation_terms.json（gitignored，⌘D 視窗維護）；
 # 檔案不存在就用下面的預設，第一次寫入才建檔。
-# KEEP-IN-SYNC: addon/__init__.py::DEFAULT_TRANSLATION_TERMS
+# KEEP-IN-SYNC: addon/_config.py::DEFAULT_TRANSLATION_TERMS
 DEFAULT_TRANSLATION_TERMS = [
     "null pointer exception",
     "race condition",
@@ -200,7 +200,7 @@ DEFAULT_TRANSLATION_TERMS = [
     "command line",
     "open source",
 ]
-TERMS_PATH = os.path.join(_REPO, "translation_terms.json")   # KEEP-IN-SYNC: addon/__init__.py::TRANSLATION_TERMS_PATH
+TERMS_PATH = os.path.join(_REPO, "translation_terms.json")   # KEEP-IN-SYNC: addon/_config.py::TRANSLATION_TERMS_PATH
 _PHRASE_RE = re.compile(r"[A-Za-z][A-Za-z'\-]*(?: [A-Za-z][A-Za-z'\-]*)+")
 
 
@@ -230,7 +230,7 @@ def _backup_bad_terms_file(target):
 def load_translation_terms(path=None):
     """讀 translation_terms.json → {"terms": [...], "pending": [...]}。
     缺檔／壞 JSON／欄位型別錯一律退回預設清單，不崩潰。
-    KEEP-IN-SYNC: addon/__init__.py::load_translation_terms。"""
+    KEEP-IN-SYNC: addon/_text.py::load_translation_terms。"""
     default = {"terms": list(DEFAULT_TRANSLATION_TERMS), "pending": []}
     target = path or TERMS_PATH
     try:
@@ -252,7 +252,7 @@ def load_translation_terms(path=None):
 
 def save_translation_terms(data, path=None):
     """寫檔（terms 去重小寫去空白；pending 以 term 去重）。失敗回 False。
-    KEEP-IN-SYNC: addon/__init__.py::save_translation_terms。"""
+    KEEP-IN-SYNC: addon/_text.py::save_translation_terms。"""
     pending, seen = [], set()
     for p in data.get("pending", []):
         key = p["term"].strip().lower()
@@ -279,7 +279,7 @@ def save_translation_terms(data, path=None):
 def record_rejected_translation(word, translation, path=None):
     """被驗證丟掉的翻譯 → 把裡面連續 ≥2 個英文字的片語記成待審（pending）。
     回傳新加的 term 列表；沒有新片語就不寫檔。
-    KEEP-IN-SYNC: addon/__init__.py::record_rejected_translation。"""
+    KEEP-IN-SYNC: addon/_text.py::record_rejected_translation。"""
     with _TERMS_LOCK:                                   # 讀-改-寫整段互斥
         data = load_translation_terms(path)
         known = {t.strip().lower() for t in data["terms"]} | {p["term"] for p in data["pending"]}
@@ -298,7 +298,7 @@ def record_rejected_translation(word, translation, path=None):
 def _looks_like_chinese_translation(text, terms=None):
     """整句翻譯驗證：要有中文，且扣掉白名單術語後英文字 < 3（3+ 視為前言／英文散文）。
     terms 省略 → 每次重讀 translation_terms.json（不快取，⌘D 改完立即生效）。
-    KEEP-IN-SYNC: addon/__init__.py::_looks_like_chinese_translation。"""
+    KEEP-IN-SYNC: addon/_text.py::_looks_like_chinese_translation。"""
     if not text:
         return False
     if not re.search(r"[一-鿿]", text):                 # must contain Chinese

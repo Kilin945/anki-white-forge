@@ -23,36 +23,36 @@ import addon  # 假 aqt 已由 conftest.py 安裝
 
 @pytest.fixture(autouse=True)
 def _free_batch():
-    addon._batch_release(addon._batch_busy())
+    addon._batch._batch_release(addon._batch._batch_busy())
     yield
-    addon._batch_release(addon._batch_busy())
+    addon._batch._batch_release(addon._batch._batch_busy())
 
 
 class TestBatchMutex:
     def test_acquire_when_free(self):
-        assert addon._batch_acquire("Complete Missing Cards") is True
-        assert addon._batch_busy() == "Complete Missing Cards"
+        assert addon._batch._batch_acquire("Complete Missing Cards") is True
+        assert addon._batch._batch_busy() == "Complete Missing Cards"
 
     def test_second_batch_blocked_even_from_another_window(self):
-        assert addon._batch_acquire("Complete Missing Cards") is True
+        assert addon._batch._batch_acquire("Complete Missing Cards") is True
         # ⌘F 的整句翻譯與 ⌘S 都會寫 Sentence_CN → 不准同時跑
-        assert addon._batch_acquire("Batch Operations") is False
-        assert addon._batch_busy() == "Complete Missing Cards"
+        assert addon._batch._batch_acquire("Batch Operations") is False
+        assert addon._batch._batch_busy() == "Complete Missing Cards"
 
     def test_release_frees_for_the_next_batch(self):
-        addon._batch_acquire("Complete Missing Cards")
-        addon._batch_release("Complete Missing Cards")
-        assert addon._batch_busy() is None
-        assert addon._batch_acquire("Batch Operations") is True
+        addon._batch._batch_acquire("Complete Missing Cards")
+        addon._batch._batch_release("Complete Missing Cards")
+        assert addon._batch._batch_busy() is None
+        assert addon._batch._batch_acquire("Batch Operations") is True
 
     def test_release_by_non_owner_is_ignored(self):
-        addon._batch_acquire("Complete Missing Cards")
-        addon._batch_release("Batch Operations")      # 別的視窗收尾不該解別人的鎖
-        assert addon._batch_busy() == "Complete Missing Cards"
+        addon._batch._batch_acquire("Complete Missing Cards")
+        addon._batch._batch_release("Batch Operations")      # 別的視窗收尾不該解別人的鎖
+        assert addon._batch._batch_busy() == "Complete Missing Cards"
 
     def test_reacquire_by_same_owner_is_allowed(self):
-        assert addon._batch_acquire("Add English Word") is True
-        assert addon._batch_acquire("Add English Word") is True
+        assert addon._batch._batch_acquire("Add English Word") is True
+        assert addon._batch._batch_acquire("Add English Word") is True
 
 
 # ── 關窗不留殭屍 worker ───────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ class _FakeDM:
         self.closed.append(name)
 
 
-class _Dlg(addon._BatchDialogMixin, _FakeBase):
+class _Dlg(addon._batch._BatchDialogMixin, _FakeBase):
     _DM_NAME = "WhiteForgeTest"
     _BATCH_LABEL = "Test Window"
 
@@ -112,7 +112,7 @@ class _Dlg(addon._BatchDialogMixin, _FakeBase):
 @pytest.fixture
 def dm(monkeypatch):
     fake = _FakeDM()
-    monkeypatch.setattr(addon.aqt, "dialogs", fake)
+    monkeypatch.setattr(addon._batch.aqt, "dialogs", fake)
     return fake
 
 
@@ -150,9 +150,9 @@ class TestCloseWhileRunning:
 
     def test_end_batch_releases_the_mutex(self, dm):
         dlg = _Dlg(worker=_FakeWorker(running=False))
-        addon._batch_acquire(_Dlg._BATCH_LABEL)
+        addon._batch._batch_acquire(_Dlg._BATCH_LABEL)
         dlg._end_batch()
-        assert addon._batch_busy() is None
+        assert addon._batch._batch_busy() is None
 
 
 class TestAnkiShutdown:
@@ -179,7 +179,7 @@ class TestAnkiShutdown:
 class TestDialogManagerRegistration:
     def test_all_three_batch_dialogs_are_registered(self):
         assert set(addon._DM_NAMES) == {
-            addon.AddWordDialog, addon.BackfillDialog, addon.BatchOperationsDialog,
+            addon._dlg_add.AddWordDialog, addon._dlg_backfill.BackfillDialog, addon._dlg_batch.BatchOperationsDialog,
         }
 
     def test_registry_names_are_unique_and_namespaced(self):
@@ -196,9 +196,9 @@ class TestDialogManagerRegistration:
                 opened.append(name)
                 return _FakeBase()
 
-        monkeypatch.setattr(addon.aqt, "dialogs", _Opener())
-        addon._show_nonmodal(addon.BackfillDialog)
-        assert opened == [addon._DM_NAMES[addon.BackfillDialog]]
+        monkeypatch.setattr(addon._batch.aqt, "dialogs", _Opener())
+        addon._batch._show_nonmodal(addon._dlg_backfill.BackfillDialog)
+        assert opened == [addon._DM_NAMES[addon._dlg_backfill.BackfillDialog]]
 
     def test_batch_dialogs_declare_a_close_contract(self):
         # register_dialog 要求:silentlyClose 或 closeWithCallback,否則退出時收不掉
@@ -208,7 +208,7 @@ class TestDialogManagerRegistration:
 
     def test_rescanning_dialogs_expose_reopen(self):
         # 單例被叫回前面時 DialogManager 會呼叫 reopen() → 重掃,不然清單是舊的
-        for cls in (addon.BackfillDialog, addon.BatchOperationsDialog):
+        for cls in (addon._dlg_backfill.BackfillDialog, addon._dlg_batch.BatchOperationsDialog):
             assert hasattr(cls, "reopen"), f"{cls.__name__} 缺 reopen(),叫回來會是舊清單"
 
 
@@ -223,8 +223,8 @@ class TestLiveNote:
         class _Mw:
             col = _Col()
 
-        monkeypatch.setattr(addon, "mw", _Mw())
-        assert addon._live_note(123) is None
+        monkeypatch.setattr(addon._batch, "mw", _Mw())
+        assert addon._batch._live_note(123) is None
 
     def test_returns_the_note_when_it_exists(self, monkeypatch):
         sentinel = object()
@@ -236,5 +236,5 @@ class TestLiveNote:
         class _Mw:
             col = _Col()
 
-        monkeypatch.setattr(addon, "mw", _Mw())
-        assert addon._live_note(123) is sentinel
+        monkeypatch.setattr(addon._batch, "mw", _Mw())
+        assert addon._batch._live_note(123) is sentinel

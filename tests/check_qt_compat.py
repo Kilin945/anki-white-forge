@@ -182,23 +182,23 @@ def main():
     @check("addon 的對話框真的繼承 QDialog（不是替身）")
     def _():
         from PyQt6.QtWidgets import QDialog
-        assert issubclass(addon.AddWordDialog, QDialog), addon.AddWordDialog.__mro__
+        assert issubclass(addon._dlg_add.AddWordDialog, QDialog), addon._dlg_add.AddWordDialog.__mro__
         return "pytest 的假 aqt 驗不到這件事"
 
     print("\n對話框建構（含 __init__ 裡的掃描）")
-    for cls_name in ("AddWordDialog", "BackfillDialog", "BatchOperationsDialog",
-                     "TranslationTermsDialog"):
+    for mod_name, cls_name in (("_dlg_add", "AddWordDialog"), ("_dlg_backfill", "BackfillDialog"),
+                               ("_dlg_batch", "BatchOperationsDialog"), ("_dlg_terms", "TranslationTermsDialog")):
         @check(f"{cls_name} 建構 + 掃描")
-        def _(cls_name=cls_name):
-            dlg = getattr(addon, cls_name)(mw)
+        def _(mod_name=mod_name, cls_name=cls_name):
+            dlg = getattr(getattr(addon, mod_name), cls_name)(mw)
             dlg.close()
             return None
 
     print("\n快捷鍵")
     @check("四組快捷鍵都綁上且互不重複")
     def _():
-        got = {k: a.shortcut().toString() for k, a in addon.ACTIONS.items()}
-        assert set(got) == set(addon.DEFAULT_SHORTCUTS), got
+        got = {k: a.shortcut().toString() for k, a in addon._config.ACTIONS.items()}
+        assert set(got) == set(addon._config.DEFAULT_SHORTCUTS), got
         used = [s for s in got.values() if s]
         assert len(used) == len(set(used)), f"重複:{got}"
         return ", ".join(f"{k}={v}" for k, v in sorted(got.items()))
@@ -213,7 +213,7 @@ def main():
 
     @check("open() 拿到單例,第二次同一個物件並觸發 reopen()")
     def _():
-        name = addon._DM_NAMES[addon.BackfillDialog]
+        name = addon._DM_NAMES[addon._dlg_backfill.BackfillDialog]
         first = aqt.dialogs.open(name)
         second = aqt.dialogs.open(name)
         assert first is second, "不是單例 → 會同時開兩個批次"

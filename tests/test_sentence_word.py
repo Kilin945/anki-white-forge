@@ -13,14 +13,14 @@ import core.text as text_mod
 class TestHasWord:
     def test_exact_and_inflected_prefix(self):
         assert text_mod.sentence_has_word("penguin", "The penguins slid on the ice.")
-        assert addon._sentence_has_word("penguin", "The penguins slid on the ice.")
+        assert addon._text._sentence_has_word("penguin", "The penguins slid on the ice.")
 
     def test_case_insensitive(self):
         assert text_mod.sentence_has_word("penguin", "Penguin colonies are loud.")
 
     def test_irregular_form_is_not_matched_like_the_template(self):
         assert not text_mod.sentence_has_word("sweep", "She swept the crumbs off the table.")
-        assert not addon._sentence_has_word("sweep", "She swept the crumbs off the table.")
+        assert not addon._text._sentence_has_word("sweep", "She swept the crumbs off the table.")
 
     def test_phrase_must_appear_whole(self):
         assert text_mod.sentence_has_word("figure out", "I will figure out the bug.")
@@ -28,7 +28,7 @@ class TestHasWord:
 
     def test_html_and_nbsp_in_word_are_ignored(self):
         assert text_mod.sentence_has_word("<b>penguin</b>&nbsp;", "A penguin waddled by.")
-        assert addon._sentence_has_word("<b>penguin</b>&nbsp;", "A penguin waddled by.")
+        assert addon._text._sentence_has_word("<b>penguin</b>&nbsp;", "A penguin waddled by.")
 
     def test_empty(self):
         assert not text_mod.sentence_has_word("", "A penguin.")
@@ -37,7 +37,7 @@ class TestHasWord:
 
 class TestPromptAddendum:
     def test_core_and_addon_prompts_match_with_must_contain(self):
-        assert addon._sentence_prompt("penguin", "", "", must_contain=True) == (
+        assert addon._llm._sentence_prompt("penguin", "", "", must_contain=True) == (
             llm_mod._sentence_instructions("penguin", "", "", must_contain=True)
             + "\n\nOutput only the sentence. No explanation, no quotes.")
 
@@ -78,7 +78,7 @@ class TestRetryCore:
 
 class TestRetryAddon:
     def _worker(self):
-        w = addon.Worker.__new__(addon.Worker)
+        w = addon._workers.Worker.__new__(addon._workers.Worker)
         w.word, w.association, w.media_dir = "penguin", "", "/tmp"
         return w
 
@@ -87,12 +87,12 @@ class TestRetryAddon:
         seen = []
         def fake_chat(prompt, **kw):
             seen.append(prompt); return next(replies)
-        with patch.object(addon, "_groq_chat", fake_chat):
+        with patch.object(addon._llm, "_groq_chat", fake_chat):
             assert self._worker()._llm_sentence("penguin") == ("The penguin waddled across the ice.", "Groq")
         assert len(seen) == 2 and "must contain the exact word" in seen[1]
 
     def test_no_retry_when_word_present(self):
         seen = []
-        with patch.object(addon, "_groq_chat", lambda p, **kw: seen.append(p) or "The penguin waddled by."):
+        with patch.object(addon._llm, "_groq_chat", lambda p, **kw: seen.append(p) or "The penguin waddled by."):
             assert self._worker()._llm_sentence("penguin")[0] == "The penguin waddled by."
         assert len(seen) == 1

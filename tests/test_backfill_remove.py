@@ -16,45 +16,45 @@ import addon  # noqa: E402  (假 aqt 已由 conftest.py 安裝)
 class TestDropNotes:
     def test_drops_only_the_given_ids(self):
         notes = [{"noteId": 1}, {"noteId": 2}, {"noteId": 3}]
-        kept = addon._drop_notes(notes, {1, 3})
+        kept = addon._dlg_backfill._drop_notes(notes, {1, 3})
         assert [n["noteId"] for n in kept] == [2]
 
     def test_empty_remove_keeps_all(self):
         notes = [{"noteId": 1}, {"noteId": 2}]
-        assert addon._drop_notes(notes, set()) == notes
+        assert addon._dlg_backfill._drop_notes(notes, set()) == notes
 
     def test_remove_all_yields_empty(self):
         notes = [{"noteId": 1}, {"noteId": 2}]
-        assert addon._drop_notes(notes, {1, 2}) == []
+        assert addon._dlg_backfill._drop_notes(notes, {1, 2}) == []
 
     def test_preserves_order_of_survivors(self):
         notes = [{"noteId": 10}, {"noteId": 20}, {"noteId": 30}, {"noteId": 40}]
-        kept = addon._drop_notes(notes, {20})
+        kept = addon._dlg_backfill._drop_notes(notes, {20})
         assert [n["noteId"] for n in kept] == [10, 30, 40]
 
     def test_does_not_mutate_input(self):
         notes = [{"noteId": 1}, {"noteId": 2}]
-        addon._drop_notes(notes, {1})
+        addon._dlg_backfill._drop_notes(notes, {1})
         assert [n["noteId"] for n in notes] == [1, 2]      # 原 list 不動
 
 
 # ── _removal_status:移除後狀態列文字 ──────────────────────────────────────────
 class TestRemovalStatus:
     def test_some_still_need_filling(self):
-        s = addon._removal_status(removed=3, remaining=4)
+        s = addon._dlg_backfill._removal_status(removed=3, remaining=4)
         assert "Removed 3" in s
         assert "4 still need filling" in s
         assert "selected" in s.lower()          # 剩下的勾還在,可以直接再按 Complete
 
     def test_all_cleared(self):
-        s = addon._removal_status(removed=5, remaining=0)
+        s = addon._dlg_backfill._removal_status(removed=5, remaining=0)
         assert "cleared" in s.lower()
         assert "still need filling" not in s
 
     def test_no_sync_reminder(self):
         # 批次跑完會自動同步（_sync_after_batch），不再叫使用者自己按
-        assert "sync" not in addon._removal_status(1, 2).lower()
-        assert "sync" not in addon._removal_status(1, 0).lower()
+        assert "sync" not in addon._dlg_backfill._removal_status(1, 2).lower()
+        assert "sync" not in addon._dlg_backfill._removal_status(1, 0).lower()
 
 
 # ── _finished_ids:跑完一批後,哪幾列該從清單上拿掉 ─────────────────────────────
@@ -79,29 +79,29 @@ def _note(**overrides):
 
 class TestFinishedIds:
     def test_complete_card_counts_as_finished(self):
-        assert addon._finished_ids([1], {1: _note()}.get) == {1}
+        assert addon._dlg_backfill._finished_ids([1], {1: _note()}.get) == {1}
 
     def test_card_missing_a_field_is_not_finished(self):
         lookup = {1: _note(Translation="")}.get
-        assert addon._finished_ids([1], lookup) == set()
+        assert addon._dlg_backfill._finished_ids([1], lookup) == set()
 
     def test_每個欄位都會擋下(self):
         for field in ("Sentence", "Audio", "Front_Audio", "Image_Prompt",
                       "Translation", "Sentence_CN"):
             lookup = {1: _note(**{field: ""})}.get
-            assert addon._finished_ids([1], lookup) == set(), f"{field} 缺了卻算完成"
+            assert addon._dlg_backfill._finished_ids([1], lookup) == set(), f"{field} 缺了卻算完成"
 
     def test_placeholder_sentence_is_not_finished(self):
-        lookup = {1: _note(Sentence=addon.PLACEHOLDERS[0])}.get
-        assert addon._finished_ids([1], lookup) == set()
+        lookup = {1: _note(Sentence=addon._config.PLACEHOLDERS[0])}.get
+        assert addon._dlg_backfill._finished_ids([1], lookup) == set()
 
     def test_deleted_card_counts_as_finished(self):
         # 視窗開著時卡片被別處刪掉(刪重複/Browse)→ 既補不了也不用補,留在清單上只是雜訊
-        assert addon._finished_ids([1], {}.get) == {1}
+        assert addon._dlg_backfill._finished_ids([1], {}.get) == {1}
 
     def test_mixed_list_keeps_the_unfinished_ones(self):
         lookup = {1: _note(), 2: _note(Translation=""), 3: _note()}.get
-        assert addon._finished_ids([1, 2, 3], lookup) == {1, 3}
+        assert addon._dlg_backfill._finished_ids([1, 2, 3], lookup) == {1, 3}
 
     def test_empty_list(self):
-        assert addon._finished_ids([], {}.get) == set()
+        assert addon._dlg_backfill._finished_ids([], {}.get) == set()

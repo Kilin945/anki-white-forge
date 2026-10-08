@@ -37,7 +37,7 @@ REAL_SENTENCES = [
 
 def _both_gates():
     """core 與 addon 兩份實作（KEEP-IN-SYNC）都要套同一組案例。"""
-    return [("core", sentence_acceptable), ("addon", addon._sentence_acceptable)]
+    return [("core", sentence_acceptable), ("addon", addon._text._sentence_acceptable)]
 
 
 class TestSentenceAcceptable:

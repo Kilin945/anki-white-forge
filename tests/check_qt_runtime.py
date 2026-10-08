@@ -143,14 +143,14 @@ def stub_sentence(self, word, association="", photo=""):
     GATE.wait(timeout=30)
     return (f"The engineer used {word} in a short stub sentence.", "Stub")
 
-addon.Worker._llm_sentence            = stub_sentence
-addon.Worker._groq_sentence           = lambda self,w,a="",photo="": f"stub {w}"
-addon.Worker._groq_translate          = lambda self,w,s,reasons=None: "字義"
-addon.Worker._groq_translate_sentence = lambda self,s,strict=False,word="",reasons=None: "這是中文翻譯。"
-addon.Worker._fetch_image             = lambda self,w,definition="": "<img src='stub.jpg'>"
-addon.Worker._make_audio_batch        = lambda self,items: None
-addon._groq_spellcheck                = lambda w: ("ok", None)
-addon.subprocess = types.SimpleNamespace(
+addon._workers.Worker._llm_sentence            = stub_sentence
+addon._workers.Worker._groq_sentence           = lambda self,w,a="",photo="": f"stub {w}"
+addon._workers.Worker._groq_translate          = lambda self,w,s,reasons=None: "字義"
+addon._workers.Worker._groq_translate_sentence = lambda self,s,strict=False,word="",reasons=None: "這是中文翻譯。"
+addon._workers.Worker._fetch_image             = lambda self,w,definition="": "<img src='stub.jpg'>"
+addon._workers.Worker._make_audio_batch        = lambda self,items: None
+addon._llm._groq_spellcheck                = lambda w: ("ok", None)
+addon._workers.subprocess = addon._dlg_add.subprocess = types.SimpleNamespace(
     run=lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr=""),
     TimeoutExpired=Exception)
 
@@ -177,13 +177,13 @@ def _fake_urlopen(req, timeout=None):
 
 class _FakeReq:
     def __init__(self, url, data=None, headers=None): self.url=url; self.data=data
-addon.urllib = types.SimpleNamespace(
+addon._workers.urllib = types.SimpleNamespace(
     request=types.SimpleNamespace(urlopen=_fake_urlopen, Request=_FakeReq),
     error=types.SimpleNamespace(HTTPError=Exception, URLError=Exception))
 
 WARNINGS = []
-addon.showWarning = lambda m, *a, **k: WARNINGS.append(m)
-addon.tooltip     = lambda *a, **k: None
+addon._dlg_add.showWarning = addon._dlg_settings.showWarning = addon._dlg_terms.showWarning = lambda m, *a, **k: WARNINGS.append(m)
+addon._dlg_add.tooltip = addon._dlg_settings.tooltip = lambda *a, **k: None
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 def pump(cond, timeout=25.0, label=""):
@@ -217,7 +217,7 @@ def seed(n=3, flagged=0, longsent=0):
     HTTP_CALLS.clear()
 
 def open_backfill():
-    dlg = addon.BackfillDialog(mw); dlg.show(); _app.processEvents(); return dlg
+    dlg = addon._dlg_backfill.BackfillDialog(mw); dlg.show(); _app.processEvents(); return dlg
 
 def select_all_rows(dlg):
     for r in dlg._rows.values(): r.checkbox.setChecked(True)
@@ -260,7 +260,7 @@ def _():
 def _():
     dlg = DLG1
     assert dlg.status.text().startswith("Done — 3 card(s) completed"), dlg.status.text()
-    assert addon._batch_busy() is None, f"批次權沒釋放：{addon._batch_busy()}"
+    assert addon._batch._batch_busy() is None, f"批次權沒釋放：{addon._batch._batch_busy()}"
     assert dlg.remove_btn.isVisible(), "Remove Finished 沒出現"
     assert dlg.remove_btn.text() == "Remove Finished (3)", dlg.remove_btn.text()
     assert not dlg.progress_bar.isVisible(), "進度條沒收起來"
@@ -278,11 +278,11 @@ def _():
 @check("自動同步遇到批次在跑 → 跳過（worker 收尾時會自己再觸發）")
 def _():
     before = mw.syncs
-    assert addon._batch_acquire("Other Batch")
+    assert addon._batch._batch_acquire("Other Batch")
     try:
-        addon._sync_now()
+        addon._batch._sync_now()
     finally:
-        addon._batch_release("Other Batch")
+        addon._batch._batch_release("Other Batch")
     assert mw.syncs == before, "批次在跑還是同步了"
     return "skipped"
 
@@ -326,8 +326,8 @@ DLG1.close(); _app.processEvents()
 def _():
     seed(3)
     fail_word = NAMES[1]
-    orig_translate = addon.Worker._groq_translate
-    addon.Worker._groq_translate = (
+    orig_translate = addon._workers.Worker._groq_translate
+    addon._workers.Worker._groq_translate = (
         lambda self, w, s, reasons=None, _f=fail_word: "" if w == _f else "字義")
     finished_hits, done_ids = [], []
     try:
@@ -342,7 +342,7 @@ def _():
         QTest.mouseClick(dlg.run_btn, Qt.MouseButton.LeftButton)
         pump(lambda: bool(finished_hits), 30, "partial batch finished")
     finally:
-        addon.Worker._groq_translate = orig_translate
+        addon._workers.Worker._groq_translate = orig_translate
     nid_fail = NID_BASE + 1
     assert nid_fail in done_ids, "前提不成立:半成品那張根本沒 emit card_done"
     assert nid_fail not in dlg._finished, "翻譯沒補到的卡被算成完成"
@@ -360,14 +360,14 @@ def _():
 def _():
     seed(3)
     fail_word = NAMES[1]
-    orig_translate = addon.Worker._groq_translate
+    orig_translate = addon._workers.Worker._groq_translate
     def fake_translate(self, w, s, reasons=None, _f=fail_word):
         if w == _f:                      # 走真實路徑的「被退」：reasons 由 _groq_translate 寫
             if reasons is not None:
                 reasons["translation"] = 'got "Linux"'
             return ""
         return "字義"
-    addon.Worker._groq_translate = fake_translate
+    addon._workers.Worker._groq_translate = fake_translate
     finished_hits = []
     try:
         dlg = open_backfill()
@@ -379,7 +379,7 @@ def _():
         QTest.mouseClick(dlg.run_btn, Qt.MouseButton.LeftButton)
         pump(lambda: bool(finished_hits), 30, "batch finished")
     finally:
-        addon.Worker._groq_translate = orig_translate
+        addon._workers.Worker._groq_translate = orig_translate
     row_fail, row_ok = dlg._rows[NID_BASE + 1], dlg._rows[NID_BASE + 0]
     assert row_fail.badge.text() == 'Meaning: got "Linux"', row_fail.badge.text()
     assert row_fail._boxes["translation"].toolTip() == 'got "Linux"', row_fail._boxes["translation"].toolTip()
@@ -405,7 +405,7 @@ def start_held_batch():
     dlg = open_backfill()
     select_all_rows(dlg)
     QTest.mouseClick(dlg.run_btn, Qt.MouseButton.LeftButton)
-    pump(lambda: addon._batch_busy() is not None, 10, "batch acquired")
+    pump(lambda: addon._batch._batch_busy() is not None, 10, "batch acquired")
     pump(lambda: len(WORKER_TIDS) > 0, 10, "worker running")
     return dlg
 
@@ -413,18 +413,18 @@ def start_held_batch():
 def _():
     seed_rich()
     globals()["DLG2"] = start_held_batch()
-    assert addon._batch_busy() == "Complete Missing Cards", addon._batch_busy()
-    assert addon._batch_acquire("Add English Word") is False
-    assert addon._batch_acquire("Batch Operations") is False
-    assert addon._batch_acquire("Complete Missing Cards") is True, "持有者自己被擋"
-    addon._batch_release("Add English Word")          # 非持有者不能解鎖
-    assert addon._batch_busy() == "Complete Missing Cards", "被非持有者解鎖了"
-    return "訊息：" + addon._batch_busy_message()
+    assert addon._batch._batch_busy() == "Complete Missing Cards", addon._batch._batch_busy()
+    assert addon._batch._batch_acquire("Add English Word") is False
+    assert addon._batch._batch_acquire("Batch Operations") is False
+    assert addon._batch._batch_acquire("Complete Missing Cards") is True, "持有者自己被擋"
+    addon._batch._batch_release("Add English Word")          # 非持有者不能解鎖
+    assert addon._batch._batch_busy() == "Complete Missing Cards", "被非持有者解鎖了"
+    return "訊息：" + addon._batch._batch_busy_message()
 
 @check("⌘F 五個 section 的動作在跑批中全被擋（沒有任何寫入）")
 def _():
     snap = dict(mw.col.calls)
-    panel = addon.BatchOperationsDialog(mw); panel.show(); _app.processEvents()
+    panel = addon._dlg_batch.BatchOperationsDialog(mw); panel.show(); _app.processEvents()
     tr, flag, dup, long_, test = panel._sections
     assert tr._notes, "TranslateSection 沒掃到缺翻譯的卡，擋不擋無從測"
     assert flag._flagged, "ClearFlaggedSection 沒掃到紅旗卡"
@@ -448,7 +448,7 @@ def _():
 
 @check("⌘A Add 在跑批中被擋（不會起第二個 Worker）")
 def _():
-    a = addon.AddWordDialog(mw); a.show(); _app.processEvents()
+    a = addon._dlg_add.AddWordDialog(mw); a.show(); _app.processEvents()
     a.word_input.setText("mutexprobe")
     a._on_add()
     assert "batch is already running" in a.status.text(), a.status.text()
@@ -460,12 +460,12 @@ def _():
 # ═══ 3. 跑批中關窗：延後關閉 / _force_close / closeWithCallback ═════════════
 print("\n3) 跑批中關窗的三條路徑")
 
-BF_NAME = addon.BackfillDialog._DM_NAME
+BF_NAME = addon._dlg_backfill.BackfillDialog._DM_NAME
 
 @check("跑批中按 Close：視窗不關，只請 worker 停（done() 的守門）")
 def _():
     dlg = DLG2
-    assert dlg.isVisible() and addon._batch_busy() is not None
+    assert dlg.isVisible() and addon._batch._batch_busy() is not None
     dlg.done(0)                                    # = Close 鈕 / X / Esc 的共同漏斗
     _app.processEvents()
     assert dlg.isVisible(), "視窗直接關掉了 → worker 的 signal 會打到死物件"
@@ -479,14 +479,14 @@ def _():
     dlg = DLG2
     GATE.set()                                     # 放行，讓 worker 收尾
     pump(lambda: not dlg.isVisible(), 30, "deferred close")
-    assert addon._batch_busy() is None, "批次權沒釋放"
+    assert addon._batch._batch_busy() is None, "批次權沒釋放"
     assert dlg._close_pending is False
     return "關窗發生在 worker 收尾之後"
 
 @check("Esc 鍵（QTest 真按鍵）走同一個 done() 漏斗 → 沒跑批時直接關")
 def _():
     seed(2)
-    dlg = addon._show_nonmodal(addon.BackfillDialog)
+    dlg = addon._batch._show_nonmodal(addon._dlg_backfill.BackfillDialog)
     _app.processEvents()
     assert aqt.dialogs._dialogs[BF_NAME][1] is dlg, "aqt.dialogs 沒登記這個實例"
     QTest.keyClick(dlg, Qt.Key.Key_Escape)
@@ -499,10 +499,10 @@ def _():
 def _():
     seed_rich()
     GATE.clear()
-    dlg = addon._show_nonmodal(addon.BackfillDialog)
+    dlg = addon._batch._show_nonmodal(addon._dlg_backfill.BackfillDialog)
     select_all_rows(dlg)
     QTest.mouseClick(dlg.run_btn, Qt.MouseButton.LeftButton)
-    pump(lambda: addon._batch_busy() is not None, 10, "batch acquired")
+    pump(lambda: addon._batch._batch_busy() is not None, 10, "batch acquired")
     assert dlg._active_worker() is not None
     dlg.done(0); _app.processEvents()
     assert dlg.isVisible(), "done() 沒擋住"            # 證明只有 _force_close 關得掉
@@ -513,17 +513,17 @@ def _():
     assert aqt.dialogs._dialogs[BF_NAME][1] is None, "沒 markClosed"
     assert waited <= dlg._CLOSE_WAIT_MS/1000 + 1.5, f"等了 {waited:.1f}s，超過上限"
     GATE.set()
-    pump(lambda: addon._batch_busy() is None, 30, "batch released")
+    pump(lambda: addon._batch._batch_busy() is None, 30, "batch released")
     return f"worker 仍在跑仍關得掉；等待 {waited:.1f}s（上限 {dlg._CLOSE_WAIT_MS/1000}s）"
 
 @check("closeWithCallback（Anki 退出 / 切 profile）：停批、等 thread 真的結束、才回呼")
 def _():
     seed_rich()
     GATE.clear()
-    dlg = addon._show_nonmodal(addon.BackfillDialog)
+    dlg = addon._batch._show_nonmodal(addon._dlg_backfill.BackfillDialog)
     select_all_rows(dlg)
     QTest.mouseClick(dlg.run_btn, Qt.MouseButton.LeftButton)
-    pump(lambda: addon._batch_busy() is not None, 10, "batch acquired")
+    pump(lambda: addon._batch._batch_busy() is not None, 10, "batch acquired")
     called = []
     threading.Timer(0.4, GATE.set).start()          # 模擬手上那張卡做完
     t0 = time.monotonic()
@@ -532,7 +532,7 @@ def _():
     assert called == [1], "callback 沒被呼叫 → Anki 會卡在退出流程"
     assert not dlg.isVisible()
     assert dlg._worker.isRunning() is False, "thread 還活著就放 Anki 卸載 collection"
-    assert addon._batch_busy() is None
+    assert addon._batch._batch_busy() is None
     assert aqt.dialogs._dialogs[BF_NAME][1] is None
     return f"等 {waited:.1f}s（上限 {dlg._STOP_WAIT_MS/1000}s）後才放行"
 
@@ -540,11 +540,11 @@ def _():
 def _():
     seed_rich()
     GATE.clear()
-    dlg = addon._show_nonmodal(addon.BackfillDialog)
-    addon._show_nonmodal(addon.BatchOperationsDialog)
+    dlg = addon._batch._show_nonmodal(addon._dlg_backfill.BackfillDialog)
+    addon._batch._show_nonmodal(addon._dlg_batch.BatchOperationsDialog)
     select_all_rows(dlg)
     QTest.mouseClick(dlg.run_btn, Qt.MouseButton.LeftButton)
-    pump(lambda: addon._batch_busy() is not None, 10, "batch acquired")
+    pump(lambda: addon._batch._batch_busy() is not None, 10, "batch acquired")
     threading.Timer(0.4, GATE.set).start()
     done = []
     aqt.dialogs.closeAll(lambda: done.append(True))
@@ -552,7 +552,7 @@ def _():
     left = [n for n in addon._DM_NAMES.values()
             if aqt.dialogs._dialogs.get(n, [None, None])[1] is not None]
     assert not left, f"沒收乾淨：{left}"
-    assert addon._batch_busy() is None, "批次權沒釋放"
+    assert addon._batch._batch_busy() is None, "批次權沒釋放"
     assert not dlg._worker.isRunning(), "worker 還活著"
     return "兩個視窗（其中一個正在跑批）全部收掉"
 
@@ -581,8 +581,8 @@ def click_modal_button(match, timeout_ms=5000):
 
 @check("拼字建議對話框：AcceptRole 的 Use '<建議>' → 回傳建議字")
 def _():
-    addon.AddWordDialog._spellcheck = lambda self, w: ("typo", "ephemeral")
-    dlg = addon.AddWordDialog(mw); dlg.show(); _app.processEvents()
+    addon._dlg_add.AddWordDialog._spellcheck = lambda self, w: ("typo", "ephemeral")
+    dlg = addon._dlg_add.AddWordDialog(mw); dlg.show(); _app.processEvents()
     hit = click_modal_button("Use '")
     out = dlg._validate_word_ui("ephemerel")
     assert hit, "沒抓到 modal QMessageBox"
@@ -606,7 +606,7 @@ def _():
 
 @check("找不到的字：QMessageBox.question 標準 Yes/No 仍可用")
 def _():
-    addon.AddWordDialog._spellcheck = lambda self, w: ("nonword", None)
+    addon._dlg_add.AddWordDialog._spellcheck = lambda self, w: ("nonword", None)
     hit = click_modal_button("Yes")
     out = DLG4._validate_word_ui("zzqqxx")
     assert out == "zzqqxx", out
@@ -621,7 +621,7 @@ print("\n5) QTest 送真實按鍵")
 
 @check("QLineEdit 逐字按鍵輸入（keyClicks）")
 def _():
-    dlg = addon.AddWordDialog(mw); dlg.show(); _app.processEvents()
+    dlg = addon._dlg_add.AddWordDialog(mw); dlg.show(); _app.processEvents()
     dlg.word_input.setFocus()
     QTest.keyClicks(dlg.word_input, "serendipity")
     assert dlg.word_input.text() == "serendipity", dlg.word_input.text()
@@ -631,7 +631,7 @@ def _():
 @check("Space 鍵切換勾選框 → 觸發 stateChanged → 按鈕文字跟著變")
 def _():
     seed(2)
-    bf = addon.BackfillDialog(mw); bf.show(); _app.processEvents()
+    bf = addon._dlg_backfill.BackfillDialog(mw); bf.show(); _app.processEvents()
     row = list(bf._rows.values())[0]
     assert bf.run_btn.text() == "Complete Selected (2)", bf.run_btn.text()
     QTest.keyClick(row.checkbox, Qt.Key.Key_Space)      # 取消單列
@@ -648,7 +648,7 @@ def _():
 @check("⌘S 開窗即全選：掃到卡就全部勾好，按一下 Complete Selected 就能跑")
 def _():
     seed(3)
-    bf = addon.BackfillDialog(mw); bf.show(); _app.processEvents()
+    bf = addon._dlg_backfill.BackfillDialog(mw); bf.show(); _app.processEvents()
     assert bf.select_all.isChecked(), "Select all 沒被勾起來"
     assert all(r.is_checked() for r in bf._rows.values()), "有列沒被連動勾到"
     assert bf.run_btn.text() == "Complete Selected (3)", bf.run_btn.text()
@@ -667,7 +667,7 @@ def _():
 @check("⌘S 沒有缺卡時不勾也不啟用：Select all 停用、按鈕 (0)")
 def _():
     seed(0)
-    bf = addon.BackfillDialog(mw); bf.show(); _app.processEvents()
+    bf = addon._dlg_backfill.BackfillDialog(mw); bf.show(); _app.processEvents()
     assert not bf._rows, f"不該掃到列,卻有 {len(bf._rows)} 列"
     assert not bf.select_all.isChecked(), "沒卡卻把 Select all 勾起來"
     assert not bf.select_all.isEnabled(), "沒卡卻啟用 Select all"
@@ -679,7 +679,7 @@ def _():
 @check("三組快捷鍵（Ctrl+A/S/F）真按下去會觸發各自的 handler")
 def _():
     fired = []
-    for key, act in addon.ACTIONS.items():
+    for key, act in addon._config.ACTIONS.items():
         act.triggered.connect(lambda _=False, k=key: fired.append(k))
         mw.addAction(act)                 # 測試環境沒有真的 menubar → 掛到 mw 上收鍵
     mw.show(); _app.processEvents()
@@ -710,9 +710,9 @@ print("\n6) ⌘A Add English Word 完整一輪")
 @check("Enter 觸發預設鈕 → Worker 跑完 → 卡片被建立、欄位齊全")
 def _():
     seed(0)
-    addon.AddWordDialog._spellcheck = lambda self, w: ("ok", None)
+    addon._dlg_add.AddWordDialog._spellcheck = lambda self, w: ("ok", None)
     GATE.set()
-    dlg = addon.AddWordDialog(mw); dlg.show(); _app.processEvents()
+    dlg = addon._dlg_add.AddWordDialog(mw); dlg.show(); _app.processEvents()
     dlg.word_input.setText("probenovel")
     dlg.assoc_input.setText("brand new")
     fin = []
@@ -730,7 +730,7 @@ def _():
     assert note["Front_Audio"] == "[sound:probenovel_word.mp3]"
     assert "<img" in note["Image_Prompt"]
     assert dlg.status.text() == "'probenovel' added!", dlg.status.text()
-    assert addon._batch_busy() is None, "批次權沒釋放"
+    assert addon._batch._batch_busy() is None, "批次權沒釋放"
     assert dlg.word_input.text() == "" and dlg.assoc_input.text() == ""
     globals()["DLG6"] = dlg
     return "8 個欄位全部寫入 + 輸入框清空 + 批次權釋放"
@@ -752,10 +752,10 @@ print("\n7) 非阻塞才會出現的路徑（reopen 重掃 / 卡片被別處刪�
 @check("reopen()：單例被叫回前面會重掃（⌘F 清完 → 一鍵跳 ⌘S 看得到新清單）")
 def _():
     seed(2)
-    dlg = addon._show_nonmodal(addon.BackfillDialog)
+    dlg = addon._batch._show_nonmodal(addon._dlg_backfill.BackfillDialog)
     assert len(dlg._rows) == 2, len(dlg._rows)
     mw.col.add(NID_BASE + 300, Front="freshcard", Association="")   # 期間多了一張缺料的卡
-    again = addon._show_nonmodal(addon.BackfillDialog)
+    again = addon._batch._show_nonmodal(addon._dlg_backfill.BackfillDialog)
     assert again is dlg, "不是單例 → 會同時開兩個批次"
     assert len(dlg._rows) == 3, f"reopen 沒重掃，仍是 {len(dlg._rows)} 列"
     dlg.close(); _app.processEvents()
@@ -764,13 +764,13 @@ def _():
 @check("_live_note：清單還在、卡片已被別處刪掉 → 跳過而不是炸掉")
 def _():
     seed(2)
-    dlg = addon._show_nonmodal(addon.BackfillDialog)
+    dlg = addon._batch._show_nonmodal(addon._dlg_backfill.BackfillDialog)
     select_all_rows(dlg)
     mw.col.remove_notes(list(mw.col._notes))          # 模擬在 Browse 裡刪掉
     QTest.mouseClick(dlg.run_btn, Qt.MouseButton.LeftButton)
     _app.processEvents()
     assert "no longer exist" in dlg.status.text(), dlg.status.text()
-    assert addon._batch_busy() is None, "卡片沒了卻沒把批次權還回去"
+    assert addon._batch._batch_busy() is None, "卡片沒了卻沒把批次權還回去"
     assert dlg._worker is None or not dlg._worker.isRunning()
     dlg.close(); _app.processEvents()
     return dlg.status.text()
@@ -779,14 +779,14 @@ def _():
 def _():
     seed(3)
     GATE.clear()
-    dlg = addon._show_nonmodal(addon.BackfillDialog)
+    dlg = addon._batch._show_nonmodal(addon._dlg_backfill.BackfillDialog)
     select_all_rows(dlg)
     QTest.mouseClick(dlg.run_btn, Qt.MouseButton.LeftButton)
     pump(lambda: len(WORKER_TIDS) > 0, 10, "worker running")
     victim = NID_BASE + 2
     mw.col._notes.pop(victim, None)                   # 跑批中被刪 → AnkiConnect 回 error
     GATE.set()
-    pump(lambda: addon._batch_busy() is None, 30, "finished")
+    pump(lambda: addon._batch._batch_busy() is None, 30, "finished")
     txt = dlg.status.text()
     assert "still need filling" not in txt, txt     # 被刪的卡不該被算成「還缺」
     assert "2 card(s) completed" in txt, txt        # 也不該被算成「已完成」
@@ -798,7 +798,7 @@ def _():
 print("\n8) ⌘F Batch Operations 五個 section 的實際動作")
 
 def fresh_panel():
-    p = addon.BatchOperationsDialog(mw); p.show(); _app.processEvents()
+    p = addon._dlg_batch.BatchOperationsDialog(mw); p.show(); _app.processEvents()
     return (p, *p._sections)
 
 @check("TranslateSection：SentenceCNWorker 整輪跑完（第二種 QThread）")
@@ -816,7 +816,7 @@ def _():
     tr._on_progress = lambda d, t, r: (tids.add(threading.get_ident()), orig(d, t, r))
     run_btn = [b for b, s in tr._mode_btns if s is None][0]     # "Run to completion"
     QTest.mouseClick(run_btn, Qt.MouseButton.LeftButton)
-    pump(lambda: addon._batch_busy() is None, 30, "translate batch done")
+    pump(lambda: addon._batch._batch_busy() is None, 30, "translate batch done")
     assert tids == {MAIN_TID}, f"progress slot 在 {tids}"
     assert all(n["Sentence_CN"] for n in mw.col._notes.values()), "有卡沒被翻到"
     assert "Translated 4 this run, 0 left" in tr.status.text(), tr.status.text()
@@ -835,17 +835,17 @@ def _():
     slow = threading.Event()
     def slow_tr(self, s, strict=False, word="", reasons=None):
         slow.wait(timeout=10); return "慢慢翻的中文。"
-    saved = addon.Worker._groq_translate_sentence
-    addon.Worker._groq_translate_sentence = slow_tr
+    saved = addon._workers.Worker._groq_translate_sentence
+    addon._workers.Worker._groq_translate_sentence = slow_tr
     try:
         panel, tr, *_ = fresh_panel()
         run_btn = [b for b, s in tr._mode_btns if s is None][0]
         QTest.mouseClick(run_btn, Qt.MouseButton.LeftButton)
-        pump(lambda: addon._batch_busy() is not None, 10, "acquired")
+        pump(lambda: addon._batch._batch_busy() is not None, 10, "acquired")
         QTest.mouseClick(tr.stop_btn, Qt.MouseButton.LeftButton)   # 真的按 Stop
         assert tr.status.text() == "Stopping…", tr.status.text()
         slow.set()
-        pump(lambda: addon._batch_busy() is None, 20, "stopped")
+        pump(lambda: addon._batch._batch_busy() is None, 20, "stopped")
         filled = sum(1 for n in mw.col._notes.values() if n["Sentence_CN"])
         assert filled < 8, f"Stop 沒作用，8 張全翻完了"
         assert tr.status.text().endswith("left."), tr.status.text()
@@ -853,7 +853,7 @@ def _():
         panel.close(); _app.processEvents()
         return f"按下 Stop 後只翻了 {filled}/8 → {tr.status.text()}"
     finally:
-        addon.Worker._groq_translate_sentence = saved
+        addon._workers.Worker._groq_translate_sentence = saved
 
 @check("ClearFlaggedSection：清 6 欄 + 拔旗，Front / Association 保留")
 def _():
@@ -865,20 +865,20 @@ def _():
         mw.col._notes[nid]["Image_Prompt"] = '<img src="a.jpg" data-source="wikimedia:77">'
     rej_dir = tempfile.mkdtemp()
     rej_path = os.path.join(rej_dir, "image_rejects.json")
-    saved_rej = addon.IMAGE_REJECTS_PATH
-    addon.IMAGE_REJECTS_PATH = rej_path
+    saved_rej = addon._config.IMAGE_REJECTS_PATH
+    addon._config.IMAGE_REJECTS_PATH = rej_path
     try:
         QTest.mouseClick(flag.clear_btn, Qt.MouseButton.LeftButton)
         _app.processEvents()
         with open(rej_path) as fh:
             data = json.load(fh)
     finally:
-        addon.IMAGE_REJECTS_PATH = saved_rej
+        addon._config.IMAGE_REJECTS_PATH = saved_rej
         import shutil; shutil.rmtree(rej_dir, ignore_errors=True)
     assert all("wikimedia:77" in v for v in data.values()) and len(data) == 2, data
     for n in mw.col._notes.values():
         assert n["Front"], "Front 被清掉了"
-        for f in addon.REFILL_CLEAR_FIELDS:
+        for f in addon._config.REFILL_CLEAR_FIELDS:
             assert n[f] == "", f"{f} 沒被清"
     assert mw.col.calls["flag"] == 2, mw.col.calls
     assert mw.col.calls["update_note"] == 2
@@ -903,7 +903,7 @@ def _():
     QTest.mouseClick(long_.clear_btn, Qt.MouseButton.LeftButton)
     _app.processEvents()
     for n in mw.col._notes.values():
-        for f in addon.REBUILD_CLEAR_FIELDS:
+        for f in addon._config.REBUILD_CLEAR_FIELDS:
             assert n[f] == "", f"{f} 沒被清"
         assert n["Front_Audio"] == "[sound:y]", "Front_Audio 被清掉了（單字音與句子無關）"
         assert n["Front"]
@@ -919,13 +919,13 @@ def _():
     test.count_input.setText("3")
     QTest.mouseClick(test.add_btn, Qt.MouseButton.LeftButton); _app.processEvents()
     assert mw.col.calls["add_note"] == 3, mw.col.calls
-    made = [n for n in mw.col._notes.values() if addon.TEST_CARD_TAG in n.tags]
+    made = [n for n in mw.col._notes.values() if addon._sec_test_cards.TEST_CARD_TAG in n.tags]
     assert len(made) == 3 and all(n["Front"].startswith("zztest") for n in made)
     assert all(not n["Sentence"] for n in made), "測試卡不該帶句子"
     QTest.mouseClick(test.add_btn, Qt.MouseButton.LeftButton); _app.processEvents()
     assert mw.col.calls["add_note"] == 3, "重複 Add 竟然又建了一次"
     QTest.mouseClick(test.clean_btn, Qt.MouseButton.LeftButton); _app.processEvents()
-    assert not [n for n in mw.col._notes.values() if addon.TEST_CARD_TAG in n.tags]
+    assert not [n for n in mw.col._notes.values() if addon._sec_test_cards.TEST_CARD_TAG in n.tags]
     assert "Deleted 3 test card(s)" in test.status.text(), test.status.text()
     panel.close(); _app.processEvents()
     return test.status.text()
@@ -993,12 +993,12 @@ def _():
     assert "no image" in texts, "沒圖的卡沒顯示佔位"
     thumbs = [b for b in dup.list_w.findChildren(QPushButton) if b.toolTip() == "Click to enlarge"]
     assert len(thumbs) == 1, len(thumbs)
-    assert thumbs[0].iconSize().width() == addon.DUPLICATE_THUMB_PX
+    assert thumbs[0].iconSize().width() == addon._sec_duplicates.DUPLICATE_THUMB_PX
     QTest.mouseClick(thumbs[0], Qt.MouseButton.LeftButton); _app.processEvents()
     pv = dup._preview
     assert isinstance(pv, QDialog) and pv.isVisible(), "點縮圖沒開大圖"
     shown = pv.findChild(QLabel).pixmap()
-    assert max(shown.width(), shown.height()) == addon.DUPLICATE_PREVIEW_PX, shown.size()
+    assert max(shown.width(), shown.height()) == addon._sec_duplicates.DUPLICATE_PREVIEW_PX, shown.size()
     assert abs(shown.width() / shown.height() - 940 / 627) < 0.01, "大圖比例跑掉"
     pv.close(); panel.close(); _app.processEvents()
     return f"大圖 {shown.width()}x{shown.height()}；" + texts[-1]
@@ -1022,14 +1022,14 @@ def _():
 @check("TranslationTermsDialog：Approve／Discard／Add／Manage 清單 Remove 都立刻存檔")
 def _():
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="whiteforge-terms-")) / "translation_terms.json"
-    saved = addon.TRANSLATION_TERMS_PATH
-    addon.TRANSLATION_TERMS_PATH = str(tmp)
+    saved = addon._config.TRANSLATION_TERMS_PATH
+    addon._config.TRANSLATION_TERMS_PATH = str(tmp)
     try:
         tmp.write_text(json.dumps({"terms": ["race condition"], "pending": [
             {"term": "null pointer exception", "word": "dealing with", "translation": "我 null pointer exception。"},
             {"term": "here is the translation", "word": "x", "translation": "Here is the translation: 我。"}]}),
             encoding="utf-8")
-        dlg = addon.TranslationTermsDialog(mw)
+        dlg = addon._dlg_terms.TranslationTermsDialog(mw)
         assert dlg.windowTitle() == "Translation Terms" and dlg.minimumWidth() >= 560
         QTest.mouseClick(dlg.approve_buttons["null pointer exception"], Qt.MouseButton.LeftButton)
         _app.processEvents()
@@ -1064,7 +1064,7 @@ def _():
         dlg.close()
         return "Approve / Discard / Add / Remove 都立刻落檔"
     finally:
-        addon.TRANSLATION_TERMS_PATH = saved
+        addon._config.TRANSLATION_TERMS_PATH = saved
         import shutil; shutil.rmtree(tmp.parent, ignore_errors=True)
 
 # ── 收尾 ────────────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 """pytest 共用設定。
 
 兩件事：
-1. 假 aqt —— `addon/__init__.py` 跑在 Anki 的 Python，會 import `aqt`（測試環境沒有）。
+1. 假 aqt —— `addon/` 套件跑在 Anki 的 Python，會 import `aqt`（測試環境沒有）。
    這裡用「萬用替身」頂替後，測試檔直接 `import addon` 就好，不用各自抄一份 stub
    （曾經 7 個測試檔逐字重複同一份，addon 多 import 一個 Qt 類別就要改 7 次）。
    conftest 保證比測試模組先載入，所以 module 層安裝即可。
@@ -78,4 +78,4 @@ def _isolate_terms_file_global(tmp_path, monkeypatch):
     import addon
     p = str(tmp_path / "translation_terms.json")
     monkeypatch.setattr(core.llm, "TERMS_PATH", p)
-    monkeypatch.setattr(addon, "TRANSLATION_TERMS_PATH", p)
+    monkeypatch.setattr(addon._config, "TRANSLATION_TERMS_PATH", p)

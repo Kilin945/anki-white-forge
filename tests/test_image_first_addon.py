@@ -10,7 +10,7 @@ import core.text as text_mod
 class TestKeepInSync:
     def test_prompt_matches_core(self):
         for args in (("ladder", "", ""), ("thread", "sewing", ""), ("ladder", "", 'A "red" ladder.')):
-            assert addon._sentence_prompt(*args) == (
+            assert addon._llm._sentence_prompt(*args) == (
                 llm_mod._sentence_instructions(*args)
                 + "\n\nOutput only the sentence. No explanation, no quotes.")
 
@@ -18,45 +18,45 @@ class TestKeepInSync:
         cases = [("", "", ""), ("A cat.", "<div>a</div>", ""), ('A "big" dog & <cat>\non grass', "", "wikimedia:12"),
                  ("", "", "pixabay:9"), ("x", "<div>b</div>", 'q"uote:1')]
         for desc, attr, src in cases:
-            h = addon._image_html("f.jpg", desc, attr, src)
+            h = addon._images._image_html("f.jpg", desc, attr, src)
             assert h == text_mod.image_html("f.jpg", desc, attr, src)
-            assert addon._image_alt(h) == text_mod.image_alt(h)
-            assert addon._image_source(h) == text_mod.image_source(h)
+            assert addon._images._image_alt(h) == text_mod.image_alt(h)
+            assert addon._images._image_source(h) == text_mod.image_source(h)
 
     def test_existing_image_without_alt_gives_no_photo(self):
-        assert addon._image_alt('<img src="old.jpg"><div>Photo by X</div>') == ""
+        assert addon._images._image_alt('<img src="old.jpg"><div>Photo by X</div>') == ""
 
     def test_legacy_image_source_is_pexels(self):
-        assert addon._image_source('<img src="old.jpg">') == "pexels:"
-        assert addon._image_source("") == ""
-        assert addon._image_source('<img src="n.jpg" alt="a" data-source="openverse:ab-1">') == "openverse:ab-1"
+        assert addon._images._image_source('<img src="old.jpg">') == "pexels:"
+        assert addon._images._image_source("") == ""
+        assert addon._images._image_source('<img src="n.jpg" alt="a" data-source="openverse:ab-1">') == "openverse:ab-1"
 
 
 class TestFetchImageParsesAlt:
     def test_alt_and_attribution(self, tmp_path):
-        w = addon.Worker.__new__(addon.Worker); w.media_dir = str(tmp_path)
+        w = addon._workers.Worker.__new__(addon._workers.Worker); w.media_dir = str(tmp_path)
         out = SimpleNamespace(returncode=0, stdout="ALT: Ladder on a wall.\nATTRIBUTION: <div>P</div>\n")
-        with patch.object(addon.subprocess, "run", return_value=out) as run:
+        with patch.object(addon._workers.subprocess, "run", return_value=out) as run:
             html = w._fetch_image("ladder", definition="climb")
-        assert addon._image_alt(html) == "Ladder on a wall."
+        assert addon._images._image_alt(html) == "Ladder on a wall."
         assert html.endswith("<div>P</div>")
         assert "--sentence" not in run.call_args.args[0]
 
     def test_source_line_parsed_into_data_source(self, tmp_path):
-        w = addon.Worker.__new__(addon.Worker); w.media_dir = str(tmp_path)
+        w = addon._workers.Worker.__new__(addon._workers.Worker); w.media_dir = str(tmp_path)
         out = SimpleNamespace(returncode=0,
                               stdout="ALT: Ladder on a wall.\nATTRIBUTION: <div>P</div>\nSOURCE: wikimedia:555\n")
-        with patch.object(addon.subprocess, "run", return_value=out):
+        with patch.object(addon._workers.subprocess, "run", return_value=out):
             html = w._fetch_image("ladder")
-        assert addon._image_source(html) == "wikimedia:555"
-        assert addon._image_alt(html) == "Ladder on a wall."
+        assert addon._images._image_source(html) == "wikimedia:555"
+        assert addon._images._image_alt(html) == "Ladder on a wall."
 
     def test_missing_source_line_gives_legacy_pexels(self, tmp_path):
-        w = addon.Worker.__new__(addon.Worker); w.media_dir = str(tmp_path)
+        w = addon._workers.Worker.__new__(addon._workers.Worker); w.media_dir = str(tmp_path)
         out = SimpleNamespace(returncode=0, stdout="ALT: x\n")
-        with patch.object(addon.subprocess, "run", return_value=out):
+        with patch.object(addon._workers.subprocess, "run", return_value=out):
             html = w._fetch_image("ladder")
-        assert 'data-source' not in html and addon._image_source(html) == "pexels:"
+        assert 'data-source' not in html and addon._images._image_source(html) == "pexels:"
 
 
 class _Emit:
@@ -65,7 +65,7 @@ class _Emit:
 
 
 def _worker(image_html, sentence):
-    w = addon.Worker.__new__(addon.Worker)
+    w = addon._workers.Worker.__new__(addon._workers.Worker)
     w.word, w.association, w.media_dir = "ladder", "", "/tmp"
     w.step, w.finished, w.error = _Emit(), _Emit(), _Emit()
     seen = {}
@@ -121,7 +121,7 @@ def _note(sentence="", image="", **extra):
 
 
 def _run_s(note, image_html, sentence):
-    bw = addon.BackfillWorker.__new__(addon.BackfillWorker)
+    bw = addon._workers.BackfillWorker.__new__(addon._workers.BackfillWorker)
     bw.media_dir = "/tmp"
     bw._hit_limit = False; bw._stopped = False; bw.retry_after = 0; bw.limit_resets = {}
     bw.step, bw.card_done = _Emit(), _Emit()
@@ -134,16 +134,16 @@ def _run_s(note, image_html, sentence):
         return (sentence, "Groq") if sentence else ("", "failed")
     w._fetch_image = fetch
     w._llm_sentence = llm_sentence
-    w._groq_translate = lambda word, s: "梯子"
-    w._groq_translate_sentence = lambda s, strict=False, word="": "梯子靠在牆上。"
+    w._groq_translate = lambda word, s, **kw: "梯子"
+    w._groq_translate_sentence = lambda s, strict=False, word="", **kw: "梯子靠在牆上。"
     w._make_audio_batch = lambda items: None
     bw._w = w
     sent = {}
     def fake_urlopen(req, timeout=None):
         sent.update(json.loads(req.data.decode())["params"]["note"]["fields"])
         return _Resp()
-    with patch.object(addon._dispatcher, "wall_secs", return_value=0), \
-         patch.object(addon.urllib.request, "urlopen", fake_urlopen):
+    with patch.object(addon._llm._dispatcher, "wall_secs", return_value=0), \
+         patch.object(addon._workers.urllib.request, "urlopen", fake_urlopen):
         bw._process_one(note)
     return log, sent
 

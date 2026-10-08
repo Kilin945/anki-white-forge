@@ -128,6 +128,16 @@ anki/
 │   ├── zh_chars.py            #   簡體字表（tools/gen_zh_chars.py 產生）
 │   └── anki.py                #   AnkiConnect API
 ├── addon/                     # Anki 插件（symlink 到 Anki 的 addons21，改完要重啟 Anki）
+│   ├── __init__.py            #   入口：選單、快捷鍵
+│   ├── _config.py             #   常數、路徑
+│   ├── _text.py               #   純函式：句子守門、翻譯驗證、術語檔
+│   ├── _llm.py                #   LLM 呼叫、造句 prompt
+│   ├── _llm_dispatch.py       #   core 分流的鏡像（插件不能 import core）
+│   ├── _images.py             #   圖片欄位、退圖紀錄
+│   ├── _batch.py              #   批次互斥、自動同步、視窗共用基礎
+│   ├── _workers.py            #   三個背景 worker
+│   ├── _dlg_*.py              #   ⌘A、⌘S、⌘F、⌘D、設定 五個視窗
+│   └── _sec_*.py              #   ⌘F 面板的五個區塊
 ├── templates/                 # 卡片模板 front.html、back.html、style.css
 ├── tests/                     # pytest、conftest.py、兩支 Anki/Qt 相容性檢查
 ├── tools/                     # 偶爾才跑的工具

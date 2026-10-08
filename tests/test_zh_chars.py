@@ -90,24 +90,24 @@ class TestCoreWiring:
 
 class TestAddonWiring:
     def _worker(self):
-        return addon.Worker.__new__(addon.Worker)
+        return addon._workers.Worker.__new__(addon._workers.Worker)
 
     def test_word_translation_converted(self):
-        with patch.object(addon, "_groq_chat", lambda *a, **k: "空指针异常"):
+        with patch.object(addon._llm, "_groq_chat", lambda *a, **k: "空指针异常"):
             assert self._worker()._groq_translate("npe", "x") == "空指針異常"
 
     def test_sentence_whitelist_still_passes(self):
-        with patch.object(addon, "_groq_chat", lambda *a, **k: "我現在正處理 null pointer exception。"):
+        with patch.object(addon._llm, "_groq_chat", lambda *a, **k: "我現在正處理 null pointer exception。"):
             assert self._worker()._groq_translate_sentence("I am dealing with it.") \
                 == "我現在正處理 null pointer exception。"
 
     def test_sentence_converted(self):
-        with patch.object(addon, "_groq_chat", lambda *a, **k: "她挥动手做出了一个手势。"):
+        with patch.object(addon._llm, "_groq_chat", lambda *a, **k: "她挥动手做出了一个手势。"):
             assert self._worker()._groq_translate_sentence("She waved.") == "她揮動手做出了一個手勢。"
 
     def test_prompts_demand_taiwan_traditional(self):
         seen = []
-        with patch.object(addon, "_groq_chat", lambda p, **k: seen.append(p) or "測試"):
+        with patch.object(addon._llm, "_groq_chat", lambda p, **k: seen.append(p) or "測試"):
             w = self._worker()
             w._groq_translate("test", "a test")
             w._groq_translate_sentence("A test.")

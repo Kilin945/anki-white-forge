@@ -297,7 +297,7 @@ class TestNoteComplete:
 
 
 class TestSentenceUsableCore:
-    """CLI 端的句子可用性判斷(gate 下游用;與 addon._sentence_usable KEEP-IN-SYNC)。"""
+    """CLI 端的句子可用性判斷(gate 下游用;與 addon._text._sentence_usable KEEP-IN-SYNC)。"""
 
     def test_real_sentence_usable(self):
         from core.text import sentence_usable

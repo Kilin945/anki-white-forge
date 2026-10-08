@@ -12,38 +12,38 @@ import addon  # noqa: E402  (假 aqt 已由 conftest.py 安裝)
 
 class TestSentenceToWrite:
     def test_generated_nonempty_wins(self):
-        assert addon._sentence_to_write("old sentence", "A new sentence.", "word") == "A new sentence."
+        assert addon._text._sentence_to_write("old sentence", "A new sentence.", "word") == "A new sentence."
 
     def test_generated_empty_current_empty_writes_placeholder(self):
-        result = addon._sentence_to_write("", "", "widget")
+        result = addon._text._sentence_to_write("", "", "widget")
         assert result == "Please add an example sentence for 'widget'."
 
     def test_generated_empty_current_placeholder_writes_placeholder(self):
         current = "Please add an example sentence for 'widget'."
-        result = addon._sentence_to_write(current, "", "widget")
+        result = addon._text._sentence_to_write(current, "", "widget")
         assert result == "Please add an example sentence for 'widget'."
 
     def test_generated_empty_current_real_sentence_returns_none(self):
         # This is the incident: regen failed (rate limit) but a real sentence already
         # exists — must NOT overwrite it with a placeholder.
-        result = addon._sentence_to_write("The widget spins quickly.", "", "widget")
+        result = addon._text._sentence_to_write("The widget spins quickly.", "", "widget")
         assert result is None
 
 
 class TestNeedSentenceAudio:
     def test_placeholder_never_gets_audio(self):
         ph = "Please add an example sentence for 'foo'."
-        assert addon._need_sentence_audio("", ph, True) is False
-        assert addon._need_sentence_audio("[sound:x.mp3]", ph, False) is False
+        assert addon._text._need_sentence_audio("", ph, True) is False
+        assert addon._text._need_sentence_audio("[sound:x.mp3]", ph, False) is False
 
     def test_missing_audio_with_real_sentence(self):
-        assert addon._need_sentence_audio("", "A real sentence.", False) is True
+        assert addon._text._need_sentence_audio("", "A real sentence.", False) is True
 
     def test_rewritten_sentence_forces_regen(self):
-        assert addon._need_sentence_audio("[sound:x.mp3]", "New sentence.", True) is True
+        assert addon._text._need_sentence_audio("[sound:x.mp3]", "New sentence.", True) is True
 
     def test_existing_audio_untouched_when_sentence_unchanged(self):
-        assert addon._need_sentence_audio("[sound:x.mp3]", "Same sentence.", False) is False
+        assert addon._text._need_sentence_audio("[sound:x.mp3]", "Same sentence.", False) is False
 
     def test_empty_sentence_no_audio(self):
-        assert addon._need_sentence_audio("", "", False) is False
+        assert addon._text._need_sentence_audio("", "", False) is False

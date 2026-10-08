@@ -35,35 +35,35 @@ class TestCore:
 class TestAddon:
     def test_keeps_whitelisted_terms(self):
         for t in KEEP:
-            assert addon._looks_like_chinese_translation(t), t
+            assert addon._text._looks_like_chinese_translation(t), t
 
     def test_still_rejects_preamble(self):
         for t in REJECT:
-            assert not addon._looks_like_chinese_translation(t), t
+            assert not addon._text._looks_like_chinese_translation(t), t
 
 
 def test_default_terms_in_sync():
-    assert addon.DEFAULT_TRANSLATION_TERMS == llm_mod.DEFAULT_TRANSLATION_TERMS
+    assert addon._config.DEFAULT_TRANSLATION_TERMS == llm_mod.DEFAULT_TRANSLATION_TERMS
     assert "null pointer exception" in llm_mod.DEFAULT_TRANSLATION_TERMS
 
 
 def test_path_constant_matches_core(monkeypatch):
     monkeypatch.undo()                                  # 比對真正的常數,不是 conftest 導向 tmp 後的值
-    assert addon.TRANSLATION_TERMS_PATH == llm_mod.TERMS_PATH
+    assert addon._config.TRANSLATION_TERMS_PATH == llm_mod.TERMS_PATH
     assert llm_mod.TERMS_PATH.endswith("translation_terms.json")
 
 
 # ── 檔案層：兩份實作（core／addon）行為必須一致 ─────────────────────────────
-IMPLS = [
-    pytest.param((llm_mod, "TERMS_PATH"), id="core"),
-    pytest.param((addon, "TRANSLATION_TERMS_PATH"), id="addon"),
+IMPLS = [   # (放函式的模組, 放路徑常數的模組, 常數名) — addon 拆檔後函式在 _text、路徑在 _config
+    pytest.param((llm_mod, llm_mod, "TERMS_PATH"), id="core"),
+    pytest.param((addon._text, addon._config, "TRANSLATION_TERMS_PATH"), id="addon"),
 ]
 
 
 @pytest.fixture(params=IMPLS)
 def impl(request):
-    mod, path_attr = request.param
-    return mod, getattr(mod, path_attr)
+    mod, path_mod, path_attr = request.param
+    return mod, getattr(path_mod, path_attr)
 
 
 def _write(path, obj):
@@ -201,8 +201,8 @@ class TestLlmTranslateRecords:
         assert not os.path.exists(_terms_path)
 
     def test_addon_worker_collects_new_terms(self, monkeypatch, _terms_path):
-        monkeypatch.setattr(addon, "_groq_chat", lambda *a, **k: "Here is the translation: 我很忙。")
-        w = addon.Worker.__new__(addon.Worker)
+        monkeypatch.setattr(addon._llm, "_groq_chat", lambda *a, **k: "Here is the translation: 我很忙。")
+        w = addon._workers.Worker.__new__(addon._workers.Worker)
         w.new_pending_terms = []
         assert w._groq_translate_sentence("I am busy.", word="busy") == ""
         assert w.new_pending_terms == ["here is the translation"]
@@ -244,9 +244,9 @@ class TestHardening:
                 mp.undo()
         else:
             mp = pytest.MonkeyPatch()
-            mp.setattr(addon, "_groq_chat", lambda *a, **k: "I'm dealing with a null pointer exception now.")
+            mp.setattr(addon._llm, "_groq_chat", lambda *a, **k: "I'm dealing with a null pointer exception now.")
             try:
-                w = addon.Worker.__new__(addon.Worker); w.new_pending_terms = []
+                w = addon._workers.Worker.__new__(addon._workers.Worker); w.new_pending_terms = []
                 assert w._groq_translate_sentence("x y.", word="w") == ""
                 assert w.new_pending_terms == []
             finally:

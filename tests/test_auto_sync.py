@@ -8,7 +8,7 @@ import addon
 def allowed(**overrides):
     state = dict(logged_in=True, media_syncing=False, progress_busy=False, batch_owner=None)
     state.update(overrides)
-    return addon._auto_sync_allowed(**state)
+    return addon._batch._auto_sync_allowed(**state)
 
 
 def test_syncs_when_idle_and_logged_in():
