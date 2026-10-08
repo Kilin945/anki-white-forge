@@ -5,10 +5,19 @@
 冷卻過後 HALF-OPEN 放一筆試探。failover：選中的失敗 → 依序換下一家。
 兩家都不可用 → raise AllProvidersLimited（帶每家 reset 秒數，政策由呼叫端決定）。
 """
+import re
 import threading
 import time
 
 from core.providers import ProviderError
+
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")   # 留 \t \n \r
+
+
+def clean_llm_text(text):
+    """去掉 LLM 回覆裡的控制字元（實測 Groq 回過 'penguin on ice\\x00'）。換行與 tab 保留：
+    句子守門靠換行擋洩漏。KEEP-IN-SYNC: core/dispatcher.py 與 addon/_llm_dispatch.py 各一份。"""
+    return _CONTROL_CHAR_RE.sub("", text) if text else text
 
 
 class CircuitBreaker:
@@ -88,7 +97,7 @@ class Dispatcher:
                 text = p.generate(prompt, temperature=temperature, max_tokens=max_tokens,
                                   effort=effort)
                 self._breakers[p.name].record_success()
-                return text
+                return clean_llm_text(text)
             except ProviderError as e:
                 cooldown = getattr(e, "retry_after", None)
                 self._breakers[p.name].record_failure(cooldown)

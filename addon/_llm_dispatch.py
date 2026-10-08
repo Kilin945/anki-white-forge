@@ -198,6 +198,14 @@ class LocalBucketLimiter:
         with self._lock:
             self._exhausted_until = time.monotonic() + float(retry_after)
 
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")   # 留 \t \n \r
+
+
+def clean_llm_text(text):
+    """去掉 LLM 回覆裡的控制字元（實測 Groq 回過 'penguin on ice\\x00'）。換行與 tab 保留：
+    句子守門靠換行擋洩漏。KEEP-IN-SYNC: core/dispatcher.py 與 addon/_llm_dispatch.py 各一份。"""
+    return _CONTROL_CHAR_RE.sub("", text) if text else text
+
 
 class CircuitBreaker:
     """三態斷路器：CLOSED →（連續失敗達 threshold）→ OPEN →（冷卻到期）→ HALF-OPEN
@@ -456,7 +464,7 @@ class Dispatcher:
                                   max_tokens=max_tokens, timeout=timeout,
                                   effort=effort)
                 self._breakers[p.name].record_success()
-                return text
+                return clean_llm_text(text)
             except ProviderRateLimited as e:
                 self._breakers[p.name].record_failure(e.retry_after)
                 _log.warning("%s 429 retry_after=%s", p.name, e.retry_after)
