@@ -54,6 +54,16 @@ def sentence_acceptable(text):
     return len(text.split()) <= MAX_SENTENCE_WORDS
 
 
+def sentence_has_word(word, text):
+    """例句裡找得到單字嗎——規則**跟 templates/back.html 的高亮一樣**：單字是句子的子字串、
+    不分大小寫（模板是 `new RegExp(word + "[a-z]*", "gi")`，所以 penguin 配得到 penguins，
+    sweep 配不到 swept）。這只是「卡片高亮得到嗎」的偵測，不是退句子的門：量過 1105 張卡
+    硬擋會誤殺 49 張（不規則動詞、片語拆開用），所以呼叫端是「沒有就重問一次」。
+    KEEP-IN-SYNC: addon/__init__.py::_sentence_has_word。"""
+    w = strip_html(word or "").lower()
+    return bool(w) and w in (text or "").lower()
+
+
 def has_image(value):
     return "<img" in value
 

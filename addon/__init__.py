@@ -299,6 +299,14 @@ def _sentence_acceptable(text):
     return len(text.split()) <= MAX_SENTENCE_WORDS
 
 
+def _sentence_has_word(word, text):
+    """例句裡找得到單字嗎——規則跟 templates/back.html 的高亮一樣（子字串、不分大小寫）。
+    只是偵測，不是退句子的門：沒有就重問一次（見 Worker._llm_sentence）。
+    KEEP-IN-SYNC: core/text.py::sentence_has_word。"""
+    w = _clean_text(word or "", lower=True)
+    return bool(w) and w in (text or "").lower()
+
+
 def _sentence_to_write(current, generated, word):
     """生成結果 → 該寫入 Sentence 的值；None = 不要寫（保住既有真句子）。
     - 生成成功 → 寫生成句
@@ -402,6 +410,12 @@ def _translation_reject_reason(word, reply):
 
 
 # KEEP IN SYNC with core/llm.PHOTO_BLOCK_TEMPLATE（逐字相同）
+# KEEP IN SYNC with core/llm.WORD_MUST_APPEAR_TEMPLATE（逐字相同）
+_WORD_MUST_APPEAR_TEMPLATE = (
+    '\n\nThe sentence must contain the exact word "{word}", spelled exactly like that '
+    '(not another form of it), so the card can highlight it.'
+)
+
 _PHOTO_BLOCK_TEMPLATE = (
     '\n\nA photo was already picked for this card. Photo description: "{photo}"\n'
     'Use the photo only if it fits both the meaning AND the setting you picked. If you picked '
@@ -413,7 +427,7 @@ _PHOTO_BLOCK_TEMPLATE = (
 )
 
 
-def _sentence_prompt(word, association="", photo=""):
+def _sentence_prompt(word, association="", photo="", must_contain=False):
     """Example-sentence prompt: pick sense (hint > SWE > everyday), short & clear, no
     definition/circular sentence.
     KEEP IN SYNC with core/llm._sentence_instructions — addon cannot import core, so this
@@ -442,6 +456,7 @@ def _sentence_prompt(word, association="", photo=""):
         f'Do NOT write a definition or a circular sentence (no "X means ...", "X is when ...", '
         f'"{word} is a kind of ..."); show the meaning through a real, concrete situation.'
         + (_PHOTO_BLOCK_TEMPLATE.format(photo=photo) if photo else "")
+        + (_WORD_MUST_APPEAR_TEMPLATE.format(word=word) if must_contain else "")
         + "\n\nOutput only the sentence. No explanation, no quotes."
     )
 
@@ -601,18 +616,28 @@ class Worker(QThread):
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
-    def _groq_sentence(self, word, association="", photo=""):
+    def _groq_sentence(self, word, association="", photo="", must_contain=False):
         # 造句是多條件約束任務 → 較高思考等級（其餘呼叫維持預設 low）
-        return _groq_chat(_sentence_prompt(word, association, photo), temperature=0.7,
-                          max_tokens=200, timeout=15, effort="medium")
+        return _groq_chat(_sentence_prompt(word, association, photo, must_contain=must_contain),
+                          temperature=0.7, max_tokens=200, timeout=15, effort="medium")
 
     def _llm_sentence(self, word, association="", photo=""):
+        """(句子, 引擎或退回原因)。句子裡沒出現單字（卡片高亮不到）就帶 must_contain 重問一次，
+        重問仍沒有也照收、只記 log——硬擋會誤殺 sweep→swept 這種合法句。
+        KEEP-IN-SYNC: core/llm.py::llm_sentence（同樣的重問邏輯）。"""
         result = self._groq_sentence(word, association, photo)
-        if _sentence_acceptable(result):
-            return result, "Groq"
-        reason = "no-reply" if not (result or "").strip() else "not-a-clean-sentence"
-        _log.warning("sentence rejected word=%s reason=%s reply=%r", word, reason, result)
-        return "", reason          # 回空 → 上層退 placeholder，等下次補；第二值給畫面分「沒回」與「回了垃圾」
+        if not _sentence_acceptable(result):
+            reason = "no-reply" if not (result or "").strip() else "not-a-clean-sentence"
+            _log.warning("sentence rejected word=%s reason=%s reply=%r", word, reason, result)
+            return "", reason      # 回空 → 上層退 placeholder，等下次補；第二值給畫面分「沒回」與「回了垃圾」
+        if not _sentence_has_word(word, result):
+            _log.info("sentence word-missing word=%s reply=%r → retry with must-contain", word, result)
+            retry = self._groq_sentence(word, association, photo, must_contain=True)
+            if _sentence_acceptable(retry):
+                if not _sentence_has_word(word, retry):
+                    _log.warning("sentence word-missing after retry word=%s reply=%r (kept)", word, retry)
+                return retry, "Groq"
+        return result, "Groq"
 
     def _groq_translate(self, word, sentence, reasons=None):
         """Traditional Chinese meaning of word AS USED IN the sentence ('' on failure).

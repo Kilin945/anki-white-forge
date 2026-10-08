@@ -8,7 +8,7 @@ from core.dispatcher import AllProvidersLimited, Dispatcher
 from core.providers import (GROQ_KEY_PATH, GROQ_MODEL, GeminiProvider,
                             GroqProvider, _load_groq_client)  # GROQ_MODEL/GROQ_KEY_PATH/_load_groq_client 純 re-export — test_backfill.py 依賴,勿刪
 from core.rate_limiter import RateLimitReached
-from core.text import sentence_acceptable
+from core.text import sentence_acceptable, sentence_has_word
 from core.zh_chars import has_simplified, to_traditional
 
 _REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -53,6 +53,12 @@ def llm(prompt, effort="low"):
     return groq_generate(prompt, effort=effort)
 
 
+# 例句裡沒出現單字時重問一次用的加註（KEEP-IN-SYNC addon/__init__.py::_WORD_MUST_APPEAR_TEMPLATE）
+WORD_MUST_APPEAR_TEMPLATE = (
+    '\n\nThe sentence must contain the exact word "{word}", spelled exactly like that '
+    '(not another form of it), so the card can highlight it.'
+)
+
 PHOTO_BLOCK_TEMPLATE = (
     '\n\nA photo was already picked for this card. Photo description: "{photo}"\n'
     'Use the photo only if it fits both the meaning AND the setting you picked. If you picked '
@@ -64,7 +70,7 @@ PHOTO_BLOCK_TEMPLATE = (
 )
 
 
-def _sentence_instructions(word, association="", photo=""):
+def _sentence_instructions(word, association="", photo="", must_contain=False):
     """Shared meaning-selection + sentence-quality rules for example-sentence prompts.
     Priority: hint (association) > software-engineering sense > most common everyday sense.
     photo（照片描述）非空時在結尾附 PHOTO_BLOCK_TEMPLATE：句子依圖造，但詞義優先序不變。
@@ -93,13 +99,26 @@ def _sentence_instructions(word, association="", photo=""):
         f'Do NOT write a definition or a circular sentence (no "X means ...", "X is when ...", '
         f'"{word} is a kind of ..."); show the meaning through a real, concrete situation.'
         + (PHOTO_BLOCK_TEMPLATE.format(photo=photo) if photo else "")
+        + (WORD_MUST_APPEAR_TEMPLATE.format(word=word) if must_contain else "")
     )
 
 
-def llm_sentence(word, association="", photo=""):
-    prompt = _sentence_instructions(word, association, photo) + "\n\nOutput only the sentence. No explanation, no quotes."
+def _ask_sentence(word, association="", photo="", must_contain=False):
+    prompt = (_sentence_instructions(word, association, photo, must_contain=must_contain)
+              + "\n\nOutput only the sentence. No explanation, no quotes.")
     result = llm(prompt, effort="medium")     # 造句是多條件約束任務 → 較高思考等級
     return result if sentence_acceptable(result) else ""
+
+
+def llm_sentence(word, association="", photo=""):
+    """例句；句子裡沒出現單字（卡片高亮不到）就帶 must_contain 重問一次，重問仍沒有也照收。
+    KEEP-IN-SYNC: addon/__init__.py::Worker._llm_sentence（同樣的重問邏輯）。"""
+    result = _ask_sentence(word, association, photo)
+    if result and not sentence_has_word(word, result):
+        retry = _ask_sentence(word, association, photo, must_contain=True)
+        if retry:
+            return retry
+    return result
 
 
 # KEEP-IN-SYNC: addon/__init__.py（_groq_translate 與 _groq_translate_sentence 的 prompt）
