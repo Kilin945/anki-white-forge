@@ -19,7 +19,7 @@
 (function(){
   var el = document.getElementById("sent");
   if (el) {
-    var word = "{{Front}}".replace(/<[^>]+>/g,"").trim().toLowerCase();
+    var word = "{{Front}}".replace(/<[^>]+>/g,"").replace(/&nbsp;|\u00a0/gi," ").trim().toLowerCase();
     word = word.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
     var html = el.innerHTML;
     var re = new RegExp("(" + word + "[a-z]*)", "gi");
