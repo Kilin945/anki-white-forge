@@ -354,6 +354,38 @@ def image_query_prompt(word, definition=""):
     )
 
 
+def sense_prompt(word):
+    """詞義 prompt。KEEP-IN-SYNC: addon/_llm.py::_sense_prompt（逐字相同，測試比對）。"""
+    return (
+        f'Pick the meaning of the English word "{word}" to teach a software engineer, in this '
+        f'priority: its software-engineering sense only if the word is itself a standard tech term '
+        f'(slang, nicknames and mascots do not count; when in doubt use the everyday meaning); '
+        f'otherwise its most common everyday meaning. Describe the meaning you picked in one short '
+        f'English phrase (at most 12 words) that makes clear which sense it is. '
+        f'Output only the phrase, nothing else.'
+    )
+
+
+MAX_SENSE_WORDS = 20   # KEEP-IN-SYNC: addon/_llm.py::_MAX_SENSE_WORDS
+
+
+def clean_sense(reply):
+    """詞義回覆的守門：單行、不超過 MAX_SENSE_WORDS 個字，否則回 ''（當作沒選到）。
+    KEEP-IN-SYNC: addon/_llm.py::_clean_sense。"""
+    s = (reply or "").strip().strip('"\'').strip()
+    if not s or "\n" in s or len(s.split()) > MAX_SENSE_WORDS:
+        return ""
+    return s
+
+
+
+def llm_pick_sense(word):
+    """沒有 Association 時先選一次詞義，搜圖與造句都拿它當提示 → 兩邊不會各選各的
+    （2026-10-10：concrete 圖搜到混凝土、例句寫成具體類別）。失敗回 ''，照舊流程走。
+    KEEP-IN-SYNC: addon/_llm.py::_llm_pick_sense。"""
+    return clean_sense(llm(sense_prompt(word)))
+
+
 def llm_image_query(word, definition=""):
     """Stock-photo search query for the word's meaning — picked BEFORE the sentence
     (句子依圖造，所以這裡不看句子)。詞義優先序與造句相同：提示 → SWE → 日常。"""

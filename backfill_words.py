@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from core.anki import anki, DECK_NAME
 from core.text import strip_html, is_placeholder, has_image, sentence_usable, image_alt, image_html
-from core.llm import llm_sentence, llm_image_query, llm_translate, engine_description
+from core.llm import llm_sentence, llm_image_query, llm_pick_sense, llm_translate, engine_description
 from core.tts import make_audio, VOICE_WORD, VOICE_SENTENCE
 from core.image import fetch_image
 
@@ -79,6 +79,12 @@ def process_note(note):
     # 先圖後句：圖依「單字+詞義」搜，句子再照照片描述寫（句子不再決定圖）。
     # 已有圖時沿用其 alt 當照片描述；舊卡沒有 alt → ''，句子照常寫。
     photo = image_alt(current_image)
+    # 詞義只選一次：圖和句子都要重做、又沒提示時，先選詞義給兩邊共用（不寫回 Association）。
+    # KEEP-IN-SYNC: addon/_workers.py::BackfillWorker._process_one（同樣的條件）
+    if not current_assoc and need_img and need_sentence:
+        current_assoc = llm_pick_sense(word)
+        if current_assoc:
+            lines.append(f"  Sense    : {current_assoc}")
     if need_img:
         img_query = llm_image_query(word, current_assoc)
         img_filename, ok, attr, description, source = _do_image(word, img_query)

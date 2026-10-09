@@ -132,6 +132,7 @@ def _run_s(note, image_html, sentence):
     def llm_sentence(word, association="", photo=""):
         log.append(("sentence", photo))
         return (sentence, "Groq") if sentence else ("", "failed")
+    w._pick_sense = lambda word: ""
     w._fetch_image = fetch
     w._llm_sentence = llm_sentence
     w._groq_translate = lambda word, s, **kw: "梯子"

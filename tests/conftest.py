@@ -88,3 +88,17 @@ def _isolate_examples(tmp_path, monkeypatch):
     for mod in (importlib.import_module("addon._examples"), core.examples.examples):
         monkeypatch.setattr(mod, "EXAMPLES_PATH", str(tmp_path / "example_index.json"))
         monkeypatch.setattr(mod, "examples_for", lambda *a, **k: [])
+
+
+@pytest.fixture(autouse=True)
+def _isolate_pick_sense(monkeypatch):
+    """沒提示時生成流程會先選詞義（打 LLM）→ 測試期間一律回空，照舊流程走、不打網路。
+    要測選詞義本身的測試，在模組層先拿原函式（import 早於這個 fixture）。"""
+    import core.llm
+    import addon
+    import backfill_words
+    import add_word
+    monkeypatch.setattr(core.llm, "llm_pick_sense", lambda w: "")
+    monkeypatch.setattr(addon._llm, "_llm_pick_sense", lambda w: "")
+    monkeypatch.setattr(backfill_words, "llm_pick_sense", lambda w: "")
+    monkeypatch.setattr(add_word, "llm_pick_sense", lambda w: "")

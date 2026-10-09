@@ -110,6 +110,39 @@ def _image_query_prompt(word, definition=""):
     )
 
 
+def _sense_prompt(word):
+    """詞義 prompt。KEEP-IN-SYNC: core/llm.py::sense_prompt（逐字相同，測試比對）。"""
+    return (
+        f'Pick the meaning of the English word "{word}" to teach a software engineer, in this '
+        f'priority: its software-engineering sense only if the word is itself a standard tech term '
+        f'(slang, nicknames and mascots do not count; when in doubt use the everyday meaning); '
+        f'otherwise its most common everyday meaning. Describe the meaning you picked in one short '
+        f'English phrase (at most 12 words) that makes clear which sense it is. '
+        f'Output only the phrase, nothing else.'
+    )
+
+
+_MAX_SENSE_WORDS = 20   # KEEP-IN-SYNC: core/llm.py::MAX_SENSE_WORDS
+
+
+def _clean_sense(reply):
+    """詞義回覆的守門：單行、不超過 _MAX_SENSE_WORDS 個字，否則回 ''。
+    KEEP-IN-SYNC: core/llm.py::clean_sense。"""
+    s = (reply or "").strip().strip('"\'').strip()
+    if not s or "\n" in s or len(s.split()) > _MAX_SENSE_WORDS:
+        return ""
+    return s
+
+
+def _llm_pick_sense(word):
+    """沒有 Association 時先選一次詞義，搜圖與造句共用 → 兩邊不會各選各的。
+    失敗回 ''，照舊流程走。KEEP-IN-SYNC: core/llm.py::llm_pick_sense。"""
+    sense = _clean_sense(_groq_chat(_sense_prompt(word), temperature=0.7, max_tokens=200,
+                                    timeout=15, task="light"))
+    _log.info("sense word=%s sense=%r", word, sense)
+    return sense
+
+
 def _llm_image_query(word, definition=""):
     """搜圖關鍵字（走輕量池）。在 addon 這邊產生，分流器才算得到這份用量。"""
     result = _groq_chat(_image_query_prompt(word, definition), temperature=0.7,

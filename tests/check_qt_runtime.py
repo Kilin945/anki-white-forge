@@ -148,6 +148,7 @@ addon._workers.Worker._groq_sentence           = lambda self,w,a="",photo="": f"
 addon._workers.Worker._groq_translate          = lambda self,w,s,reasons=None: "字義"
 addon._workers.Worker._groq_translate_sentence = lambda self,s,strict=False,word="",reasons=None: "這是中文翻譯。"
 addon._workers.Worker._fetch_image             = lambda self,w,definition="": "<img src='stub.jpg'>"
+addon._workers.Worker._pick_sense              = lambda self,w: ""
 addon._workers.Worker._make_audio_batch        = lambda self,items: None
 addon._llm._groq_spellcheck                = lambda w: ("ok", None)
 addon._workers.subprocess = addon._dlg_add.subprocess = types.SimpleNamespace(

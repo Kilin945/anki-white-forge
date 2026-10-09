@@ -40,12 +40,14 @@ class Worker(QThread):
             # 圖先行：依「單字＋詞義」搜圖，再依照片描述造句（句子配圖）。圖不再依賴句子，
             # 句子生成失敗圖照留。
             reasons = {}                      # field key → 畫面短句（完整原因在 log）
-            image_field = self._fetch_image(word, definition=self.association)
+            # 詞義只選一次：沒提示就先選，搜圖與造句共用（不寫回 Association 欄位）
+            hint = self.association or self._pick_sense(word)
+            image_field = self._fetch_image(word, definition=hint)
             self.step.emit("image", "ok" if image_field else "warn",
                            "" if image_field else "no image")
             photo = _image_alt(image_field)
 
-            sentence, engine = self._llm_sentence(word, self.association, photo=photo)
+            sentence, engine = self._llm_sentence(word, hint, photo=photo)
             if not sentence:
                 sentence = f"Please add an example sentence for '{word}'."
             sentence_ok = _sentence_usable(sentence)
@@ -105,6 +107,10 @@ class Worker(QThread):
             self.error.emit(str(e))
 
     # ── helpers ──────────────────────────────────────────────────────────────
+
+    def _pick_sense(self, word):
+        """沒有 Association 時選一次詞義（⌘A／⌘S 共用；測試替換這個方法）。"""
+        return _llm._llm_pick_sense(word)
 
     def _groq_sentence(self, word, association="", photo="", must_contain=False, examples=()):
         # 造句是多條件約束任務 → 較高思考等級（其餘呼叫維持預設 low）
@@ -296,6 +302,10 @@ class BackfillWorker(QThread):
         reasons = {}                      # field key → 畫面短句（完整原因在 log）
 
         assoc = _clean_text(note["fields"].get("Association", {}).get("value", ""))
+        # 詞義只選一次：圖和句子都要重做、又沒提示時，先選詞義給兩邊共用。
+        # 只缺其中一樣時不選——另一樣已經定了詞義，另外選反而可能對不上。
+        if not assoc and need_sentence and "<img" not in note["fields"]["Image_Prompt"]["value"]:
+            assoc = self._w._pick_sense(word)
 
         # 圖先行：圖不依賴句子（依單字＋詞義搜），先補圖，句子再依照片描述造。
         need_image = "<img" not in note["fields"]["Image_Prompt"]["value"]

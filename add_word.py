@@ -8,7 +8,7 @@ import threading
 from spellchecker import SpellChecker
 
 from core.anki import anki, DECK_NAME, MODEL_NAME
-from core.llm import llm_sentence, llm_image_query, llm_translate, llm_translate_sentence, engine_description
+from core.llm import llm_sentence, llm_image_query, llm_pick_sense, llm_translate, llm_translate_sentence, engine_description
 from core.tts import make_audio, VOICE_WORD, VOICE_SENTENCE
 from core.image import fetch_image
 from core.text import image_html
@@ -103,15 +103,20 @@ def main():
     if not confirm("  Proceed?"):
         sys.exit(0)
 
+    # 詞義只選一次：沒提示就先選，搜圖與造句共用（不寫進 Association 欄位）
+    hint = association or llm_pick_sense(word)
+    if hint and not association:
+        print(f"\n  Sense: {hint}")
+
     print(f"\n[1] Image…")
     img_filename = f"{word}_img_{int(time.time())}.jpg"
-    img_query = llm_image_query(word, definition=association)
+    img_query = llm_image_query(word, definition=hint)
     ok, attribution, description, source = fetch_image(word, os.path.join(MEDIA_DIR, img_filename), search_query=img_query)
     image_field = image_html(img_filename, description, attribution, source) if ok else ""
     print(f"  Image {'✓' if ok else '⚠️ not found'}")
 
     print("[2] Sentence…")
-    sentence = llm_sentence(word, association, photo=description if ok else "") or f"Please add an example sentence for '{word}'."
+    sentence = llm_sentence(word, hint, photo=description if ok else "") or f"Please add an example sentence for '{word}'."
     print(f"  {sentence[:80]}")
 
     print("[3] Audio + Translation (parallel)…")
