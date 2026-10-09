@@ -38,7 +38,7 @@ class _RecorderDispatcher:
         self.kwargs = kw
         return self._reply
 
-    def wall_secs(self):
+    def wall_secs(self, task=None):
         return 0.0
 
 

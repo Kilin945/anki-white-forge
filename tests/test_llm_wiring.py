@@ -58,9 +58,10 @@ class TestWiring:
                 self.name, self.model = name, model
         fake = _FakeDispatcher()
         fake.providers = [_P("groq", "llama-3.3-70b-versatile"), _P("gemini", "gemini-2.0-flash")]
+        fake.pools = {"sentence": fake.providers, "light": fake.providers[:1]}
         with patch.object(llm_mod, "_dispatcher", fake):
             s = llm_mod.engine_description()
-            assert "groq" in s and "gemini" in s
+            assert "sentence: 2 models" in s and "light: 1 models" in s
 
     def test_load_groq_client_still_importable(self):
         assert callable(llm_mod._load_groq_client)     # test_backfill.py 靠它
@@ -80,3 +81,12 @@ class TestSentenceEffort:
         with patch.object(llm_mod, "_dispatcher", fake):
             llm_mod.llm_translate("cat", "A cat sat.")
         assert fake.kwargs["effort"] == "low"
+
+
+def test_core_sentence_uses_sentence_pool(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(llm_mod, "groq_generate",
+                        lambda prompt, effort="low", task="light": seen.setdefault("task", task)
+                        and "The penguin waddled across the ice.")
+    llm_mod.llm_sentence("penguin")
+    assert seen["task"] == "sentence"

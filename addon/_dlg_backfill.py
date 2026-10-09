@@ -356,11 +356,14 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
         elif getattr(self._worker, "_hit_limit", False):
             secs = int(self._worker.retry_after)
             resets = getattr(self._worker, "limit_resets", {})
-            if len(resets) > 1:        # 雙 provider:報每家真實恢復時間
+            pools = getattr(self._worker, "limit_pools", [])
+            if resets:
+                label = ("Sentence" if pools == ["sentence"] else
+                         "Translation" if pools == ["light"] else "All")
                 self.status.setText(
-                    f"Both providers out of quota — {_lld.format_reset_summary(resets)}. "
+                    f"{label} models are out of quota — {_lld.format_reset_summary(resets)}. "
                     f"Completed {done}, {left} still need filling.")
-            else:                      # 單 Groq 退化:沿用原措辭
+            else:                      # 沒有池資訊:沿用原措辭
                 self.status.setText(
                     f"Hit the cloud rate limit — completed {done}, {left} still need "
                     f"filling. Try again in ~{secs}s, then reselect.")

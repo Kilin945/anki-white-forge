@@ -23,10 +23,12 @@ def main():
     parser.add_argument("word")
     parser.add_argument("filepath")
     parser.add_argument("--definition", default="")
+    parser.add_argument("--query", default="")
     args = parser.parse_args()
 
-    query = llm_image_query(args.word, args.definition)
-    print(f"QUERY: {query} [{engine_description()}]", file=sys.stderr)
+    # addon 會帶 --query（搜圖關鍵字在 addon 的分流器上算）；CLI 直接跑才自己問 LLM
+    query = args.query or llm_image_query(args.word, args.definition)
+    print(f"QUERY: {query}" + ("" if args.query else f" [{engine_description()}]"), file=sys.stderr)
 
     ok, attribution, description, source = fetch_image(args.word, args.filepath, search_query=query)
     if ok:

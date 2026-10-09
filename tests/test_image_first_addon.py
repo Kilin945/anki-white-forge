@@ -172,3 +172,26 @@ class TestCmdSOrder:
         assert "Image_Prompt" in sent
         for k in ("Translation", "Sentence_CN", "Audio"):
             assert k not in sent
+
+
+def test_image_query_prompt_matches_core():
+    import addon
+    import core.llm
+    for w, d in [("penguin", ""), ("idempotent", "重複執行結果相同")]:
+        assert addon._llm._image_query_prompt(w, d) == core.llm.image_query_prompt(w, d)
+
+
+def test_fetch_image_passes_query_to_helper(monkeypatch):
+    import addon
+    calls = {}
+
+    class Done:
+        returncode, stdout, stderr = 1, "", ""
+    monkeypatch.setattr(addon._llm, "_groq_chat", lambda p, **kw: "penguin on ice")
+    monkeypatch.setattr(addon._workers.subprocess, "run",
+                        lambda cmd, **kw: calls.setdefault("cmd", cmd) and Done())
+    w = addon._workers.Worker.__new__(addon._workers.Worker)
+    w.media_dir = "/tmp"
+    w._fetch_image("penguin")
+    cmd = calls["cmd"]
+    assert cmd[cmd.index("--query") + 1] == "penguin on ice"

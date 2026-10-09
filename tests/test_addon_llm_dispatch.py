@@ -310,9 +310,9 @@ class TestParsersAndHelpers:
         assert lld._gemini_retry_secs("junk") == pytest.approx(30.0)
 
     def test_format_reset_summary(self):
-        s = lld.format_reset_summary({"groq": 40.2, "gemini": 15.7})
-        assert "Groq" in s and "Gemini" in s
-        assert "~40s" in s and "~15s" in s
+        s = lld.format_reset_summary({"groq:a": 40.2, "gemini:b": 15.7})
+        assert s == "next model frees up in ~15s (gemini:b)"
+        assert lld.format_reset_summary({}) == "no model available"
 
     def test_load_without_key_returns_none(self, tmp_path, monkeypatch):
         monkeypatch.setattr(lld, "GEMINI_KEY_PATH", str(tmp_path / "nope"))
@@ -343,7 +343,7 @@ class TestParsersAndHelpers:
         monkeypatch.setattr(lld, "GEMINI_KEY_PATH", str(tmp_path / "nope"))
         monkeypatch.setenv("GEMINI_API_KEY", "env-key")
         g = lld.GeminiProvider.load()
-        assert g is not None and g.name == "gemini"
+        assert g is not None and g.name.startswith("gemini:")
         monkeypatch.setattr(lld, "GROQ_KEY_PATH", str(tmp_path / "nope2"))
         monkeypatch.setenv("GROQ_API_KEY", "env-key2")
         assert lld.GroqProvider.load() is not None

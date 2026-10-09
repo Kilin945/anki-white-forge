@@ -10,12 +10,14 @@
 
 | 組件 | 技術 | 用途 |
 |------|------|------|
-| LLM | **Groq API + Gemini API** | 例句、單字翻譯、整句翻譯、圖片搜尋關鍵字 |
+| LLM | **Groq、Gemini、Cloudflare Workers AI** | 例句、單字翻譯、整句翻譯、圖片搜尋關鍵字 |
 | TTS | **edge-tts** | 正面 Andrew 男聲唸單字、背面 Ava 女聲唸句子 |
 | 圖片 | **Pexels、Wikimedia Commons、Openverse、Pixabay** | 單字插圖，依序切換 |
 | Anki | AnkiConnect | CLI 與 Anki 溝通 |
 
-LLM 呼叫會依剩餘額度在 Groq 和 Gemini 之間自動分流，一家見底就切另一家。沒設定 `.gemini_key` 就只用 Groq，功能不變。
+LLM 依工作分成兩組模型。造句一組，翻譯與搜圖關鍵字一組。
+一個模型額度用完，就換同組的下一個。
+沒放金鑰的服務會自動略過。只放 Groq 金鑰也能用。
 
 程式分四層：
 
@@ -63,6 +65,13 @@ echo "gsk_your_key_here" > .groq_key     # Groq，免費：https://console.groq.
 echo "your_key_here"     > .gemini_key   # Gemini，可選，免費：https://aistudio.google.com/apikey
 echo "your_key_here"     > .pexels_key   # Pexels，免費：https://www.pexels.com/api
 echo "your_key_here"     > .pixabay_key  # Pixabay，免費：https://pixabay.com/api/docs/
+```
+
+Cloudflare Workers AI 可選，免費。`.cloudflare_key` 要寫兩行：
+
+```
+CLOUDFLARE_ACCOUNT_ID=你的帳號 ID
+CLOUDFLARE_API_TOKEN=你的 API Token
 ```
 
 Wikimedia Commons 與 Openverse 不用金鑰。沒有金鑰的圖源會被略過，其他圖源照常運作。
@@ -120,8 +129,8 @@ Mac：⌘A、⌘S、⌘F 寫完卡片後會自動同步。沒登入 AnkiWeb 時�
 anki/
 ├── core/                      # 共用邏輯
 │   ├── llm.py                 #   LLM 入口：例句、翻譯、搜圖關鍵字
-│   ├── dispatcher.py          #   Groq + Gemini 容量感知分流、斷路器
-│   ├── providers.py           #   兩家 provider 的呼叫與額度計算
+│   ├── dispatcher.py          #   分池的容量感知分流、斷路器
+│   ├── providers.py           #   各模型 provider 的呼叫與額度計算
 │   ├── image.py               #   四圖源搜尋下載
 │   ├── tts.py                 #   edge-tts：Andrew 唸單字、Ava 唸句子
 │   ├── text.py                #   去 HTML、正規化、佔位符判斷
@@ -148,7 +157,7 @@ anki/
 ├── regen_audio.py             # 重生所有音檔
 ├── update_template.py         # 套用模板到 Anki
 ├── _image_helper.py 等三支    # 插件的外部小程式，見「系統架構」
-├── .groq_key 等四個金鑰檔     # gitignored
+├── .groq_key 等金鑰檔         # gitignored
 ├── image_rejects.json         # 退圖紀錄（gitignored）
 ├── translation_terms.json     # 翻譯術語清單（gitignored）
 ├── logs/addon_llm.log         # 插件的 LLM 呼叫紀錄，保留最近 3MB（gitignored）

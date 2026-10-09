@@ -72,22 +72,35 @@ class AllProvidersLimited(Exception):
 
 
 class Dispatcher:
-    """單一決策點：過濾（斷路器/headroom）→ 挑 headroom 最大 → 打 → 失敗 failover。"""
+    """依任務分池：每筆呼叫只在該任務的池裡挑 headroom 最大且斷路器放行的模型，
+    失敗依序換池內下一個；池全滅 raise AllProvidersLimited（只帶該池的 reset）。
+    傳 list 等於兩個任務共用同一串（舊介面）。
+    KEEP-IN-SYNC: addon/_llm_dispatch.py::Dispatcher（差異：core 無 timeout、無 wall_secs）。"""
 
-    def __init__(self, providers, threshold=3, cooldown_default=30.0):
-        self.providers = list(providers)
-        self._breakers = {p.name: CircuitBreaker(threshold, cooldown_default)
-                          for p in self.providers}
+    def __init__(self, pools, threshold=3, cooldown_default=30.0):
+        if not isinstance(pools, dict):
+            pools = {"sentence": list(pools), "light": list(pools)}
+        self.pools = {task: list(ps) for task, ps in pools.items()}
+        seen = {}
+        for ps in self.pools.values():
+            for p in ps:
+                seen.setdefault(p.name, p)
+        self.providers = list(seen.values())
+        self._breakers = {name: CircuitBreaker(threshold, cooldown_default) for name in seen}
 
-    def _resets(self):
-        out = {}
-        for p in self.providers:
-            out[p.name] = max(p.reset_secs(), self._breakers[p.name].open_remaining())
-        return out
+    def _pool(self, task):
+        return self.pools.get(task, self.providers)
 
-    def generate(self, prompt, *, temperature=0.7, max_tokens=200, effort="low"):
-        ranked = sorted(((p.headroom(), p) for p in self.providers),
-                        key=lambda t: t[0], reverse=True)     # headroom 快照一次
+    def _reset_of(self, p):
+        return max(p.reset_secs(), self._breakers[p.name].open_remaining())
+
+    def resets(self, task=None):
+        ps = self.providers if task is None else self._pool(task)
+        return {p.name: self._reset_of(p) for p in ps}
+
+    def generate(self, prompt, *, temperature=0.7, max_tokens=200, effort="low", task="light"):
+        ranked = sorted(((p.headroom(), p) for p in self._pool(task)),
+                        key=lambda t: t[0], reverse=True)     # headroom 快照一次；穩定排序：同分照池內順序
         for h, p in ranked:
             if h <= 0.0:
                 continue
@@ -104,4 +117,4 @@ class Dispatcher:
             except Exception:
                 self._breakers[p.name].record_failure()   # 非預期例外也要釋放試探閘
                 raise
-        raise AllProvidersLimited(self._resets())
+        raise AllProvidersLimited(self.resets(task))

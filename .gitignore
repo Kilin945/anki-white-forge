@@ -10,6 +10,7 @@ __pycache__/
 image_rejects.json
 .groq_key
 .gemini_key
+.cloudflare_key
 .idea/
 addon/meta.json
 addon/__pycache__/

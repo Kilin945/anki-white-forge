@@ -274,3 +274,32 @@ class TestEffortPassthrough:
         p.generate = spy
         disp.Dispatcher([p]).generate("p", temperature=0, max_tokens=8, effort="medium")
         assert p.last_kwargs["effort"] == "medium"
+
+
+def test_core_dispatcher_routes_by_task():
+    from core.dispatcher import Dispatcher
+
+    class P:
+        def __init__(self, name): self.name, self.calls = name, 0
+        def generate(self, prompt, **kw): self.calls += 1; return self.name
+        def headroom(self): return 1.0
+        def reset_secs(self): return 0.0
+    s, l = P("s"), P("l")
+    d = Dispatcher({"sentence": [s], "light": [l]})
+    assert d.generate("p", task="sentence") == "s"
+    assert d.generate("p") == "l"
+
+
+def test_core_pools_match_addon():
+    import importlib.util, pathlib
+    import core.providers as prov
+    spec = importlib.util.spec_from_file_location(
+        "lld_sync", pathlib.Path(__file__).parent.parent / "addon" / "_llm_dispatch.py")
+    lld = importlib.util.module_from_spec(spec); spec.loader.exec_module(lld)
+    assert prov.SENTENCE_POOL == lld.SENTENCE_POOL
+    assert prov.LIGHT_POOL == lld.LIGHT_POOL
+    assert prov.CLOUDFLARE_DAILY_NEURONS == lld.CLOUDFLARE_DAILY_NEURONS
+    assert prov.CLOUDFLARE_NEURON_RESERVE == lld.CLOUDFLARE_NEURON_RESERVE
+    assert prov.GEMINI_FLASH_RPM == lld.GEMINI_FLASH_RPM
+    assert prov.GEMINI_LITE_RPM == lld.GEMINI_LITE_RPM
+    assert not any("lite" in m for _, m, _ in prov.SENTENCE_POOL)

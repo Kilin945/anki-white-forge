@@ -141,7 +141,7 @@ class TestProviderLoad:
         p.write_text("AIzaFAKE\n")
         monkeypatch.setattr(prov, "GEMINI_KEY_PATH", str(p))
         g = prov.GeminiProvider.load()
-        assert g is not None and g.name == "gemini"
+        assert g is not None and g.name.startswith("gemini:")
 
 
 class TestEffortPayload:
@@ -209,3 +209,77 @@ class TestEffortPayload:
         cfg = self._gemini_cfg(monkeypatch, effort="medium")
         assert cfg["thinkingConfig"]["thinkingLevel"] == "high"
         assert cfg["maxOutputTokens"] == 32 + prov.REASONING_HEADROOM_DEEP
+
+
+class _Resp:
+    """requests 回應替身：status_code／text／json()／headers。"""
+    def __init__(self, status=200, text="", data=None, headers=None):
+        self.status_code, self.text, self._data = status, text, data
+        self.headers = headers or {}
+
+    def json(self):
+        return self._data
+
+
+_DAILY_429 = ('{"error": {"code": 429, "details": [{"violations": [{"quotaId": '
+              '"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}, '
+              '{"retryDelay": "65152s"}]}}')
+
+
+def test_gemini_daily_quota_cools_down_until_reset(monkeypatch):
+    monkeypatch.setattr(prov.requests, "post", lambda *a, **kw: _Resp(429, _DAILY_429))
+    g = prov.GeminiProvider("k", "gemini-3.5-flash", 5)
+    with pytest.raises(prov.ProviderRateLimited) as ei:
+        g.generate("p", temperature=0, max_tokens=8)
+    assert ei.value.retry_after == pytest.approx(65152.0)   # 不套 60 秒上限
+    assert g.headroom() == 0.0
+    assert g.reset_secs() > 60000
+
+
+def test_gemini_per_minute_429_still_backs_off_short(monkeypatch):
+    body = '{"error": {"code": 429, "details": [{"retryDelay": "13s"}]}}'
+    monkeypatch.setattr(prov.requests, "post", lambda *a, **kw: _Resp(429, body))
+    with pytest.raises(prov.ProviderRateLimited) as ei:
+        prov.GeminiProvider("k", "gemini-3.5-flash", 5).generate(
+            "p", temperature=0, max_tokens=8)
+    assert ei.value.retry_after <= 60.0
+
+
+def test_lite_model_sends_no_thinking_config(monkeypatch):
+    seen = {}
+
+    def fake_post(url, json=None, timeout=None, headers=None):
+        seen.update(json)
+        return _Resp(500)
+
+    monkeypatch.setattr(prov.requests, "post", fake_post)
+    with pytest.raises(prov.ProviderError):
+        prov.GeminiProvider("k", "gemini-3.5-flash-lite", 15).generate(
+            "p", temperature=0, max_tokens=32)
+    assert "thinkingConfig" not in seen["generationConfig"]
+    assert seen["generationConfig"]["maxOutputTokens"] == 32
+
+
+def _cf_ok(text, neurons):
+    return _Resp(200, data={"success": True, "result": {
+        "response": text, "usage": {"neurons": neurons}}})
+
+
+def test_cloudflare_generate_records_neurons(monkeypatch):
+    b = prov.NeuronBudget(daily=1000, reserve=0)
+    p = prov.CloudflareProvider("acct", "tok", "@cf/openai/gpt-oss-120b", b)
+    monkeypatch.setattr(prov.requests, "post", lambda *a, **kw: _cf_ok("Hi.", 30.0))
+    assert p.generate("p", temperature=0, max_tokens=8) == "Hi."
+    assert p.name == "cloudflare:@cf/openai/gpt-oss-120b"
+    assert b.headroom() == pytest.approx(0.97)
+
+
+def test_cloudflare_daily_exhausted_marks_budget(monkeypatch):
+    body = ('{"success": false, "errors": [{"code": 4006, "message": '
+            '"you have used up your daily free allocation of 10,000 neurons"}]}')
+    monkeypatch.setattr(prov.requests, "post", lambda *a, **kw: _Resp(429, body))
+    b = prov.NeuronBudget(daily=10000, reserve=0)
+    p = prov.CloudflareProvider("a", "t", "@cf/x", b)
+    with pytest.raises(prov.ProviderRateLimited):
+        p.generate("p", temperature=0, max_tokens=8)
+    assert b.headroom() == 0.0

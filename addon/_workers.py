@@ -108,7 +108,8 @@ class Worker(QThread):
     def _groq_sentence(self, word, association="", photo="", must_contain=False):
         # 造句是多條件約束任務 → 較高思考等級（其餘呼叫維持預設 low）
         return _llm._groq_chat(_sentence_prompt(word, association, photo, must_contain=must_contain),
-                          temperature=0.7, max_tokens=200, timeout=15, effort="medium")
+                          temperature=0.7, max_tokens=200, timeout=15, effort="medium",
+                          task="sentence")
 
     def _llm_sentence(self, word, association="", photo=""):
         """(句子, 引擎或退回原因)。句子裡沒出現單字（卡片高亮不到）就帶 must_contain 重問一次，
@@ -196,6 +197,7 @@ class Worker(QThread):
         cmd = [VENV_PYTHON, IMAGE_SCRIPT]
         if definition:
             cmd.extend(["--definition", definition])
+        cmd.extend(["--query", _llm._llm_image_query(word, definition)])
         cmd.extend(["--", word, filepath])
         try:
             result = subprocess.run(
@@ -248,13 +250,21 @@ class BackfillWorker(QThread):
         self._hit_limit = False        # hit a real rate-limit wall → stop the rest, dialog notifies
         self._stopped = False          # 使用者關窗/Anki 退出 → 做完手上這張就收工
         self.retry_after = 0
-        self.limit_resets = {}         # 撞牆當下兩家的恢復秒數(對話框訊息用)
+        self.limit_resets = {}         # 撞牆那個池的各模型恢復秒數(對話框訊息用)
+        self.limit_pools = []          # 撞牆的池名("sentence"／"light")
         self.new_pending_terms = []    # 本輪翻譯被丟掉、新記進待審的術語(收尾提示用);
         self._w.new_pending_terms = self.new_pending_terms   # 同一個 list,_w 在 worker 執行緒裡 extend
 
     def stop(self):
         """請 worker 收工：剩下的卡直接跳過（同 _hit_limit 的既有跳過機制）。"""
         self._stopped = True
+
+    def _wall_for(self, need_sentence):
+        """這張卡會用到的池裡，最久的牆（0＝都有模型可用）。輕量池一定用到（翻譯）。"""
+        tasks = ["light"] + (["sentence"] if need_sentence else [])
+        walls = {t: _llm._dispatcher.wall_secs(t) for t in tasks}
+        self._blocked_tasks = [t for t, w in walls.items() if w > 0]
+        return max(walls.values())
 
     def _process_one(self, note):
         note_id = note["noteId"]
@@ -263,15 +273,20 @@ class BackfillWorker(QThread):
         # immediately (the dialog says how many are left). No waiting.
         if self._hit_limit or self._stopped:
             return f"skip {word}"
-        wall = _llm._dispatcher.wall_secs()
+        current = note["fields"]["Sentence"]["value"]
+        need_sentence = not current or any(p in current for p in PLACEHOLDERS)
+        wall = self._wall_for(need_sentence)
         if 0 < wall <= SHORT_WALL_WAIT:
             _log.info("short wall %.1fs — waiting", wall)
             time.sleep(wall + 0.2)             # 短牆:等掉它,額度窗口一過就續跑
-            wall = _llm._dispatcher.wall_secs()
+            wall = self._wall_for(need_sentence)
         if wall > 0:
             self._hit_limit = True
             self.retry_after = max(self.retry_after, int(wall) + 1)
-            self.limit_resets = _llm._dispatcher.resets()
+            self.limit_pools = list(self._blocked_tasks)
+            self.limit_resets = {}         # 只收撞牆的池,別把還有額度的池混進來
+            for t in self.limit_pools:
+                self.limit_resets.update(_llm._dispatcher.resets(t))
             _log.warning("⌘S stopped: resets=%s", self.limit_resets)
             return f"skip {word}"
         fields = {}
@@ -288,8 +303,7 @@ class BackfillWorker(QThread):
                            "" if image_html else "no image")
         photo = _image_alt(fields.get("Image_Prompt") or note["fields"]["Image_Prompt"]["value"])
 
-        current = note["fields"]["Sentence"]["value"]
-        if not current or any(p in current for p in PLACEHOLDERS):
+        if need_sentence:
             sentence, engine = self._w._llm_sentence(word, assoc, photo=photo)
             to_write = _sentence_to_write(current, sentence, word)
             if to_write is not None:
@@ -382,6 +396,7 @@ class BackfillWorker(QThread):
     def run(self):
         from concurrent.futures import ThreadPoolExecutor, as_completed
         _log.info("⌘S run start: %d cards", len(self.notes))
+        start = time.monotonic()
         results = []
         with ThreadPoolExecutor(max_workers=MAX_BACKFILL_WORKERS) as pool:
             futures = {pool.submit(self._process_one, note): note for note in self.notes}
@@ -392,6 +407,9 @@ class BackfillWorker(QThread):
                     note = futures[future]
                     word = _clean_text(note["fields"]["Front"]["value"], lower=True)
                     results.append(f"✗ {word}: {e}")
+        done = sum(1 for r in results if r.startswith("✓"))
+        skipped = sum(1 for r in results if r.startswith("skip"))
+        _log.info("⌘S run end: done=%d skipped=%d secs=%.1f", done, skipped, time.monotonic() - start)
         self.finished.emit(results)
 
 

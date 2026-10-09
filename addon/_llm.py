@@ -8,9 +8,8 @@ from ._zh_chars import has_simplified, simplified_chars, to_traditional   # KEEP
 _log = _lld.get_logger()   # 批次/LLM 事件集中記錄到 logs/addon_llm.log（gitignored）
 
 
-# 雙 provider 分流(KEEP-IN-SYNC 鏡像;無 .gemini_key 自動退化為單 Groq)
-_dispatcher = _lld.Dispatcher(
-    [p for p in (_lld.GroqProvider.load(), _lld.GeminiProvider.load()) if p])
+# 依任務分池(KEEP-IN-SYNC 鏡像;沒金鑰的家族自動略過)
+_dispatcher = _lld.Dispatcher(_lld.build_pools())
 
 
 # KEEP IN SYNC with core/llm.PHOTO_BLOCK_TEMPLATE（逐字相同）
@@ -66,16 +65,18 @@ def _sentence_prompt(word, association="", photo="", must_contain=False):
     )
 
 
-def _groq_chat(prompt, *, temperature, max_tokens, timeout, strict=False, effort="low"):
-    """One LLM text call via the dual-provider dispatcher; '' on no key / failure.
-    strict=True surfaces both-providers-limited as _AddonRateLimited (so the burst
+def _groq_chat(prompt, *, temperature, max_tokens, timeout, strict=False, effort="low",
+               task="light"):
+    """One LLM text call via the pooled dispatcher; '' on no key / failure.
+    task picks the pool ("sentence" for sentence writing, "light" for the rest).
+    strict=True surfaces all-models-limited as _AddonRateLimited (so the burst
     engine can pace/stop) instead of swallowing it as ''."""
     if not _dispatcher.providers:
         return ""
     try:
         return _dispatcher.generate(prompt, temperature=temperature,
                                     max_tokens=max_tokens, timeout=timeout,
-                                    effort=effort)
+                                    effort=effort, task=task)
     except _lld.AllProvidersLimited as e:
         if strict:
             raise _AddonRateLimited(int(e.soonest_reset) + 1)
@@ -90,6 +91,30 @@ class _AddonRateLimited(Exception):
     def __init__(self, retry_after=60):
         super().__init__("rate limited")
         self.retry_after = retry_after
+
+
+def _image_query_prompt(word, definition=""):
+    """搜圖關鍵字 prompt。KEEP-IN-SYNC: core/llm.py::image_query_prompt（逐字相同，test_image_first_addon 比對）。"""
+    hint = f' The learner\'s hint for the meaning: "{definition}".' if definition else ""
+    return (
+        f'Pick the meaning of the English word "{word}" to show in a photo, in this '
+        f'priority: the hint if given; otherwise its software-engineering sense only if the word is '
+        f'itself a standard tech term (slang, nicknames and mascots do not count; when in doubt use '
+        f'the everyday meaning); otherwise its most common everyday meaning.{hint} '
+        f'Give a short stock-photo search query (3-6 words) for a photo that clearly shows '
+        f'that meaning. If you picked the software-engineering sense, search for a computer '
+        f'or tech scene that shows it; otherwise prefer concrete, visible things. Output only the search query, '
+        f'nothing else.'
+    )
+
+
+def _llm_image_query(word, definition=""):
+    """搜圖關鍵字（走輕量池）。在 addon 這邊產生，分流器才算得到這份用量。"""
+    result = _groq_chat(_image_query_prompt(word, definition), temperature=0.7,
+                        max_tokens=200, timeout=15, task="light")
+    if result:
+        return result.strip().strip('"\'')
+    return f"{word} {definition} photo" if definition else f"{word} illustration"
 
 
 def _groq_spellcheck(word):

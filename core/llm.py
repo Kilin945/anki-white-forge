@@ -6,30 +6,30 @@ import threading
 
 from core.dispatcher import AllProvidersLimited, Dispatcher
 from core.providers import (GROQ_KEY_PATH, GROQ_MODEL, GeminiProvider,
-                            GroqProvider, _load_groq_client)  # GROQ_MODEL/GROQ_KEY_PATH/_load_groq_client 純 re-export — test_backfill.py 依賴,勿刪
+                            GroqProvider, _load_groq_client, build_pools)  # GROQ_MODEL/GROQ_KEY_PATH/_load_groq_client 純 re-export — test_backfill.py 依賴,勿刪
 from core.rate_limiter import RateLimitReached
 from core.text import sentence_acceptable, sentence_has_word
 from core.zh_chars import has_simplified, to_traditional
 
 _REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
-_dispatcher = Dispatcher(
-    [p for p in (GroqProvider.load(), GeminiProvider.load()) if p])
+_dispatcher = Dispatcher(build_pools())
 
 
 def engine_description():
     """人看的引擎清單（backfill_words 橫幅）。"""
     if not _dispatcher.providers:
-        return "no LLM (set .groq_key / .gemini_key)"
-    return " + ".join(f"{p.name} ({p.model})" for p in _dispatcher.providers)
+        return "no LLM (set .groq_key / .gemini_key / .cloudflare_key)"
+    return ", ".join(f"{task}: {len(ps)} models" for task, ps in _dispatcher.pools.items())
 
 
-def groq_generate(prompt, effort="low"):
-    """單發生成：任何失敗（含兩家見底）靜默回 ''。名字保留舊稱以免動全部呼叫端。"""
+def groq_generate(prompt, effort="low", task="light"):
+    """單發生成：任何失敗（含該池模型全數見底）靜默回 ''。名字保留舊稱以免動全部呼叫端。"""
     if not _dispatcher.providers:
         return ""
     try:
-        return _dispatcher.generate(prompt, temperature=0.7, max_tokens=200, effort=effort)
+        return _dispatcher.generate(prompt, temperature=0.7, max_tokens=200, effort=effort,
+                                    task=task)
     except AllProvidersLimited:
         print("  [llm] all providers limited — skipping")
         return ""
@@ -39,7 +39,7 @@ def groq_generate(prompt, effort="low"):
 
 
 def groq_generate_strict(prompt):
-    """批次用：兩家見底 → 翻譯成既有 RateLimitReached（retry=最快恢復那家），
+    """批次用：池內模型全數見底 → 翻譯成既有 RateLimitReached（retry=池內最快恢復的模型），
     既有 pacing 呼叫端一行不改。"""
     if not _dispatcher.providers:
         return ""
@@ -49,8 +49,8 @@ def groq_generate_strict(prompt):
         raise RateLimitReached(int(e.soonest_reset) + 1)
 
 
-def llm(prompt, effort="low"):
-    return groq_generate(prompt, effort=effort)
+def llm(prompt, effort="low", task="light"):
+    return groq_generate(prompt, effort=effort, task=task)
 
 
 # 例句裡沒出現單字時重問一次用的加註（KEEP-IN-SYNC addon/_llm.py::_WORD_MUST_APPEAR_TEMPLATE）
@@ -106,7 +106,7 @@ def _sentence_instructions(word, association="", photo="", must_contain=False):
 def _ask_sentence(word, association="", photo="", must_contain=False):
     prompt = (_sentence_instructions(word, association, photo, must_contain=must_contain)
               + "\n\nOutput only the sentence. No explanation, no quotes.")
-    result = llm(prompt, effort="medium")     # 造句是多條件約束任務 → 較高思考等級
+    result = llm(prompt, effort="medium", task="sentence")   # 造句：多條件約束 → 較高思考等級、走造句池
     return result if sentence_acceptable(result) else ""
 
 
@@ -335,11 +335,10 @@ def llm_translate_sentence(sentence, *, strict=False, word=""):
     return ""
 
 
-def llm_image_query(word, definition=""):
-    """Stock-photo search query for the word's meaning — picked BEFORE the sentence
-    (句子依圖造，所以這裡不看句子)。詞義優先序與造句相同：提示 → SWE → 日常。"""
+def image_query_prompt(word, definition=""):
+    """搜圖關鍵字 prompt。KEEP-IN-SYNC: addon/_llm.py::_image_query_prompt（逐字相同，測試比對）。"""
     hint = f' The learner\'s hint for the meaning: "{definition}".' if definition else ""
-    result = llm(
+    return (
         f'Pick the meaning of the English word "{word}" to show in a photo, in this '
         f'priority: the hint if given; otherwise its software-engineering sense only if the word is '
         f'itself a standard tech term (slang, nicknames and mascots do not count; when in doubt use '
@@ -349,6 +348,12 @@ def llm_image_query(word, definition=""):
         f'or tech scene that shows it; otherwise prefer concrete, visible things. Output only the search query, '
         f'nothing else.'
     )
+
+
+def llm_image_query(word, definition=""):
+    """Stock-photo search query for the word's meaning — picked BEFORE the sentence
+    (句子依圖造，所以這裡不看句子)。詞義優先序與造句相同：提示 → SWE → 日常。"""
+    result = llm(image_query_prompt(word, definition))
     if result:
         return result.strip().strip('"\'')
     if definition:
