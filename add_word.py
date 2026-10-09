@@ -11,6 +11,7 @@ from core.anki import anki, DECK_NAME, MODEL_NAME
 from core.llm import llm_sentence, llm_image_query, llm_pick_sense, llm_translate, llm_translate_sentence, engine_description
 from core.tts import make_audio, VOICE_WORD, VOICE_SENTENCE
 from core.image import fetch_image
+from core.picture import find_picture
 from core.text import image_html
 
 MEDIA_DIR = os.path.expanduser("~/Library/Application Support/Anki2/Kilin/collection.media")
@@ -111,7 +112,12 @@ def main():
     print(f"\n[1] Image…")
     img_filename = f"{word}_img_{int(time.time())}.jpg"
     img_query = llm_image_query(word, definition=hint)
-    ok, attribution, description, source = fetch_image(word, os.path.join(MEDIA_DIR, img_filename), search_query=img_query)
+    img_path = os.path.join(MEDIA_DIR, img_filename)
+    if hint:      # 有詞義 → 挑圖（LLM 挑＋看圖確認）
+        found = find_picture(word, img_path, img_query, hint)
+    else:
+        found = fetch_image(word, img_path, search_query=img_query)
+    ok, attribution, description, source = found
     image_field = image_html(img_filename, description, attribution, source) if ok else ""
     print(f"  Image {'✓' if ok else '⚠️ not found'}")
 

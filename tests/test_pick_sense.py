@@ -162,7 +162,7 @@ def _cli(note):
     with patch.object(backfill_words, "llm_pick_sense", pick), \
          patch.object(backfill_words, "llm_image_query",
                       lambda w, d="": seen.update(image=d) or "code screen"), \
-         patch.object(backfill_words, "fetch_image", lambda w, p, search_query=None: (False, "", "", "")), \
+         patch.object(backfill_words, "fetch_image", lambda w, p, search_query=None, **kw: (False, "", "", "")), \
          patch.object(backfill_words, "llm_sentence",
                       lambda w, association="", photo="": seen.update(sentence=association)
                       or "The Logger class is concrete."), \

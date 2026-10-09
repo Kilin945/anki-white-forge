@@ -22,6 +22,9 @@ from ._images import _image_alt, _image_html
 _log = _lld.get_logger()   # 批次/LLM 事件集中記錄到 logs/addon_llm.log（gitignored）
 
 
+IMAGE_TIMEOUT_SECS = 240   # 挑圖最多看 6 張圖、每次看圖最多 40 秒 → 給足時間，逾時就當沒圖
+
+
 class Worker(QThread):
     step     = pyqtSignal(str, str, str)   # (field key, state: "ok" / "warn", 退回原因短句，ok 時為 "")
     finished = pyqtSignal(dict)
@@ -220,12 +223,13 @@ class Worker(QThread):
         filepath = os.path.join(self.media_dir, filename)
         cmd = [VENV_PYTHON, IMAGE_SCRIPT]
         if definition:
-            cmd.extend(["--definition", definition])
+            # 有詞義 → helper 走 core/picture.py：LLM 挑＋看圖確認，不對換下一張（會比較久）
+            cmd.extend(["--definition", definition, "--sense", definition])
         cmd.extend(["--query", _llm._llm_image_query(word, definition)])
         cmd.extend(["--", word, filepath])
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=60,
+                cmd, capture_output=True, text=True, timeout=IMAGE_TIMEOUT_SECS if definition else 60,
             )
         except Exception as e:          # timeout / spawn failure → no image; leave blank for ⌘S to retry
             _log.warning("image rejected word=%s reason=helper-failed error=%r", word, e)

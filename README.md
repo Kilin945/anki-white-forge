@@ -191,6 +191,9 @@ anki/
 
 **Q：某個單字圖片不對？**  
 A：手機標紅旗，Mac 按 `⌘F` 用 Clear Flagged Cards 清空，再按 `⌘S` 重生，會換圖源。
+填了 Association 的卡，會先讓 AI 看過圖、確認是那個意思才放。
+找不到程式意思的圖時，會改放日常意思的圖，例如 concrete 放混凝土。
+這樣找圖比較慢，一張卡要幾秒到幾十秒。
 
 **Q：音檔唸的是 placeholder 文字？**  
 A：跑 `uv run python regen_audio.py` 重新生成所有音檔。

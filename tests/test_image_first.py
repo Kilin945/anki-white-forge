@@ -126,7 +126,7 @@ class TestBackfillWordsOrder:
         def fake_sentence(word, association="", photo=""):
             calls["photo"] = photo
             return sentence
-        def fake_fetch(word, path, search_query=None):
+        def fake_fetch(word, path, search_query=None, **kw):
             calls["query"] = search_query
             return fetch
         with patch.object(backfill_words, "llm_sentence", fake_sentence), \

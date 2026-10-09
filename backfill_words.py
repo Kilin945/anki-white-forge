@@ -10,16 +10,22 @@ from core.text import strip_html, is_placeholder, has_image, sentence_usable, im
 from core.llm import llm_sentence, llm_image_query, llm_pick_sense, llm_translate, engine_description
 from core.tts import make_audio, VOICE_WORD, VOICE_SENTENCE
 from core.image import fetch_image
+from core.picture import find_picture
 
 MEDIA_DIR = os.path.expanduser("~/Library/Application Support/Anki2/Kilin/collection.media")
 MAX_WORKERS = 4
 _print_lock = threading.Lock()
 
 
-def _do_image(word, img_query):
+def _do_image(word, img_query, sense=""):
+    """有詞義就走 core/picture.py 挑圖（LLM 挑＋看圖確認），沒有就拿第一張。"""
     img_filename = f"{word}_img_{int(time.time())}.jpg"
     img_path = os.path.join(MEDIA_DIR, img_filename)
-    ok, attribution, description, source = fetch_image(word, img_path, search_query=img_query)
+    if sense:
+        found = find_picture(word, img_path, img_query, sense)
+    else:
+        found = fetch_image(word, img_path, search_query=img_query)
+    ok, attribution, description, source = found
     return img_filename, ok, attribution, description, source
 
 
@@ -87,7 +93,7 @@ def process_note(note):
             lines.append(f"  Sense    : {current_assoc}")
     if need_img:
         img_query = llm_image_query(word, current_assoc)
-        img_filename, ok, attr, description, source = _do_image(word, img_query)
+        img_filename, ok, attr, description, source = _do_image(word, img_query, sense=current_assoc)
         if ok:
             fields["Image_Prompt"] = image_html(img_filename, description, attr, source)
             photo = description

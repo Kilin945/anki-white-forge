@@ -215,9 +215,48 @@ def _safe_search(fn, query):
         return []
 
 
+# ── 挑圖（core/picture.py 用）───────────────────────────────────────────────
+# judge(alts) → 候選索引（0 起算）／PICK_NONE（這家都不合格）／None（挑圖失敗）。
+# verify(path) → True（看過圖、對）／False（看過圖、不對）／None（沒辦法看 → 照收）。
+PICK_NONE = -1
+
+
+def ordered_sources(rejects):
+    """[(name, fn)]，退過的圖源排最後。"""
+    fns = dict(SOURCES)
+    return [(n, fns[n]) for n in order_sources([n for n, _ in SOURCES], rejects)]
+
+
+def search_candidates(name, fn, query, rejects):
+    """一家的候選清單，退過的那張先拿掉（不給 LLM 看，也不會再挑）。"""
+    return [c for c in _safe_search(fn, query) if f"{name}:{c['id']}" not in rejects]
+
+
+def _result(hit, name):
+    return True, hit["attribution"], hit["alt"], f"{name}:{hit['id']}"
+
+
+def fetch_judged(filepath, query, rejects, judge, verify):
+    """一家一家：judge 從描述挑一張 → 下載 → verify 看圖。看圖說不對就換下一家；
+    judge 失敗就依序試這家的候選（每張都要過 verify）。回結果，或 None（每一家都沒有對的圖）。"""
+    for name, fn in ordered_sources(rejects):
+        cands = search_candidates(name, fn, query, rejects)
+        if not cands:
+            continue
+        pick = judge([c["alt"] for c in cands])
+        if pick == PICK_NONE:
+            continue
+        for cand in (cands[:MAX_DOWNLOAD_TRIES] if pick is None else [cands[pick]]):
+            hit = _download([cand], name, rejects, filepath)
+            if hit and verify(filepath) is not False:
+                return _result(hit, name)
+    return None
+
+
 def fetch_image(word, filepath, search_query=None, rejects=None):
     """找一張圖寫到 filepath。回 (ok, attribution_html, description, source_tag)。
-    source_tag 形如 "pexels:123"，存進 <img data-src> 供之後退圖辨識。"""
+    source_tag 形如 "pexels:123"，存進 <img data-src> 供之後退圖辨識。
+    多圖源 hedged 搜尋，誰先有圖用誰（不挑；要挑圖走 core/picture.py）。"""
     query = search_query or f"{word} meaning illustration"
     if rejects is None:
         rejects = load_rejects(word)
@@ -244,7 +283,7 @@ def fetch_image(word, filepath, search_query=None, rejects=None):
                 name = pending.pop(fut)
                 hit = _download(fut.result(), name, rejects, filepath)
                 if hit:
-                    return True, hit["attribution"], hit["alt"], f"{name}:{hit['id']}"
+                    return _result(hit, name)
             if queue:                    # 這家沒有 → 不等，立刻開下一家
                 launch()
                 next_at = time.monotonic() + HEDGE_SECS

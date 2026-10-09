@@ -5,6 +5,7 @@ import shutil
 import threading
 
 from core.examples import examples as _examples
+from core.image import PICK_NONE
 from core.dispatcher import AllProvidersLimited, Dispatcher
 from core.providers import (GROQ_KEY_PATH, GROQ_MODEL, GeminiProvider,
                             GroqProvider, _load_groq_client, build_pools)  # GROQ_MODEL/GROQ_KEY_PATH/_load_groq_client 純 re-export — test_backfill.py 依賴,勿刪
@@ -425,6 +426,41 @@ def llm_pick_sense(word):
     （2026-10-10：concrete 圖搜到混凝土、例句寫成具體類別）。失敗回 ''，照舊流程走。
     KEEP-IN-SYNC: addon/_llm.py::_llm_pick_sense。"""
     return clean_sense(llm(sense_prompt(word)))
+
+
+def image_pick_prompt(word, sense, alts):
+    """挑圖 prompt。KEEP-IN-SYNC: addon/_llm.py::_image_pick_prompt（逐字相同，測試比對）。"""
+    lines = "\n".join(f"{i + 1}. {a or '(no description)'}" for i, a in enumerate(alts))
+    return (
+        f'We need a photo that shows the meaning of the English word "{word}": "{sense}".\n'
+        f'Here are the descriptions of the candidate photos:\n{lines}\n'
+        f'Reply with the number of the one photo that best shows this meaning. '
+        f'If none of them shows this meaning, reply NONE. Reply with only the number or NONE.'
+    )
+
+
+def parse_image_pick(reply, n):
+    """回覆 → 候選索引（0 起算）／PICK_NONE／None（看不懂或沒回 → 呼叫端退回拿第一張）。
+    KEEP-IN-SYNC: addon/_llm.py::_parse_image_pick。"""
+    r = (reply or "").strip().upper()
+    if r.startswith("NONE"):
+        return PICK_NONE
+    m = re.match(r"(\d+)", r)
+    if m and 1 <= int(m.group(1)) <= n:
+        return int(m.group(1)) - 1
+    return None
+
+
+def llm_pick_image(word, sense, alts):
+    """從候選照片描述挑出表現這個詞義的那張（輕量池）。"""
+    return parse_image_pick(llm(image_pick_prompt(word, sense, alts)), len(alts))
+
+
+def llm_is_tech(word, sense):
+    """這個詞義是不是軟體／電腦概念（最後退路要不要放通用程式畫面）。沒回當作不是。"""
+    reply = llm(f'Is this meaning of the English word "{word}" a software, programming or '
+                f'computer concept: "{sense}"? Answer only YES or NO.')
+    return (reply or "").strip().upper().startswith("YES")
 
 
 def llm_image_query(word, definition=""):
