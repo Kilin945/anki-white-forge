@@ -227,12 +227,20 @@ class LocalBucketLimiter:
             self._exhausted_until = time.monotonic() + float(retry_after)
 
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")   # 留 \t \n \r
+_SPECIAL_SPACE_RE = re.compile("[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]")   # 不換行空格等 → 一般空格
+_ZERO_WIDTH_RE = re.compile("[\u200b\ufeff]")                                     # 零寬字元 → 刪掉
 
 
 def clean_llm_text(text):
     """去掉 LLM 回覆裡的控制字元（實測 Groq 回過 'penguin on ice\\x00'）。換行與 tab 保留：
-    句子守門靠換行擋洩漏。KEEP-IN-SYNC: core/dispatcher.py 與 addon/_llm_dispatch.py 各一份。"""
-    return _CONTROL_CHAR_RE.sub("", text) if text else text
+    句子守門靠換行擋洩漏。
+    特殊空白（實測例句與翻譯出現 'Van der\\u202fPol'）換成一般空格：它不算空格，術語白名單與抓術語都對不上，
+    那張卡的整句翻譯怎麼重按都補不出來。KEEP-IN-SYNC: core/dispatcher.py 與 addon/_llm_dispatch.py 各一份。"""
+    if not text:
+        return text
+    text = _CONTROL_CHAR_RE.sub("", text)
+    text = _ZERO_WIDTH_RE.sub("", text)
+    return _SPECIAL_SPACE_RE.sub(" ", text)
 
 
 class CircuitBreaker:
