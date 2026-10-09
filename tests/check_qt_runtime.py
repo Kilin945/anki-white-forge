@@ -389,6 +389,41 @@ def _():
     dlg._force_close(0); _app.processEvents()
     return f"fail row badge={row_fail.badge.text()!r}, ok row badge={row_ok.badge.text()!r}"
 
+@check("⌘S: 補完的列出縮圖；整列懸停的預覽有圖（媒體路徑含空白也載得到）和例句；橘框懸停仍是退回原因")
+def _():
+    from PyQt6.QtGui import QPixmap, QColor
+    from PyQt6.QtWidgets import QLabel
+    seed(1)
+    media = os.path.join(MEDIA_DIR, "Application Support")      # 真的媒體資料夾路徑有空白
+    os.makedirs(media, exist_ok=True)
+    img = QPixmap(400, 300); img.fill(QColor("#ff0000"))
+    img.save(os.path.join(media, "preview_probe.png"))
+    orig_dir, orig_fetch = mw.col.media.dir, addon._workers.Worker._fetch_image
+    mw.col.media.dir = lambda: media
+    addon._workers.Worker._fetch_image = lambda self, w, definition="": '<img src="preview_probe.png" alt="red">'
+    hits = []
+    try:
+        dlg = open_backfill()
+        select_all_rows(dlg)
+        orig_fin = dlg._on_finished
+        dlg._on_finished = lambda res: (hits.append(1), orig_fin(res))
+        QTest.mouseClick(dlg.run_btn, Qt.MouseButton.LeftButton)
+        pump(lambda: bool(hits), 30, "batch finished")
+    finally:
+        mw.col.media.dir, addon._workers.Worker._fetch_image = orig_dir, orig_fetch
+    row = dlg._rows[NID_BASE]
+    assert row.thumb.isVisible(), "縮圖沒出現"
+    assert row.thumb.pixmap().height() == addon._dlg_backfill.THUMB_HEIGHT, row.thumb.pixmap().size()
+    tip = row.toolTip()
+    assert f"The engineer used {NAMES[0]}" in tip and "這是中文翻譯。" in tip and "字義" in tip, tip
+    probe = QLabel(tip); probe.adjustSize()                    # 跟 tooltip 同一套 rich text 引擎
+    shot = probe.grab().toImage()
+    assert shot.pixelColor(20, 20) == QColor("#ff0000"), f"預覽裡的圖沒載到：{shot.pixelColor(20, 20).name()}"
+    row.set_box("translation", "warn", 'got "Linux"')          # 橘框自己的 tooltip 不被整列蓋掉
+    assert row._boxes["translation"].toolTip() == 'got "Linux"'
+    dlg._force_close(0); _app.processEvents()
+    return f"縮圖 {row.thumb.pixmap().width()}x{row.thumb.pixmap().height()}；預覽 {probe.width()}x{probe.height()}"
+
 # ═══ 2. 批次互斥 ════════════════════════════════════════════════════════════
 print("\n2) 批次互斥（_batch_acquire / _blocked_by_batch）")
 

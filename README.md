@@ -105,6 +105,10 @@ Wikimedia Commons 與 Openverse 不用金鑰。沒有金鑰的圖源會被略過
 | Rebuild Long Sentences | 清空過長例句 |
 | Test Cards | 產生或清除測試卡 |
 
+⌘S 補完一張卡，那一列會出現縮圖。
+滑鼠停在那一列，會浮出大圖、例句、整句翻譯和單字翻譯。
+用它確認圖和例句是不是同一個意思。
+
 ---
 
 ## 自動同步

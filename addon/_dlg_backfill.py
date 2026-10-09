@@ -1,14 +1,19 @@
 """⌘S Complete Missing Cards 視窗：`FieldRow`、`BackfillDialog` 與它的純函式。"""
 
+import os
+
 from aqt import mw
 from aqt.qt import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QProgressBar, QScrollArea, QWidget, QCheckBox, QKeySequence, Qt,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QProgressBar, QScrollArea, QWidget, QCheckBox, QKeySequence, QPixmap, Qt,
 )
 from . import _llm_dispatch as _lld
 from ._config import BACKFILL_BOXES, BOX_STYLE, PLACEHOLDERS, _BADGE_OK_STYLE, _BADGE_WARN_STYLE, _FIELD_LABEL, _shortcut
-from ._text import _clean_text, _looks_english, _reasons_text
+from ._text import _clean_text, _image_filename, _looks_english, _preview_html, _reasons_text
 from ._batch import _BatchDialogMixin, _batch_acquire, _batch_busy_message, _batch_release, _deck_note_ids, _live_note, _show_nonmodal, _sync_after_batch
 from ._workers import BackfillWorker
+
+
+THUMB_HEIGHT = 48   # ⌘S 補完那列的縮圖高度（px）
 
 
 class FieldRow(QWidget):
@@ -36,6 +41,9 @@ class FieldRow(QWidget):
             self._boxes[key] = box
             lay.addWidget(box)
             self.set_box(key, "ok" if present.get(key) else "working")
+        self.thumb = QLabel()             # 補完後才出現的縮圖（set_preview）
+        self.thumb.setVisible(False)
+        lay.addWidget(self.thumb)
         self.badge = QLabel("")
         self.badge.setStyleSheet(_BADGE_OK_STYLE)
         self.badge.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)   # 退回原因也能複製
@@ -64,6 +72,15 @@ class FieldRow(QWidget):
             return
         self.badge.setStyleSheet(_BADGE_OK_STYLE)
         self.badge.setText(f"'{self.word}' added!")
+
+    def set_preview(self, pixmap, tooltip_html):
+        """補完的卡：列尾放縮圖，整列 tooltip 放大圖＋文字。橘框自己的 tooltip（退回原因）
+        優先——Qt 先問滑鼠底下的元件，它沒有 tooltip 才往上交給整列。"""
+        if pixmap is not None and not pixmap.isNull():
+            self.thumb.setPixmap(pixmap.scaledToHeight(THUMB_HEIGHT,
+                                 Qt.TransformationMode.SmoothTransformation))
+            self.thumb.setVisible(True)
+        self.setToolTip(tooltip_html)
 
     def is_checked(self):
         return self.checkbox.isChecked()
@@ -339,6 +356,22 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
         row = self._rows.get(note_id)
         if row:
             row.set_done()
+            self._show_preview(row, note_id)
+
+    def _show_preview(self, row, note_id):
+        """重讀欄位（不信 worker 回報的值）→ 縮圖＋浮動預覽。卡被刪了就不顯示；圖讀不到只放文字。"""
+        note = _live_note(note_id)
+        if note is None:
+            return
+        name = _image_filename(note["Image_Prompt"])
+        path = os.path.join(mw.col.media.dir(), name) if name else ""
+        if path and not os.path.exists(path):
+            path = ""
+        pixmap = QPixmap(path) if path else None
+        size = (pixmap.width(), pixmap.height()) if pixmap is not None else (0, 0)
+        row.set_preview(pixmap,
+                        _preview_html(note["Sentence"], note["Sentence_CN"] if "Sentence_CN" in note else "",
+                                      note["Translation"] if "Translation" in note else "", path, size))
 
     def _on_finished(self, results):
         self.progress_bar.setVisible(False)

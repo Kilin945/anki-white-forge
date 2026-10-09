@@ -1,13 +1,12 @@
 """⌘F 面板第三塊：找重複單字並刪除（含分組、比較欄位等純函式）。"""
 
 import os
-import re
 import time
 from aqt import mw
 from aqt.qt import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QWidget, QCheckBox, QPixmap, QIcon, QSize, QMessageBox, Qt,
 )
-from ._text import _clean_text
+from ._text import _clean_text, _image_filename
 from ._batch import _blocked_by_batch, _deck_note_ids, _section_title, _sync_after_batch
 
 
@@ -64,12 +63,6 @@ def _review_summary(reps, ivl):
     if ivl and ivl > 0:
         text += f" · {ivl}-day interval"
     return text
-
-
-def _image_filename(value):
-    """First <img src="…"> filename in a field, or None (no image / leftover HTML)."""
-    m = re.search(r'<img[^>]*\bsrc="([^"]+)"', value or "")
-    return m.group(1) if m else None
 
 
 def _review_stats(note):

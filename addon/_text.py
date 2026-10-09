@@ -5,6 +5,7 @@ import re
 import json
 import html
 import shutil
+import urllib.parse
 import threading
 from . import _llm_dispatch as _lld
 from . import _config
@@ -33,6 +34,41 @@ def _clean_text(raw, *, lower=False):
     # strip only real HTML tags (`<tag ...>` / `</tag>`); leave literal `<`…`>` in content
     text = html.unescape(re.sub(r"</?[a-zA-Z][^>]*>", "", raw)).replace("\xa0", " ").strip()
     return text.lower() if lower else text
+
+
+def _image_filename(value):
+    """First <img src="…"> filename in a field, or None (no image / leftover HTML)."""
+    m = re.search(r'<img[^>]*\bsrc="([^"]+)"', value or "")
+    return m.group(1) if m else None
+
+
+PREVIEW_IMAGE_BOX = 260   # 預覽圖的外框（px）：直式、橫式都縮進這個正方形，保持比例
+PREVIEW_TEXT_WIDTH = 340  # 右欄文字寬（px），超過就換行
+
+
+def _fit_box(width, height, box=PREVIEW_IMAGE_BOX):
+    """(寬, 高) 等比縮進 box×box；讀不到尺寸（0）回 (box, box)。"""
+    if width <= 0 or height <= 0:
+        return box, box
+    scale = box / max(width, height)
+    return round(width * scale), round(height * scale)
+
+
+def _preview_html(sentence, sentence_cn, translation, image_path, image_size=(0, 0)):
+    """⌘S 補完那列的浮動預覽（整列的 tooltip）：左欄圖、右欄例句／整句翻譯／單字翻譯，
+    讓使用者一眼比對圖和文字是不是同一個意思。欄位是 HTML → 先去標籤再跳脫；空的顯示「—」。
+    圖用 file URL（媒體資料夾路徑有空白）；image_size 是原圖 (寬, 高)，縮進 PREVIEW_IMAGE_BOX。"""
+    def line(raw):
+        return html.escape(_clean_text(raw or "")) or "—"
+    text = (f"<p style='font-size:18px; font-weight:600'>{line(sentence)}</p>"
+            f"<p style='font-size:16px'>{line(sentence_cn)}</p>"
+            f"<p style='font-size:16px; color:#64748B'>{line(translation)}</p>")
+    if not image_path:
+        return f"<table><tr><td width='{PREVIEW_TEXT_WIDTH}'>{text}</td></tr></table>"
+    w, h = _fit_box(*image_size)
+    img = f'<img src="file://{urllib.parse.quote(image_path)}" width="{w}" height="{h}">'
+    return (f"<table cellspacing='8'><tr><td>{img}</td>"
+            f"<td width='{PREVIEW_TEXT_WIDTH}' valign='top'>{text}</td></tr></table>")
 
 
 ENGLISH_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\- ]*")

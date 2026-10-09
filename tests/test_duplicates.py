@@ -72,8 +72,8 @@ class TestReviewSummary:
 class TestImageFilename:
     def test_real_field(self):
         v = '<img src="dull_img_1790187098.jpg"><div style="font-size:10px">credit</div>'
-        assert addon._sec_duplicates._image_filename(v) == "dull_img_1790187098.jpg"
+        assert addon._text._image_filename(v) == "dull_img_1790187098.jpg"
 
     def test_no_image(self):
-        assert addon._sec_duplicates._image_filename("") is None
-        assert addon._sec_duplicates._image_filename("<div>leftover</div>") is None
+        assert addon._text._image_filename("") is None
+        assert addon._text._image_filename("<div>leftover</div>") is None
