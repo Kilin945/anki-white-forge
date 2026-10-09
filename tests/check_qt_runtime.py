@@ -1067,7 +1067,19 @@ def _():
         addon._config.TRANSLATION_TERMS_PATH = saved
         import shutil; shutil.rmtree(tmp.parent, ignore_errors=True)
 
-# ── 收尾 ────────────────────────────────────────────────────────────────────
+@check("⌘S 每列的單字與退回原因可以用滑鼠選取複製，勾選框照樣點得到")
+def _():
+    row = addon._dlg_backfill.FieldRow("simulate", {})
+    row.resize(900, 30); row.show(); _app.processEvents()
+    row.set_box("sentence_cn", "warn", "too much English")
+    for lbl in (row.word_label, row.badge):
+        assert lbl.textInteractionFlags() & Qt.TextInteractionFlag.TextSelectableByMouse, lbl.text()
+    click_checkbox(row.checkbox)
+    assert row.is_checked()
+    row.close()
+    return "單字、原因可選取；勾選框可點"
+
+# ── 收尾────────────────────────────────────────────────────────────────────
 aqt.dialogs.closeAll(lambda: None)
 _app.processEvents()
 print()

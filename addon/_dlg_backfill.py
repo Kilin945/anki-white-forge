@@ -24,9 +24,10 @@ class FieldRow(QWidget):
         lay.setContentsMargins(4, 2, 4, 2)
         self.checkbox = QCheckBox()       # left-most: pick which cards to complete (default unchecked)
         lay.addWidget(self.checkbox)
-        wl = QLabel(word)
+        self.word_label = wl = QLabel(word)
         wl.setMinimumWidth(120)
         wl.setStyleSheet("font-weight:600; color:#1E293B;")
+        wl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)   # 單字可以選取複製（QLabel 預設不行）
         lay.addWidget(wl)
         for key, _label in BACKFILL_BOXES:    # all five fields, incl. the sentence translation
             box = QLabel()
@@ -37,6 +38,7 @@ class FieldRow(QWidget):
             self.set_box(key, "ok" if present.get(key) else "working")
         self.badge = QLabel("")
         self.badge.setStyleSheet(_BADGE_OK_STYLE)
+        self.badge.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)   # 退回原因也能複製
         lay.addWidget(self.badge)
         lay.addStretch()
 
