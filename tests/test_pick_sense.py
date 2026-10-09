@@ -166,7 +166,7 @@ def _cli(note):
          patch.object(backfill_words, "llm_sentence",
                       lambda w, association="", photo="": seen.update(sentence=association)
                       or "The Logger class is concrete."), \
-         patch.object(backfill_words, "llm_translate", lambda w, s: "具體"), \
+         patch.object(backfill_words, "llm_translate", lambda w, s, sense="": "具體"), \
          patch.object(backfill_words, "make_audio", lambda *a, **k: None), \
          patch.object(backfill_words, "anki", MagicMock()):
         backfill_words.process_note(note)

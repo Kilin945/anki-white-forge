@@ -122,7 +122,7 @@ def main():
     print("[3] Audio + Translation (parallel)…")
     translation_result = [""]
     def do_translate():
-        translation_result[0] = llm_translate(word, sentence)
+        translation_result[0] = llm_translate(word, sentence, sense=hint)
     trans_thread = threading.Thread(target=do_translate)
     trans_thread.start()
 
@@ -138,7 +138,7 @@ def main():
 
     # only translate / write Sentence_CN if the note type actually has the field
     has_cn = "Sentence_CN" in anki("modelFieldNames", modelName=MODEL_NAME)
-    sentence_cn = llm_translate_sentence(sentence, word=word) if has_cn else ""
+    sentence_cn = llm_translate_sentence(sentence, word=word, sense=hint) if has_cn else ""
     if has_cn:
         print(f"  整句譯: {sentence_cn or '⚠️'}")
 

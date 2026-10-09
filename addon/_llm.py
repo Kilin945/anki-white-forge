@@ -21,6 +21,16 @@ _WORD_MUST_APPEAR_TEMPLATE = (
 )
 
 
+# KEEP IN SYNC with core/llm.SENSE_RETRY_TEMPLATE（逐字相同）
+_SENSE_RETRY_TEMPLATE = (
+    '\n\nAn earlier attempt did not use "{word}" with the meaning "{sense}", or did not '
+    'sound natural: "{previous}". Write a new sentence that does.'
+)
+
+# KEEP IN SYNC with core/llm.TRANSLATION_SENSE_TEMPLATE（逐字相同）
+_TRANSLATION_SENSE_TEMPLATE = ' The word "{word}" here means: "{sense}". Translate it with that meaning.'
+
+
 _PHOTO_BLOCK_TEMPLATE = (
     '\n\nA photo was already picked for this card. Photo description: "{photo}"\n'
     'Use the photo only if it fits both the meaning AND the setting you picked. If you picked '
@@ -32,7 +42,8 @@ _PHOTO_BLOCK_TEMPLATE = (
 )
 
 
-def _sentence_prompt(word, association="", photo="", must_contain=False, examples=()):
+def _sentence_prompt(word, association="", photo="", must_contain=False, examples=(),
+                     previous=""):
     """Example-sentence prompt: pick sense (hint > SWE > everyday), short & clear, no
     definition/circular sentence.
     KEEP IN SYNC with core/llm._sentence_instructions — addon cannot import core, so this
@@ -63,8 +74,31 @@ def _sentence_prompt(word, association="", photo="", must_contain=False, example
         + _examples.examples_block(examples)
         + (_PHOTO_BLOCK_TEMPLATE.format(photo=photo) if photo else "")
         + (_WORD_MUST_APPEAR_TEMPLATE.format(word=word) if must_contain else "")
+        + (_SENSE_RETRY_TEMPLATE.format(word=word, sense=association, previous=previous)
+           if previous else "")
         + "\n\nOutput only the sentence. No explanation, no quotes."
     )
+
+
+def _sense_check_prompt(word, sense, sentence):
+    """例句有沒有照詞義寫。KEEP-IN-SYNC: core/llm.py::sense_check_prompt（逐字相同，測試比對）。"""
+    return (
+        f'Does this sentence use the word "{word}" with this meaning: "{sense}"? '
+        f'And is it natural English that a native speaker would write?\n'
+        f'Sentence: "{sentence}"\n'
+        f'Answer only YES or NO.'
+    )
+
+
+def _sense_fits_reply(reply):
+    """只有明確回 NO 才算不合；沒回、回別的都放行。KEEP-IN-SYNC: core/llm.py::sense_fits_reply。"""
+    return not (reply or "").strip().upper().startswith("NO")
+
+
+def _sentence_fits_sense(word, sense, sentence):
+    """走輕量池問一次；失敗（沒回）視為合格，不擋造句。"""
+    return _sense_fits_reply(_groq_chat(_sense_check_prompt(word, sense, sentence),
+                                        temperature=0, max_tokens=200, timeout=10, task="light"))
 
 
 def _groq_chat(prompt, *, temperature, max_tokens, timeout, strict=False, effort="low",

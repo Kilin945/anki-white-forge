@@ -54,6 +54,15 @@ def llm(prompt, effort="low", task="light"):
     return groq_generate(prompt, effort=effort, task=task)
 
 
+# 例句沒照詞義寫時重造用的加註（KEEP-IN-SYNC addon/_llm.py::_SENSE_RETRY_TEMPLATE）
+SENSE_RETRY_TEMPLATE = (
+    '\n\nAn earlier attempt did not use "{word}" with the meaning "{sense}", or did not '
+    'sound natural: "{previous}". Write a new sentence that does.'
+)
+
+# 翻譯帶上詞義，單字翻譯和整句翻譯照同一個意思翻（KEEP-IN-SYNC addon/_llm.py::_TRANSLATION_SENSE_TEMPLATE）
+TRANSLATION_SENSE_TEMPLATE = ' The word "{word}" here means: "{sense}". Translate it with that meaning.'
+
 # 例句裡沒出現單字時重問一次用的加註（KEEP-IN-SYNC addon/_llm.py::_WORD_MUST_APPEAR_TEMPLATE）
 WORD_MUST_APPEAR_TEMPLATE = (
     '\n\nThe sentence must contain the exact word "{word}", spelled exactly like that '
@@ -71,7 +80,8 @@ PHOTO_BLOCK_TEMPLATE = (
 )
 
 
-def _sentence_instructions(word, association="", photo="", must_contain=False, examples=()):
+def _sentence_instructions(word, association="", photo="", must_contain=False, examples=(),
+                           previous=""):
     """Shared meaning-selection + sentence-quality rules for example-sentence prompts.
     Priority: hint (association) > software-engineering sense > most common everyday sense.
     photo（照片描述）非空時在結尾附 PHOTO_BLOCK_TEMPLATE：句子依圖造，但詞義優先序不變。
@@ -102,12 +112,14 @@ def _sentence_instructions(word, association="", photo="", must_contain=False, e
         + _examples.examples_block(examples)
         + (PHOTO_BLOCK_TEMPLATE.format(photo=photo) if photo else "")
         + (WORD_MUST_APPEAR_TEMPLATE.format(word=word) if must_contain else "")
+        + (SENSE_RETRY_TEMPLATE.format(word=word, sense=association, previous=previous)
+           if previous else "")
     )
 
 
-def _ask_sentence(word, association="", photo="", must_contain=False, examples=()):
+def _ask_sentence(word, association="", photo="", must_contain=False, examples=(), previous=""):
     prompt = (_sentence_instructions(word, association, photo, must_contain=must_contain,
-                                     examples=examples)
+                                     examples=examples, previous=previous)
               + "\n\nOutput only the sentence. No explanation, no quotes.")
     result = llm(prompt, effort="medium", task="sentence")   # 造句：多條件約束 → 較高思考等級、走造句池
     return result if sentence_acceptable(result) else ""
@@ -121,18 +133,45 @@ def llm_sentence(word, association="", photo=""):
     if result and not sentence_has_word(word, result):
         retry = _ask_sentence(word, association, photo, must_contain=True, examples=ex)
         if retry:
-            return retry
+            result = retry
+    # 有詞義就檢查例句有沒有照它寫；不合就帶著上一句重造一次，重造的直接收（不再檢查）
+    if result and association and not sentence_fits_sense(word, association, result):
+        retry = _ask_sentence(word, association, photo, must_contain=True, examples=ex,
+                              previous=result)
+        if retry:
+            result = retry
     return result
+
+
+def sense_check_prompt(word, sense, sentence):
+    """例句有沒有照詞義寫。KEEP-IN-SYNC: addon/_llm.py::_sense_check_prompt（逐字相同，測試比對）。"""
+    return (
+        f'Does this sentence use the word "{word}" with this meaning: "{sense}"? '
+        f'And is it natural English that a native speaker would write?\n'
+        f'Sentence: "{sentence}"\n'
+        f'Answer only YES or NO.'
+    )
+
+
+def sense_fits_reply(reply):
+    """只有明確回 NO 才算不合；沒回、回別的都放行（檢查失敗不擋造句）。
+    KEEP-IN-SYNC: addon/_llm.py::_sense_fits_reply。"""
+    return not (reply or "").strip().upper().startswith("NO")
+
+
+def sentence_fits_sense(word, sense, sentence):
+    return sense_fits_reply(llm(sense_check_prompt(word, sense, sentence)))
 
 
 # KEEP-IN-SYNC: addon/_workers.py（Worker._groq_translate 與 _groq_translate_sentence 的 prompt）
 _TW_RULE = "Write Traditional Chinese as used in Taiwan; never use Simplified Chinese characters. "
 
 
-def llm_translate(word, sentence=""):
+def llm_translate(word, sentence="", sense=""):
     ctx = f' as it is used in this sentence: "{sentence}"' if sentence else ""
+    meant = TRANSLATION_SENSE_TEMPLATE.format(word=word, sense=sense) if sense else ""
     result = llm(
-        f'Give the Traditional Chinese meaning of "{word}"{ctx}. '
+        f'Give the Traditional Chinese meaning of "{word}"{ctx}.{meant} '
         f'Give ONE concise translation only — do NOT list synonyms or near-duplicate terms '
         f'(e.g. never "水杯、茶杯"). If "{word}" is a product / framework / library / tool proper '
         f'noun (e.g. Spring, React, Docker, Hazelcast), do NOT translate it — output the English '
@@ -317,7 +356,7 @@ def _looks_like_chinese_translation(text, terms=None):
                                                        # a single embedded term (concurrency, Microsoft…) is kept
 
 
-def llm_translate_sentence(sentence, *, strict=False, word=""):
+def llm_translate_sentence(sentence, *, strict=False, word="", sense=""):
     """Traditional-Chinese translation of a full English sentence. '' on failure.
 
     strict=True surfaces Groq 429 as RateLimitReached (for batch jobs);
@@ -327,6 +366,8 @@ def llm_translate_sentence(sentence, *, strict=False, word=""):
     if not sentence:
         return ""
     prompt = SENTENCE_CN_PROMPT.format(sentence=sentence)
+    if sense and word:
+        prompt += TRANSLATION_SENSE_TEMPLATE.format(word=word, sense=sense)
     result = groq_generate_strict(prompt) if strict else llm(prompt)
     result = result.strip().strip('"').strip()
     if has_simplified(result):          # 簡體先轉繁體，再進驗證

@@ -121,7 +121,7 @@ def process_note(note):
         if not has_front_audio:
             futures["front_audio"] = pool.submit(_do_word_audio, word)
         if not has_translation and usable:
-            futures["translation"] = pool.submit(llm_translate, word, sentence)
+            futures["translation"] = pool.submit(llm_translate, word, sentence, sense=current_assoc)
 
         if "audio" in futures:
             fields["Audio"] = f"[sound:{futures['audio'].result()}]"

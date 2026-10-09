@@ -145,8 +145,8 @@ def stub_sentence(self, word, association="", photo=""):
 
 addon._workers.Worker._llm_sentence            = stub_sentence
 addon._workers.Worker._groq_sentence           = lambda self,w,a="",photo="": f"stub {w}"
-addon._workers.Worker._groq_translate          = lambda self,w,s,reasons=None: "字義"
-addon._workers.Worker._groq_translate_sentence = lambda self,s,strict=False,word="",reasons=None: "這是中文翻譯。"
+addon._workers.Worker._groq_translate          = lambda self,w,s,reasons=None,sense="": "字義"
+addon._workers.Worker._groq_translate_sentence = lambda self,s,strict=False,word="",reasons=None,sense="": "這是中文翻譯。"
 addon._workers.Worker._fetch_image             = lambda self,w,definition="": "<img src='stub.jpg'>"
 addon._workers.Worker._pick_sense              = lambda self,w: ""
 addon._workers.Worker._make_audio_batch        = lambda self,items: None
@@ -329,7 +329,7 @@ def _():
     fail_word = NAMES[1]
     orig_translate = addon._workers.Worker._groq_translate
     addon._workers.Worker._groq_translate = (
-        lambda self, w, s, reasons=None, _f=fail_word: "" if w == _f else "字義")
+        lambda self, w, s, reasons=None, sense="", _f=fail_word: "" if w == _f else "字義")
     finished_hits, done_ids = [], []
     try:
         dlg = open_backfill()
@@ -362,7 +362,7 @@ def _():
     seed(3)
     fail_word = NAMES[1]
     orig_translate = addon._workers.Worker._groq_translate
-    def fake_translate(self, w, s, reasons=None, _f=fail_word):
+    def fake_translate(self, w, s, reasons=None, sense="", _f=fail_word):
         if w == _f:                      # 走真實路徑的「被退」：reasons 由 _groq_translate 寫
             if reasons is not None:
                 reasons["translation"] = 'got "Linux"'
@@ -869,7 +869,7 @@ def _():
                    Audio="[sound:x]", Front_Audio="[sound:y]",
                    Image_Prompt="<img src=a>", Translation="義", Sentence_CN="")
     slow = threading.Event()
-    def slow_tr(self, s, strict=False, word="", reasons=None):
+    def slow_tr(self, s, strict=False, word="", reasons=None, sense=""):
         slow.wait(timeout=10); return "慢慢翻的中文。"
     saved = addon._workers.Worker._groq_translate_sentence
     addon._workers.Worker._groq_translate_sentence = slow_tr

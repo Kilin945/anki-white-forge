@@ -64,8 +64,9 @@ class Worker(QThread):
             front_audio_filename = f"{word}_word.mp3"
 
             def do_translate():
-                translation_result[0] = self._groq_translate(word, sentence, reasons=reasons)
-                sentence_cn_result[0] = self._groq_translate_sentence(sentence, word=word, reasons=reasons)
+                translation_result[0] = self._groq_translate(word, sentence, reasons=reasons, sense=hint)
+                sentence_cn_result[0] = self._groq_translate_sentence(sentence, word=word, reasons=reasons,
+                                                                      sense=hint)
 
             trans_thread = None
             if sentence_ok:
@@ -112,10 +113,11 @@ class Worker(QThread):
         """沒有 Association 時選一次詞義（⌘A／⌘S 共用；測試替換這個方法）。"""
         return _llm._llm_pick_sense(word)
 
-    def _groq_sentence(self, word, association="", photo="", must_contain=False, examples=()):
+    def _groq_sentence(self, word, association="", photo="", must_contain=False, examples=(),
+                       previous=""):
         # 造句是多條件約束任務 → 較高思考等級（其餘呼叫維持預設 low）
         return _llm._groq_chat(_sentence_prompt(word, association, photo, must_contain=must_contain,
-                                         examples=examples),
+                                         examples=examples, previous=previous),
                           temperature=0.7, max_tokens=200, timeout=15, effort="medium",
                           task="sentence")
 
@@ -135,15 +137,26 @@ class Worker(QThread):
             if _sentence_acceptable(retry):
                 if not _sentence_has_word(word, retry):
                     _log.warning("sentence word-missing after retry word=%s reply=%r (kept)", word, retry)
-                return retry, "Groq"
+                result = retry
+        # 有詞義就檢查例句有沒有照它寫；不合就帶著上一句重造一次，重造的直接收（不再檢查）
+        # KEEP-IN-SYNC: core/llm.py::llm_sentence
+        if association and not _llm._sentence_fits_sense(word, association, result):
+            _log.warning("sentence sense-mismatch word=%s sense=%r reply=%r → retry",
+                         word, association, result)
+            retry = self._groq_sentence(word, association, photo, must_contain=True, examples=ex,
+                                        previous=result)
+            if _sentence_acceptable(retry):
+                result = retry
         return result, "Groq"
 
-    def _groq_translate(self, word, sentence, reasons=None):
+    def _groq_translate(self, word, sentence, reasons=None, sense=""):
         """Traditional Chinese meaning of word AS USED IN the sentence ('' on failure).
         Proper nouns (frameworks/products) stay in English.
         reasons：呼叫端給的 dict，被退時寫入 reasons["translation"]＝畫面短句（完整原因在 log）。"""
         prompt = (f'Give the Traditional Chinese meaning of "{word}" as it is used in this '
-                  f'sentence: "{sentence}". Give ONE concise translation only — do NOT list '
+                  f'sentence: "{sentence}".'
+                  + (_llm._TRANSLATION_SENSE_TEMPLATE.format(word=word, sense=sense) if sense else "")
+                  + f' Give ONE concise translation only — do NOT list '
                   f'synonyms or near-duplicate terms (e.g. never "水杯、茶杯"). If "{word}" is a '
                   f'product / framework / library / tool proper noun (e.g. Spring, React, Docker, '
                   f'Hazelcast), do NOT translate it — output the English name as-is. Keep it short '
@@ -162,7 +175,7 @@ class Worker(QThread):
                 reasons["translation"] = short
         return accepted
 
-    def _groq_translate_sentence(self, sentence, *, strict=False, word="", reasons=None):
+    def _groq_translate_sentence(self, sentence, *, strict=False, word="", reasons=None, sense=""):
         """Traditional Chinese translation of a full sentence. '' on failure.
         strict=True raises _AddonRateLimited on 429 (for the 批次回填 burst engine).
         reasons：呼叫端給的 dict，被退時寫入 reasons["sentence_cn"]＝畫面短句（完整原因在 log）。"""
@@ -175,6 +188,8 @@ class Worker(QThread):
                   'never use Simplified Chinese characters. '
                   'Output only the translation. No explanation, '
                   f'no quotes.\n\nSentence: "{sentence}"')
+        if sense and word:
+            prompt += _llm._TRANSLATION_SENSE_TEMPLATE.format(word=word, sense=sense)
         reply = _llm._groq_chat(prompt, temperature=0.3, max_tokens=200, timeout=15,
                            strict=strict).strip().strip('"').strip()
         reply = _to_traditional_logged(word, reply)
@@ -355,9 +370,10 @@ class BackfillWorker(QThread):
         if need_translation or need_sentence_cn:
             def do_translate(w=word, s=sentence):     # both Groq text calls share one thread
                 if need_translation:
-                    translation_result[0] = self._w._groq_translate(w, s, reasons=reasons)
+                    translation_result[0] = self._w._groq_translate(w, s, reasons=reasons, sense=assoc)
                 if need_sentence_cn:
-                    sentence_cn_result[0] = self._w._groq_translate_sentence(s, word=w, reasons=reasons)
+                    sentence_cn_result[0] = self._w._groq_translate_sentence(s, word=w, reasons=reasons,
+                                                                             sense=assoc)
             trans_thread = threading.Thread(target=do_translate)
             trans_thread.start()
 
