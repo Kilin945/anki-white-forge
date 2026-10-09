@@ -195,3 +195,29 @@ def test_fetch_image_passes_query_to_helper(monkeypatch):
     w._fetch_image("penguin")
     cmd = calls["cmd"]
     assert cmd[cmd.index("--query") + 1] == "penguin on ice"
+
+
+def test_sentence_prompts_with_examples_match_core():
+    import addon
+    import core.llm
+    ex = [("retry", "We retry the failed call."), ("rollback", "We rolled back the deploy.")]
+    a = addon._llm._sentence_prompt("idempotent", "", "", examples=ex)
+    c = core.llm._sentence_instructions("idempotent", "", "", examples=ex) \
+        + "\n\nOutput only the sentence. No explanation, no quotes."
+    assert a == c
+    assert "- retry: We retry the failed call." in a
+
+
+def test_worker_sentence_gets_examples_once_per_card(monkeypatch):
+    import addon
+    calls, prompts = [], []
+    monkeypatch.setattr(addon._examples, "examples_for",
+                        lambda w, a="", **k: calls.append(w) or [("retry", "We retry it.")])
+    replies = iter(["They waddle on the ice.", "The penguin waddled."])   # 第一句沒單字 → 重問
+    monkeypatch.setattr(addon._llm, "_groq_chat",
+                        lambda p, **kw: prompts.append(p) or next(replies))
+    w = addon._workers.Worker.__new__(addon._workers.Worker)
+    w._llm_sentence("penguin")
+    assert calls == ["penguin"]
+    assert len(prompts) == 2
+    assert all("- retry: We retry it." in p for p in prompts)

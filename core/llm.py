@@ -4,6 +4,7 @@ import re
 import shutil
 import threading
 
+from core.examples import examples as _examples
 from core.dispatcher import AllProvidersLimited, Dispatcher
 from core.providers import (GROQ_KEY_PATH, GROQ_MODEL, GeminiProvider,
                             GroqProvider, _load_groq_client, build_pools)  # GROQ_MODEL/GROQ_KEY_PATH/_load_groq_client 純 re-export — test_backfill.py 依賴,勿刪
@@ -70,7 +71,7 @@ PHOTO_BLOCK_TEMPLATE = (
 )
 
 
-def _sentence_instructions(word, association="", photo="", must_contain=False):
+def _sentence_instructions(word, association="", photo="", must_contain=False, examples=()):
     """Shared meaning-selection + sentence-quality rules for example-sentence prompts.
     Priority: hint (association) > software-engineering sense > most common everyday sense.
     photo（照片描述）非空時在結尾附 PHOTO_BLOCK_TEMPLATE：句子依圖造，但詞義優先序不變。
@@ -98,13 +99,15 @@ def _sentence_instructions(word, association="", photo="", must_contain=False):
         f'everyday sentence and do NOT force in software, teams, or tech. '
         f'Do NOT write a definition or a circular sentence (no "X means ...", "X is when ...", '
         f'"{word} is a kind of ..."); show the meaning through a real, concrete situation.'
+        + _examples.examples_block(examples)
         + (PHOTO_BLOCK_TEMPLATE.format(photo=photo) if photo else "")
         + (WORD_MUST_APPEAR_TEMPLATE.format(word=word) if must_contain else "")
     )
 
 
-def _ask_sentence(word, association="", photo="", must_contain=False):
-    prompt = (_sentence_instructions(word, association, photo, must_contain=must_contain)
+def _ask_sentence(word, association="", photo="", must_contain=False, examples=()):
+    prompt = (_sentence_instructions(word, association, photo, must_contain=must_contain,
+                                     examples=examples)
               + "\n\nOutput only the sentence. No explanation, no quotes.")
     result = llm(prompt, effort="medium", task="sentence")   # 造句：多條件約束 → 較高思考等級、走造句池
     return result if sentence_acceptable(result) else ""
@@ -113,9 +116,10 @@ def _ask_sentence(word, association="", photo="", must_contain=False):
 def llm_sentence(word, association="", photo=""):
     """例句；句子裡沒出現單字（卡片高亮不到）就帶 must_contain 重問一次，重問仍沒有也照收。
     KEEP-IN-SYNC: addon/_workers.py::Worker._llm_sentence（同樣的重問邏輯）。"""
-    result = _ask_sentence(word, association, photo)
+    ex = _examples.examples_for(word, association)   # 好卡範例；失敗回 []，不擋造句
+    result = _ask_sentence(word, association, photo, examples=ex)
     if result and not sentence_has_word(word, result):
-        retry = _ask_sentence(word, association, photo, must_contain=True)
+        retry = _ask_sentence(word, association, photo, must_contain=True, examples=ex)
         if retry:
             return retry
     return result

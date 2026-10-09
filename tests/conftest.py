@@ -79,3 +79,12 @@ def _isolate_terms_file_global(tmp_path, monkeypatch):
     p = str(tmp_path / "translation_terms.json")
     monkeypatch.setattr(core.llm, "TERMS_PATH", p)
     monkeypatch.setattr(addon._config, "TRANSLATION_TERMS_PATH", p)
+
+@pytest.fixture(autouse=True)
+def _isolate_examples(tmp_path, monkeypatch):
+    """造句會查好卡範例 → 測試期間一律回空、索引路徑導到 tmp，不打網路、不碰 repo 那份。"""
+    import importlib
+    import core.examples
+    for mod in (importlib.import_module("addon._examples"), core.examples.examples):
+        monkeypatch.setattr(mod, "EXAMPLES_PATH", str(tmp_path / "example_index.json"))
+        monkeypatch.setattr(mod, "examples_for", lambda *a, **k: [])

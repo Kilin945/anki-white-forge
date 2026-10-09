@@ -3,6 +3,7 @@
 
 import re
 from . import _llm_dispatch as _lld
+from . import _examples
 from ._zh_chars import has_simplified, simplified_chars, to_traditional   # KEEP-IN-SYNC: core/zh_chars.py
 
 _log = _lld.get_logger()   # 批次/LLM 事件集中記錄到 logs/addon_llm.log（gitignored）
@@ -31,7 +32,7 @@ _PHOTO_BLOCK_TEMPLATE = (
 )
 
 
-def _sentence_prompt(word, association="", photo="", must_contain=False):
+def _sentence_prompt(word, association="", photo="", must_contain=False, examples=()):
     """Example-sentence prompt: pick sense (hint > SWE > everyday), short & clear, no
     definition/circular sentence.
     KEEP IN SYNC with core/llm._sentence_instructions — addon cannot import core, so this
@@ -59,6 +60,7 @@ def _sentence_prompt(word, association="", photo="", must_contain=False):
         f'everyday sentence and do NOT force in software, teams, or tech. '
         f'Do NOT write a definition or a circular sentence (no "X means ...", "X is when ...", '
         f'"{word} is a kind of ..."); show the meaning through a real, concrete situation.'
+        + _examples.examples_block(examples)
         + (_PHOTO_BLOCK_TEMPLATE.format(photo=photo) if photo else "")
         + (_WORD_MUST_APPEAR_TEMPLATE.format(word=word) if must_contain else "")
         + "\n\nOutput only the sentence. No explanation, no quotes."

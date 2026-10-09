@@ -123,6 +123,20 @@ Mac：⌘A、⌘S、⌘F 寫完卡片後會自動同步。沒登入 AnkiWeb 時�
 
 ---
 
+## 好卡範例
+
+複習 3 次以上的卡，會被當成造句的範例。
+
+1. 造句前，系統找出意思最接近的 3 張好卡。
+2. 把它們的單字與例句放進 prompt，讓新句子的風格跟著走。
+3. 紅旗卡與測試卡不算好卡。
+
+第一次要自己建索引：`uv run python tools/build_example_index.py`（Anki 要開著）。
+之後每次按 ⌘S，會自動補進新達標的卡。
+索引檔 `example_index.json` 不進版控。沒索引或查不到時，照原本的 prompt 造句。
+
+---
+
 ## 專案結構
 
 ```
@@ -135,6 +149,7 @@ anki/
 │   ├── tts.py                 #   edge-tts：Andrew 唸單字、Ava 唸句子
 │   ├── text.py                #   去 HTML、正規化、佔位符判斷
 │   ├── zh_chars.py            #   簡體字表（tools/gen_zh_chars.py 產生）
+│   ├── examples.py            #   載入 addon/_examples.py（好卡範例只有一份實作）
 │   └── anki.py                #   AnkiConnect API
 ├── addon/                     # Anki 插件（symlink 到 Anki 的 addons21，改完要重啟 Anki）
 │   ├── __init__.py            #   入口：選單、快捷鍵
@@ -143,6 +158,7 @@ anki/
 │   ├── _llm.py                #   LLM 呼叫、造句 prompt
 │   ├── _llm_dispatch.py       #   core 分流的鏡像（插件不能 import core）
 │   ├── _images.py             #   圖片欄位、退圖紀錄
+│   ├── _examples.py           #   好卡範例：向量索引、找相近的卡
 │   ├── _batch.py              #   批次互斥、自動同步、視窗共用基礎
 │   ├── _workers.py            #   三個背景 worker
 │   ├── _dlg_*.py              #   ⌘A、⌘S、⌘F、⌘D、設定 五個視窗
@@ -160,6 +176,7 @@ anki/
 ├── .groq_key 等金鑰檔         # gitignored
 ├── image_rejects.json         # 退圖紀錄（gitignored）
 ├── translation_terms.json     # 翻譯術語清單（gitignored）
+├── example_index.json         # 好卡範例的向量索引（gitignored）
 ├── logs/addon_llm.log         # 插件的 LLM 呼叫紀錄，保留最近 3MB（gitignored）
 └── pyproject.toml
 ```

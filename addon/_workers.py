@@ -13,6 +13,7 @@ from aqt.qt import (
 )
 from . import _llm_dispatch as _lld
 from . import _llm
+from . import _examples
 from ._config import ANKI_URL, GTTS_SCRIPT, IMAGE_SCRIPT, MAX_BACKFILL_WORKERS, PLACEHOLDERS, SHORT_WALL_WAIT, VENV_PYTHON, VOICE_SENTENCE, VOICE_WORD
 from ._text import _accept_word_translation, _clean_text, _key_error_lines, _looks_like_chinese_translation, _need_sentence_audio, _sentence_acceptable, _sentence_has_word, _sentence_reason_text, _sentence_to_write, _sentence_usable, _translation_reject_reason, record_rejected_translation
 from ._llm import _AddonRateLimited, _sentence_prompt, _to_traditional_logged
@@ -105,9 +106,10 @@ class Worker(QThread):
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
-    def _groq_sentence(self, word, association="", photo="", must_contain=False):
+    def _groq_sentence(self, word, association="", photo="", must_contain=False, examples=()):
         # 造句是多條件約束任務 → 較高思考等級（其餘呼叫維持預設 low）
-        return _llm._groq_chat(_sentence_prompt(word, association, photo, must_contain=must_contain),
+        return _llm._groq_chat(_sentence_prompt(word, association, photo, must_contain=must_contain,
+                                         examples=examples),
                           temperature=0.7, max_tokens=200, timeout=15, effort="medium",
                           task="sentence")
 
@@ -115,14 +117,15 @@ class Worker(QThread):
         """(句子, 引擎或退回原因)。句子裡沒出現單字（卡片高亮不到）就帶 must_contain 重問一次，
         重問仍沒有也照收、只記 log——硬擋會誤殺 sweep→swept 這種合法句。
         KEEP-IN-SYNC: core/llm.py::llm_sentence（同樣的重問邏輯）。"""
-        result = self._groq_sentence(word, association, photo)
+        ex = _examples.examples_for(word, association)   # 每張卡只查一次；失敗回 []
+        result = self._groq_sentence(word, association, photo, examples=ex)
         if not _sentence_acceptable(result):
             reason = "no-reply" if not (result or "").strip() else "not-a-clean-sentence"
             _log.warning("sentence rejected word=%s reason=%s reply=%r", word, reason, result)
             return "", reason      # 回空 → 上層退 placeholder，等下次補；第二值給畫面分「沒回」與「回了垃圾」
         if not _sentence_has_word(word, result):
             _log.info("sentence word-missing word=%s reply=%r → retry with must-contain", word, result)
-            retry = self._groq_sentence(word, association, photo, must_contain=True)
+            retry = self._groq_sentence(word, association, photo, must_contain=True, examples=ex)
             if _sentence_acceptable(retry):
                 if not _sentence_has_word(word, retry):
                     _log.warning("sentence word-missing after retry word=%s reply=%r (kept)", word, retry)
@@ -396,6 +399,12 @@ class BackfillWorker(QThread):
     def run(self):
         from concurrent.futures import ThreadPoolExecutor, as_completed
         _log.info("⌘S run start: %d cards", len(self.notes))
+        try:   # 把新達標的好卡補進範例索引；失敗只記 log，不擋補卡
+            added, removed = _examples.refresh_index(_examples.anki_connect(ANKI_URL))
+            if added or removed:
+                _log.info("example index: +%d -%d", added, removed)
+        except Exception as e:
+            _log.warning("example index refresh failed: %r", e)
         start = time.monotonic()
         results = []
         with ThreadPoolExecutor(max_workers=MAX_BACKFILL_WORKERS) as pool:
