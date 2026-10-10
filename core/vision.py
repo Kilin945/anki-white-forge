@@ -16,6 +16,7 @@ import time
 
 import requests
 
+from core.image import progress
 from core.providers import GEMINI_KEY_PATH, GEMINI_URL, _REPO, _extract_gemini_text, _gemini_429_secs
 
 # lite：15 張測試集同樣全對、每張 1.4～5 秒（flash 2～35 秒），而且不吃造句池 flash 的每日額度
@@ -108,6 +109,7 @@ def vision_fits(word, sense, image_path):
     for model in VISION_MODELS:
         if _cooling(model):
             continue
+        progress(f"checking photo with {model}")
         try:
             text, status, err = _ask(model, key, prompt, data)
         except (requests.RequestException, ValueError, KeyError):

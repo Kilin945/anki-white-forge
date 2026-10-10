@@ -1,6 +1,8 @@
 """批次視窗的共用基礎：批次互斥、`_live_note`、寫完卡片自動同步、`_BatchDialogMixin`、非阻塞開窗。"""
 
+import math
 import threading
+import time
 import aqt
 from aqt import mw
 from aqt.qt import (
@@ -313,6 +315,39 @@ def _button_row(*buttons):
         b.setMinimumWidth(BUTTON_MIN_WIDTH)
         row.addWidget(b)
     return row_w
+
+
+# ── 生成中的即時進度（⌘A 狀態列、⌘S 每一列）─────────────────────────────────────
+
+def _activity_line(text, elapsed, left=None):
+    """'Image · searching Pexels · 4s (6s left)'。left＝找圖的倒數（其餘步驟沒有）。"""
+    line = f"{text} · {elapsed}s"
+    return line if left is None else f"{line} ({max(left, 0)}s left)"
+
+
+class LiveActivity:
+    """記住「現在在做什麼」與開始時間，給視窗的 QTimer 每秒組成一行字。
+    倒數只在找圖那一步（worker 送來 countdown>0 時開始，換到別的步驟就收掉）。"""
+
+    def __init__(self, clock=time.monotonic):
+        self._clock = clock
+        self._t0 = clock()
+        self.text = ""
+        self._deadline = None
+
+    def update(self, text, countdown=0):
+        self.text = text
+        if countdown > 0:
+            self._deadline = self._clock() + countdown
+        elif not text.startswith("Image"):
+            self._deadline = None
+
+    def line(self):
+        if not self.text:
+            return ""
+        now = self._clock()
+        left = None if self._deadline is None else math.ceil(self._deadline - now)
+        return _activity_line(self.text, int(now - self._t0), left)
 
 
 def _show_nonmodal(dialog_cls):

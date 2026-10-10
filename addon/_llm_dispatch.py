@@ -489,6 +489,16 @@ class Dispatcher:
                 seen.setdefault(p.name, p)
         self.providers = list(seen.values())
         self._breakers = {name: CircuitBreaker(threshold, cooldown_default) for name in seen}
+        # 視窗顯示進度用：listener(kind, model_name)，kind = "try"（要問這個模型）／"fail"（它沒回，換下一個）。
+        # 只有 addon 有（core 沒有視窗）；listener 自己出錯不能影響呼叫。
+        self.listener = None
+
+    def _notify(self, kind, name):
+        if self.listener is not None:
+            try:
+                self.listener(kind, name)
+            except Exception:
+                pass
 
     def _pool(self, task):
         return self.pools.get(task, self.providers)
@@ -522,6 +532,7 @@ class Dispatcher:
                 continue
             (_log.info if task == "sentence" else _log.debug)(
                 "%s via %s headroom=%.2f", task, p.name, h)
+            self._notify("try", p.name)
             try:
                 text = p.generate(prompt, temperature=temperature,
                                   max_tokens=max_tokens, timeout=timeout,
@@ -529,6 +540,7 @@ class Dispatcher:
                 self._breakers[p.name].record_success()
                 return clean_llm_text(text)
             except ProviderRateLimited as e:
+                self._notify("fail", p.name)
                 self._breakers[p.name].record_failure(e.retry_after)
                 _log.warning("%s 429 retry_after=%s", p.name, e.retry_after)
                 # 印實際生效的冷卻,不是例外帶來的建議值(後者可能是 None,
@@ -537,6 +549,7 @@ class Dispatcher:
                 if opened > 0:
                     _log.warning("breaker OPEN %s cooldown=%.0fs", p.name, opened)
             except ProviderError as e:
+                self._notify("fail", p.name)
                 cooldown = getattr(e, "retry_after", None)
                 self._breakers[p.name].record_failure(cooldown)
                 _log.warning("%s failed (%s) → failover", p.name, e)

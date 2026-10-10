@@ -35,8 +35,9 @@ class TestKeepInSync:
 class TestFetchImageParsesAlt:
     def test_alt_and_attribution(self, tmp_path):
         w = addon._workers.Worker.__new__(addon._workers.Worker); w.media_dir = str(tmp_path)
-        out = SimpleNamespace(returncode=0, stdout="ALT: Ladder on a wall.\nATTRIBUTION: <div>P</div>\n")
-        with patch.object(addon._workers.subprocess, "run", return_value=out) as run:
+        out = (0, "ALT: Ladder on a wall.\nATTRIBUTION: <div>P</div>\n", "")
+        with patch.object(addon._workers.Worker, "_run_helper", return_value=out) as run, \
+             patch.object(addon._llm, "_llm_image_query", lambda w, d="": "ladder wall"):
             html = w._fetch_image("ladder", definition="climb")
         assert addon._images._image_alt(html) == "Ladder on a wall."
         assert html.endswith("<div>P</div>")
@@ -44,17 +45,16 @@ class TestFetchImageParsesAlt:
 
     def test_source_line_parsed_into_data_source(self, tmp_path):
         w = addon._workers.Worker.__new__(addon._workers.Worker); w.media_dir = str(tmp_path)
-        out = SimpleNamespace(returncode=0,
-                              stdout="ALT: Ladder on a wall.\nATTRIBUTION: <div>P</div>\nSOURCE: wikimedia:555\n")
-        with patch.object(addon._workers.subprocess, "run", return_value=out):
+        out = (0, "ALT: Ladder on a wall.\nATTRIBUTION: <div>P</div>\nSOURCE: wikimedia:555\n", "")
+        with patch.object(addon._workers.Worker, "_run_helper", return_value=out):
             html = w._fetch_image("ladder")
         assert addon._images._image_source(html) == "wikimedia:555"
         assert addon._images._image_alt(html) == "Ladder on a wall."
 
     def test_missing_source_line_gives_legacy_pexels(self, tmp_path):
         w = addon._workers.Worker.__new__(addon._workers.Worker); w.media_dir = str(tmp_path)
-        out = SimpleNamespace(returncode=0, stdout="ALT: x\n")
-        with patch.object(addon._workers.subprocess, "run", return_value=out):
+        out = (0, "ALT: x\n", "")
+        with patch.object(addon._workers.Worker, "_run_helper", return_value=out):
             html = w._fetch_image("ladder")
         assert 'data-source' not in html and addon._images._image_source(html) == "pexels:"
 
@@ -186,11 +186,9 @@ def test_fetch_image_passes_query_to_helper(monkeypatch):
     import addon
     calls = {}
 
-    class Done:
-        returncode, stdout, stderr = 1, "", ""
     monkeypatch.setattr(addon._llm, "_groq_chat", lambda p, **kw: "penguin on ice")
-    monkeypatch.setattr(addon._workers.subprocess, "run",
-                        lambda cmd, **kw: calls.setdefault("cmd", cmd) and Done())
+    monkeypatch.setattr(addon._workers.Worker, "_run_helper",
+                        lambda self, cmd, timeout: calls.setdefault("cmd", cmd) and (1, "", ""))
     w = addon._workers.Worker.__new__(addon._workers.Worker)
     w.media_dir = "/tmp"
     w._fetch_image("penguin")

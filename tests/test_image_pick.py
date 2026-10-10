@@ -270,10 +270,10 @@ def test_helper_without_sense_keeps_old_flow(monkeypatch, capsys):
 
 def test_addon_passes_sense_and_longer_timeout(tmp_path, monkeypatch):
     seen = {}
-    def run(cmd, **kw):
-        seen.update(cmd=cmd, timeout=kw["timeout"])
-        return MagicMock(returncode=1, stdout="", stderr="")
-    monkeypatch.setattr(addon._workers.subprocess, "run", run)
+    def run(self, cmd, timeout):
+        seen.update(cmd=cmd, timeout=timeout)
+        return 1, "", ""
+    monkeypatch.setattr(addon._workers.Worker, "_run_helper", run)
     monkeypatch.setattr(addon._llm, "_llm_image_query", lambda w, d="": "q")
     w = addon._workers.Worker.__new__(addon._workers.Worker); w.media_dir = str(tmp_path)
     w._fetch_image("concrete", definition="具體類別")
@@ -291,3 +291,53 @@ def test_cli_backfill_uses_find_picture_only_with_sense(monkeypatch):
     backfill_words._do_image("concrete", "q", sense="具體類別")
     backfill_words._do_image("concrete", "q")
     assert used == ["pick", "plain"]
+
+
+# ── 畫面進度：helper 的 PROGRESS 行、換模型、⌘S 三張同時跑不互蓋 ─────────────────
+
+def test_run_helper_streams_progress_lines(tmp_path):
+    import sys as _sys
+    script = tmp_path / "fake_helper.py"
+    script.write_text(
+        "import sys, time\n"
+        "print('PROGRESS_BUDGET: 10', file=sys.stderr, flush=True)\n"
+        "print('PROGRESS: searching Pexels', file=sys.stderr, flush=True)\n"
+        "print('[picture] debug line', file=sys.stderr, flush=True)\n"
+        "print('ALT: a glacier')\n")
+    said = []
+    prog = addon._workers._Progress(lambda text, countdown: said.append((text, countdown)))
+    prog.phase = "Image"
+    w = addon._workers.Worker.__new__(addon._workers.Worker)
+    addon._workers._bind_progress(prog)
+    try:
+        rc, out, err = w._run_helper([_sys.executable, str(script)], 10)
+    finally:
+        addon._workers._bind_progress(None)
+    assert rc == 0 and "ALT: a glacier" in out and "[picture] debug line" in err
+    assert said == [("Image · finding a photo", 10), ("Image · searching Pexels", 0)]
+
+
+def test_model_switch_goes_to_the_card_on_this_thread():
+    import threading as _t
+    said = {"a": [], "b": []}
+    progs = {k: addon._workers._Progress(lambda text, c, k=k: said[k].append(text)) for k in said}
+    def card(k, model):
+        addon._workers._bind_progress(progs[k])
+        try:
+            addon._workers._set_phase("Sentence")
+            addon._llm._dispatcher.listener("try", model)
+            addon._llm._dispatcher.listener("fail", model)
+        finally:
+            addon._workers._bind_progress(None)
+    ts = [_t.Thread(target=card, args=("a", "groq:openai/gpt-oss-120b")),
+          _t.Thread(target=card, args=("b", "gemini:gemini-3.7-flash"))]
+    for t in ts: t.start()
+    for t in ts: t.join()
+    assert said["a"] == ["Sentence · starting", "Sentence · gpt-oss-120b (groq)",
+                         "Sentence · gpt-oss-120b (groq) no reply, trying the next model"]
+    assert said["b"][1] == "Sentence · gemini-3.7-flash (gemini)"
+
+
+def test_no_progress_registered_is_silent():
+    addon._llm._dispatcher.listener("try", "groq:x")      # 測試、⌘F 翻譯：沒登記 → 不炸
+    addon._workers._set_phase("Image")

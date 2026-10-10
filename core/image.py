@@ -157,6 +157,8 @@ def _search_pixabay(query):
     return out
 
 
+SOURCE_LABELS = {"pexels": "Pexels", "wikimedia": "Wikimedia", "openverse": "Openverse", "pixabay": "Pixabay"}
+
 # 優先順序 = 列表順序。fetch_image 每次呼叫時才讀，測試可以整個換掉。
 SOURCES = [
     ("pexels", _search_pexels),
@@ -216,6 +218,11 @@ def _safe_search(fn, query):
         return []
 
 
+def progress(text):
+    """給 addon 看的進度行（stderr，addon 逐行讀、顯示在視窗上）。CLI 直跑時就是一行 log。"""
+    print(f"PROGRESS: {text}", file=sys.stderr, flush=True)
+
+
 # ── 挑圖（core/picture.py 用）───────────────────────────────────────────────
 # judge(alts) → 依好壞排好的候選索引 list（0 起算；[]＝這家都不合格）／None（挑圖失敗）。
 # verify(path) → True（看過圖、對）／False（看過圖、不對）／None（沒辦法看 → 可以照收）。
@@ -262,7 +269,7 @@ def fetch_judged(filepath, query, rejects, judge, verify, keep_going=lambda: Tru
     for name, fn in ordered_sources(rejects):
         if not keep_going():
             return None
-        print(f"  [picture] search {name}", file=sys.stderr, flush=True)
+        progress(f"searching {SOURCE_LABELS.get(name, name)}")
         cands = search_candidates(name, fn, query, rejects)
         if not cands:
             continue

@@ -52,7 +52,9 @@ def find_picture(word, filepath, query, sense, rejects=None, budget=None):
     """回 (ok, attribution_html, description, source_tag)，同 image.fetch_image。"""
     if rejects is None:
         rejects = image.load_rejects(word)
-    deadline = time.monotonic() + (PICTURE_BUDGET_SECS if budget is None else budget)
+    budget = PICTURE_BUDGET_SECS if budget is None else budget
+    print(f"PROGRESS_BUDGET: {budget}", file=sys.stderr, flush=True)   # addon 拿來倒數
+    deadline = time.monotonic() + budget
     stop_at = deadline - FALLBACK_RESERVE_SECS      # 過了這個時間就不再換家，改走舊流程
     checks = [MAX_VISION_CHECKS]
     checks_lock = threading.Lock()            # 同一家的 TOP_N 張同時看圖 → 計數要上鎖
@@ -62,6 +64,7 @@ def find_picture(word, filepath, query, sense, rejects=None, budget=None):
 
     def stage(q, s):
         def judge(alts):
+            image.progress(f"picking from {len(alts)} photos")
             pick = _timed(lambda: llm.llm_pick_image(word, s, alts), left(JUDGE_TIMEOUT_SECS))
             _log(f"{word}: pick {pick} from {len(alts)}")
             return pick
@@ -88,6 +91,7 @@ def find_picture(word, filepath, query, sense, rejects=None, budget=None):
         tech = _timed(lambda: llm.llm_is_tech(word, sense), IS_TECH_TIMEOUT_SECS)
         q = GENERIC_TECH_QUERY if tech else query
         _log(f"{word}: out of time → first image for {q!r}")
+        image.progress("out of time, using the first result")
         found = _timed(lambda: image.fetch_image(word, filepath, search_query=q, rejects=rejects),
                        max(deadline - time.monotonic(), FALLBACK_RESERVE_SECS))
         if found and found[0]:

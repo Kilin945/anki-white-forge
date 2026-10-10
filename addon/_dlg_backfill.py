@@ -4,12 +4,12 @@ import os
 
 from aqt import mw
 from aqt.qt import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QProgressBar, QScrollArea, QWidget, QCheckBox, QKeySequence, QPixmap, Qt,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QProgressBar, QScrollArea, QWidget, QCheckBox, QKeySequence, QPixmap, QTimer, Qt,
 )
 from . import _llm_dispatch as _lld
 from ._config import BACKFILL_BOXES, BOX_STYLE, PLACEHOLDERS, _BADGE_OK_STYLE, _BADGE_WARN_STYLE, _FIELD_LABEL, _shortcut
 from ._text import _clean_text, _image_filename, _looks_english, _preview_html, _reasons_text
-from ._batch import _BatchDialogMixin, _batch_acquire, _batch_busy_message, _batch_release, _deck_note_ids, _live_note, _selectable_all, _show_nonmodal, _sync_after_batch
+from ._batch import _BatchDialogMixin, _batch_acquire, _batch_busy_message, _batch_release, _deck_note_ids, _live_note, _selectable_all, _show_nonmodal, _sync_after_batch, LiveActivity
 from ._workers import BackfillWorker
 
 
@@ -25,8 +25,13 @@ class FieldRow(QWidget):
         self.word = word
         self._boxes = {}
         self._reasons = {}                # field key → 退回原因短句（只顯示短句；細節在 log）；set_box 會用到，要在迴圈前
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(4, 2, 4, 2)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(4, 2, 4, 2)
+        outer.setSpacing(0)
+        lay = QHBoxLayout()
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)                 # 跟原本單行時的間距一樣，五個框才不會黏在一起
+        outer.addLayout(lay)
         self.checkbox = QCheckBox()       # left-most: pick which cards to complete (default unchecked)
         lay.addWidget(self.checkbox)
         self.word_label = wl = QLabel(word)
@@ -45,10 +50,19 @@ class FieldRow(QWidget):
         self.thumb.setVisible(False)
         lay.addWidget(self.thumb)
         self.badge = QLabel("")
+        self.badge.setWordWrap(True)
         self.badge.setStyleSheet(_BADGE_OK_STYLE)
         self.badge.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)   # 退回原因也能複製
         lay.addWidget(self.badge)
         lay.addStretch()
+        # 生成中：現在在做什麼、用哪個模型、幾秒（做完就清掉）。放在列下方第二行、會換行——
+        # 放在同一行時，長模型名（llama-3.3-70b-instruct-fp8-fast）會把列撐寬、出橫向捲軸、後半截掉。
+        self.activity = QLabel("")
+        self.activity.setStyleSheet("color:#64748b; padding-left:28px;")
+        self.activity.setWordWrap(True)
+        self.activity.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.activity.setVisible(False)
+        outer.addWidget(self.activity)
 
     def set_box(self, key, state, reason=""):
         box = self._boxes.get(key)
@@ -67,7 +81,12 @@ class FieldRow(QWidget):
             self.badge.setStyleSheet(_BADGE_WARN_STYLE)
             self.badge.setText(_reasons_text(self._reasons))
 
+    def set_activity(self, text):
+        self.activity.setText(text)
+        self.activity.setVisible(bool(text))
+
     def set_done(self):
+        self.set_activity("")
         if self._reasons:                 # 有欄位被退就留著原因，不蓋成 added!
             return
         self.badge.setStyleSheet(_BADGE_OK_STYLE)
@@ -213,6 +232,9 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
         self._rows_box.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        # 不准橫向捲動：長的進度字、退回原因只能換行，不能把列撐寬（使用者：不想往右滑）。
+        # 視窗最小寬 960 放得下單字＋五個框，所以關掉不會切到框。
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(self._rows_host)
         root.addWidget(scroll)
 
@@ -344,7 +366,12 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
         self._worker = BackfillWorker(fresh_notes, mw.col.media.dir())
         self._worker.step.connect(self._on_step)
         self._worker.card_done.connect(self._on_card_done)
+        self._worker.activity.connect(self._on_activity)
         self._worker.finished.connect(self._on_finished)
+        self._live = {}                   # note_id → LiveActivity（正在補的卡）
+        self._live_timer = QTimer(self)   # 每秒刷新秒數與倒數
+        self._live_timer.timeout.connect(self._show_live)
+        self._live_timer.start(1000)
         self._worker.error.connect(lambda e: self.status.setText(f"Error: {e}"))
         self._worker.start()
 
@@ -353,7 +380,21 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
         if row:
             row.set_box(field, state, reason)
 
+    def _on_activity(self, note_id, text, countdown):
+        live = self._live.setdefault(note_id, LiveActivity())
+        live.update(text, countdown)
+        row = self._rows.get(note_id)
+        if row:
+            row.set_activity(live.line())
+
+    def _show_live(self):
+        for note_id, live in self._live.items():
+            row = self._rows.get(note_id)
+            if row:
+                row.set_activity(live.line())
+
     def _on_card_done(self, note_id):
+        self._live.pop(note_id, None)
         row = self._rows.get(note_id)
         if row:
             row.set_done()
@@ -375,6 +416,12 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
                                       note["Translation"] if "Translation" in note else "", path, size))
 
     def _on_finished(self, results):
+        self._live_timer.stop()
+        for note_id in list(self._live):          # 被跳過、沒跑完的卡也清掉進度字
+            row = self._rows.get(note_id)
+            if row:
+                row.set_activity("")
+        self._live = {}
         self.progress_bar.setVisible(False)
         mw.col.save()
         mw.reset()

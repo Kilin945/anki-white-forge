@@ -25,10 +25,86 @@ _log = _lld.get_logger()   # 批次/LLM 事件集中記錄到 logs/addon_llm.log
 IMAGE_TIMEOUT_SECS = 25    # 挑圖本身最多約 10 秒（core/picture.py PICTURE_BUDGET_SECS），加上子程序啟動的餘裕
 
 
+def _short_model(name):
+    """'groq:openai/gpt-oss-120b' → 'gpt-oss-120b (groq)'：畫面上放得下、又看得出是哪家。"""
+    family, _, model = name.partition(":")
+    return f"{model.rsplit('/', 1)[-1]} ({family})" if model else name
+
+
+# ── 畫面上的進度（現在在做什麼、用哪個模型）─────────────────────────────────────
+# ⌘S 同時補 MAX_BACKFILL_WORKERS 張卡、共用同一個 Worker 物件 → 進度不能存在 Worker 上（會互蓋）。
+# 改成「哪條執行緒在替哪張卡做事」：每張卡一個 _Progress，在做事的執行緒登記；
+# Dispatcher 換模型時（listener，在呼叫它的那條執行緒上）查表送到對的那張卡。
+# 子執行緒（翻譯、讀 helper 輸出）要自己登記同一個 _Progress。
+
+class _Progress:
+    def __init__(self, sink):
+        self.sink = sink          # sink(text, countdown_secs)
+        self.phase = ""
+
+    def say(self, text, countdown=0):
+        self.sink(text, countdown)
+
+    def set_phase(self, phase):
+        self.phase = phase
+        self.say(f"{phase} · starting")
+
+    def on_llm(self, kind, name):
+        if kind == "try":
+            self.say(f"{self.phase} · {_short_model(name)}")
+        else:
+            self.say(f"{self.phase} · {_short_model(name)} no reply, trying the next model")
+
+
+_progress_by_thread = {}
+_progress_lock = threading.Lock()
+
+
+def _bind_progress(prog):
+    with _progress_lock:
+        if prog is None:
+            _progress_by_thread.pop(threading.get_ident(), None)
+        else:
+            _progress_by_thread[threading.get_ident()] = prog
+
+
+def _current_progress():
+    with _progress_lock:
+        return _progress_by_thread.get(threading.get_ident())
+
+
+def _set_phase(phase):
+    prog = _current_progress()
+    if prog is not None:
+        prog.set_phase(phase)
+
+
+def _llm_event(kind, name):
+    prog = _current_progress()
+    if prog is not None:
+        prog.on_llm(kind, name)
+
+
+_llm._dispatcher.listener = _llm_event      # 沒登記進度的執行緒（測試、⌘F 翻譯）→ 什麼都不做
+
+
+def _with_progress(prog, fn):
+    """給子執行緒用：先登記跟父執行緒同一個進度，再做事。"""
+    def run(*a, **kw):
+        _bind_progress(prog)
+        try:
+            return fn(*a, **kw)
+        finally:
+            _bind_progress(None)
+    return run
+
+
 class Worker(QThread):
     step     = pyqtSignal(str, str, str)   # (field key, state: "ok" / "warn", 退回原因短句，ok 時為 "")
+    activity = pyqtSignal(str, int)        # (現在在做什麼, 倒數秒數；0＝不倒數) — 視窗每秒刷新顯示
     finished = pyqtSignal(dict)
     error    = pyqtSignal(str)
+
 
     def __init__(self, word, association, media_dir):
         super().__init__()
@@ -37,6 +113,13 @@ class Worker(QThread):
         self.media_dir   = media_dir
 
     def run(self):
+        _bind_progress(_Progress(self.activity.emit))
+        try:
+            self._run()
+        finally:
+            _bind_progress(None)
+
+    def _run(self):
         try:
             word = self.word
 
@@ -44,12 +127,16 @@ class Worker(QThread):
             # 句子生成失敗圖照留。
             reasons = {}                      # field key → 畫面短句（完整原因在 log）
             # 詞義只選一次：沒提示就先選，搜圖與造句共用（不寫回 Association 欄位）
+            if not self.association:
+                _set_phase("Meaning")
             hint = self.association or self._pick_sense(word)
+            _set_phase("Image")
             image_field = self._fetch_image(word, definition=hint)
             self.step.emit("image", "ok" if image_field else "warn",
                            "" if image_field else "no image")
             photo = _image_alt(image_field)
 
+            _set_phase("Sentence")
             sentence, engine = self._llm_sentence(word, hint, photo=photo)
             if not sentence:
                 sentence = f"Please add an example sentence for '{word}'."
@@ -71,9 +158,10 @@ class Worker(QThread):
                 sentence_cn_result[0] = self._groq_translate_sentence(sentence, word=word, reasons=reasons,
                                                                       sense=hint)
 
+            _set_phase("Translation & audio")
             trans_thread = None
             if sentence_ok:
-                trans_thread = threading.Thread(target=do_translate)
+                trans_thread = threading.Thread(target=_with_progress(_current_progress(), do_translate))
                 trans_thread.start()
 
             audio_items = [
@@ -111,6 +199,40 @@ class Worker(QThread):
             self.error.emit(str(e))
 
     # ── helpers ──────────────────────────────────────────────────────────────
+
+    def _run_helper(self, cmd, timeout):
+        """跑 helper，stderr 的 PROGRESS 行即時轉成畫面進度。回 (returncode, stdout, stderr)；逾時 raise。"""
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        out, err = [], []
+        prog = _current_progress()     # 讀 stderr 的是另一條執行緒 → 先抓住這張卡的進度
+
+        def say(text, countdown=0):
+            if prog is not None:
+                prog.say(text, countdown)
+
+        def read_out():
+            out.append(proc.stdout.read())
+
+        def read_err():
+            for line in proc.stderr:
+                err.append(line)
+                if line.startswith("PROGRESS_BUDGET: "):
+                    say(f"{prog.phase if prog else 'Image'} · finding a photo", int(float(line.split(": ", 1)[1])))
+                elif line.startswith("PROGRESS: "):
+                    say(f"{prog.phase if prog else 'Image'} · {line[len('PROGRESS: '):].strip()}")
+
+        readers = [threading.Thread(target=f, daemon=True) for f in (read_out, read_err)]
+        for t in readers:
+            t.start()
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            raise
+        for t in readers:
+            t.join(2)
+        return proc.returncode, "".join(out), "".join(err)
 
     def _pick_sense(self, word):
         """沒有 Association 時選一次詞義（⌘A／⌘S 共用；測試替換這個方法）。"""
@@ -228,18 +350,16 @@ class Worker(QThread):
         cmd.extend(["--query", _llm._llm_image_query(word, definition)])
         cmd.extend(["--", word, filepath])
         try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=IMAGE_TIMEOUT_SECS if definition else 60,
-            )
+            returncode, stdout, stderr = self._run_helper(cmd, IMAGE_TIMEOUT_SECS if definition else 60)
         except Exception as e:          # timeout / spawn failure → no image; leave blank for ⌘S to retry
             _log.warning("image rejected word=%s reason=helper-failed error=%r", word, e)
             return ""                   # called synchronously; must not raise, a failure just leaves the image blank
-        if result.returncode != 0:
+        if returncode != 0:
             _log.warning("image rejected word=%s reason=no-result stderr=%r", word,
-                         (result.stderr or "").strip()[-300:])
-        if result.returncode == 0:
+                         (stderr or "").strip()[-300:])
+        if returncode == 0:
             alt = attribution = source = ""
-            for line in result.stdout.splitlines():
+            for line in stdout.splitlines():
                 if line.startswith("ALT: "):
                     alt = line[len("ALT: "):]
                 elif line.startswith("ATTRIBUTION: "):
@@ -264,6 +384,7 @@ class Worker(QThread):
 
 class BackfillWorker(QThread):
     step      = pyqtSignal(object, str, str, str)   # (note_id, field, state, 退回原因短句) — object: note ids exceed 32-bit int
+    activity  = pyqtSignal(object, str, int)   # (note_id, 現在在做什麼, 倒數秒數；0＝不倒數)
     card_done = pyqtSignal(object)             # (note_id) 這張處理完了 —— 不等於補齊了
                                                # (欄位生失敗只會 emit step warn,不中斷)
     finished  = pyqtSignal(list)
@@ -295,6 +416,14 @@ class BackfillWorker(QThread):
         return max(walls.values())
 
     def _process_one(self, note):
+        _bind_progress(_Progress(lambda text, countdown, nid=note["noteId"]:
+                                 self.activity.emit(nid, text, countdown)))
+        try:
+            return self._process_card(note)
+        finally:
+            _bind_progress(None)
+
+    def _process_card(self, note):
         note_id = note["noteId"]
         word = _clean_text(note["fields"]["Front"]["value"], lower=True)
         # Deterministic rate-limit gate: near the cloud limit → stop here and skip the rest
@@ -324,11 +453,13 @@ class BackfillWorker(QThread):
         # 詞義只選一次：圖和句子都要重做、又沒提示時，先選詞義給兩邊共用。
         # 只缺其中一樣時不選——另一樣已經定了詞義，另外選反而可能對不上。
         if not assoc and need_sentence and "<img" not in note["fields"]["Image_Prompt"]["value"]:
+            _set_phase("Meaning")
             assoc = self._w._pick_sense(word)
 
         # 圖先行：圖不依賴句子（依單字＋詞義搜），先補圖，句子再依照片描述造。
         need_image = "<img" not in note["fields"]["Image_Prompt"]["value"]
         if need_image:
+            _set_phase("Image")
             image_html = self._w._fetch_image(word, definition=assoc)
             fields["Image_Prompt"] = image_html or ""
             self.step.emit(note_id, "image", "ok" if image_html else "warn",
@@ -336,6 +467,7 @@ class BackfillWorker(QThread):
         photo = _image_alt(fields.get("Image_Prompt") or note["fields"]["Image_Prompt"]["value"])
 
         if need_sentence:
+            _set_phase("Sentence")
             sentence, engine = self._w._llm_sentence(word, assoc, photo=photo)
             to_write = _sentence_to_write(current, sentence, word)
             if to_write is not None:
@@ -367,6 +499,7 @@ class BackfillWorker(QThread):
                     self.step.emit(note_id, key, "warn", "skipped: no sentence")
             need_translation = need_sentence_cn = False
 
+        _set_phase("Translation & audio")
         translation_result = [""]
         sentence_cn_result = [""]
         trans_thread = None
@@ -378,7 +511,7 @@ class BackfillWorker(QThread):
                 if need_sentence_cn:
                     sentence_cn_result[0] = self._w._groq_translate_sentence(s, word=w, reasons=reasons,
                                                                              sense=assoc)
-            trans_thread = threading.Thread(target=do_translate)
+            trans_thread = threading.Thread(target=_with_progress(_current_progress(), do_translate))
             trans_thread.start()
 
         audio_batch = []

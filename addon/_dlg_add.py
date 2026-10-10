@@ -4,13 +4,13 @@ import json
 import subprocess
 from aqt import mw
 from aqt.qt import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit, QPushButton, QProgressBar, QMessageBox, Qt,
+    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit, QPushButton, QProgressBar, QMessageBox, QTimer, Qt,
 )
 from aqt.utils import showWarning, tooltip
 from . import _llm
 from ._config import BOX_STYLE, DECK_NAME, FIELD_BOXES, MODEL_NAME, VALIDATE_SCRIPT, VENV_PYTHON, _FIELD_LABEL
 from ._text import _clean_text, _looks_english, _reasons_text
-from ._batch import _BatchDialogMixin, _batch_acquire, _batch_busy_message, _deck_note_ids, _show_nonmodal, _sync_after_batch, _selectable_all
+from ._batch import _BatchDialogMixin, _batch_acquire, _batch_busy_message, _deck_note_ids, _show_nonmodal, _sync_after_batch, _selectable_all, LiveActivity
 from ._workers import Worker
 
 
@@ -233,13 +233,36 @@ class AddWordDialog(_BatchDialogMixin, QDialog):
         self._set_status(f"Generating: {word}")
         self._start_boxes()
 
+        # 即時進度：現在在做哪一步、用哪個模型、過了幾秒（找圖時再加倒數），每秒刷新
+        self._live = LiveActivity()
+        self._live_word = word
+        self._live_timer = QTimer(self)
+        self._live_timer.timeout.connect(self._show_live)
+        self._live_timer.start(1000)
+
         self._worker = Worker(word, assoc, mw.col.media.dir())
         self._worker.step.connect(self._set_box)
+        self._worker.activity.connect(self._on_activity)
         self._worker.finished.connect(self._on_finished)
         self._worker.error.connect(self._on_error)
         self._worker.start()
 
+    def _on_activity(self, text, countdown):
+        self._live.update(text, countdown)
+        self._show_live()
+
+    def _show_live(self):
+        line = self._live.line()
+        if line:
+            self._set_status(f"Generating '{self._live_word}' — {line}")
+
+    def _stop_live(self):
+        timer = getattr(self, "_live_timer", None)
+        if timer is not None:
+            timer.stop()
+
     def _on_finished(self, data):
+        self._stop_live()
         try:
             model = mw.col.models.by_name(MODEL_NAME)
             if not model:
@@ -278,6 +301,7 @@ class AddWordDialog(_BatchDialogMixin, QDialog):
             self._end_batch()
 
     def _on_error(self, msg):
+        self._stop_live()
         self._set_status(f"Error: {msg}", "warn")
         self.add_btn.setEnabled(True)
         self.progress_bar.setVisible(False)

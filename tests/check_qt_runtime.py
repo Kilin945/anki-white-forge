@@ -1127,6 +1127,31 @@ def _():
     panel.close(); _app.processEvents()
     return f"空清單框 {heights['flag']}px；按鈕 {widths['flag']}px"
 
+@check("⌘S 生成中每列顯示現在在做什麼與秒數；做完清掉（使用者：不知道現在狀況才覺得慢）")
+def _():
+    seed(3)
+    dlg = start_held_batch()                       # 造句的 stub 卡在 GATE → 停在 Sentence 這一步
+    try:
+        pump(lambda: any(r.activity.text().startswith("Sentence") for r in dlg._rows.values()), 10,
+             "row shows Sentence activity")
+        shown = next(r.activity.text() for r in dlg._rows.values() if r.activity.text())
+        assert shown.endswith("s") and " · " in shown, shown
+        row = next(iter(dlg._rows.values()))           # 超長的進度字也只能換行，不准出橫向捲軸
+        row.set_activity("Translation & audio · llama-3.3-70b-instruct-fp8-fast (cloudflare) "
+                         "no reply, trying the next model · 99s " * 3)
+        _app.processEvents()
+        scroll = row.parentWidget().parentWidget().parentWidget()
+        assert not scroll.horizontalScrollBar().isVisible(), "出現橫向捲軸"
+        assert row.width() <= scroll.viewport().width(), (row.width(), scroll.viewport().width())
+    finally:
+        GATE.set()
+    pump(lambda: addon._batch._batch_busy() is None, 30, "batch finished")
+    _app.processEvents()
+    left = [r.activity.text() for r in dlg._rows.values() if r.activity.isVisible()]
+    assert not left, f"做完還留著進度字：{left}"
+    dlg._force_close(0); _app.processEvents()
+    return f"進行中：{shown!r}"
+
 @check("TranslationTermsDialog：Approve／Discard／Add／Manage 清單 Remove 都立刻存檔")
 def _():
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="whiteforge-terms-")) / "translation_terms.json"
