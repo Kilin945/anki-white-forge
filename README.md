@@ -1,5 +1,7 @@
 # My Daily English — Anki 自動化單字系統
 
+[![tests](https://github.com/Kilin945/anki-white-forge/actions/workflows/test.yml/badge.svg)](https://github.com/Kilin945/anki-white-forge/actions/workflows/test.yml)
+
 個人英文單字學習系統，基於 Anki + AnkiConnect。輸入一個單字，例句、圖片、語音、翻譯全部自動生成。
 
 ---
@@ -172,6 +174,7 @@ anki/
 │   └── _sec_*.py              #   ⌘F 面板的五個區塊
 ├── templates/                 # 卡片模板 front.html、back.html、style.css
 ├── tests/                     # pytest、conftest.py、兩支 Anki/Qt 相容性檢查
+├── .github/workflows/         # GitHub Actions：每次 push 跑 pytest
 ├── tools/                     # 偶爾才跑的工具
 ├── docs/                      # README 用的圖、設計文件
 ├── add_word.py                # CLI 新增單字
