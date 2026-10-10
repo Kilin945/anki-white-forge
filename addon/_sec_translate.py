@@ -6,7 +6,7 @@ from aqt.qt import (
 )
 from ._config import PLACEHOLDERS
 from ._text import _clean_text
-from ._batch import _batch_acquire, _batch_busy_message, _deck_note_ids, _section_title, _sync_after_batch
+from ._batch import _batch_acquire, _batch_busy_message, _deck_note_ids, _section_title, _selectable, _sync_after_batch
 from ._workers import SentenceCNWorker
 
 
@@ -38,7 +38,7 @@ class TranslateSection(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.addWidget(_section_title("Backfill Sentence Translations"))
 
-        self.info = QLabel()
+        self.info = _selectable(QLabel())
         self.info.setWordWrap(True)
         root.addWidget(self.info)
 
@@ -58,7 +58,7 @@ class TranslateSection(QWidget):
             self._mode_btns.append((b, secs))
         root.addLayout(self._mode_row)
 
-        self.status = QLabel("")
+        self.status = _selectable(QLabel(""))
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(self.status)
 

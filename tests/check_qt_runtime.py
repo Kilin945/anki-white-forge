@@ -896,7 +896,7 @@ def _():
     seed(0, flagged=2)
     panel, tr, flag, dup, long_, test = fresh_panel()
     assert len(flag._flagged) == 2, flag._flagged
-    assert flag.clear_btn.text() == "Clear 2 Cards", flag.clear_btn.text()
+    assert flag.clear_btn.text() == "Clear", flag.clear_btn.text()     # 不顯示張數
     for nid in mw.col.flagged:
         mw.col._notes[nid]["Image_Prompt"] = '<img src="a.jpg" data-source="wikimedia:77">'
     rej_dir = tempfile.mkdtemp()
@@ -1054,6 +1054,78 @@ def _():
     assert hit and mw.col.calls["remove_notes"] == 0, "按 No 還是刪了"
     panel.close(); _app.processEvents()
     return "整組全勾被擋、確認按 No 沒刪"
+
+@check("⌘F 所有文字（含標題、說明）可以選取複製（同 ⌘S）；重複卡清單框跟著內容：沒有就一行高，有就長高；勾選框照樣點得到")
+def _():
+    from PyQt6.QtWidgets import QLabel
+    sel = Qt.TextInteractionFlag.TextSelectableByMouse
+    seed(0, flagged=1, longsent=1)
+    panel, tr, flag, dup, long_, test = fresh_panel()
+    empty_h = dup._list.height()
+    assert empty_h < 60, f"沒有重複卡時清單框還有 {empty_h}px 高"
+    stuck = [l.text()[:40] for l in panel.findChildren(QLabel) if l.text() and not l.textInteractionFlags() & sel]
+    assert not stuck, f"這些字不能選取：{stuck}"
+    panel.close(); _app.processEvents()
+    mw.col.add(1780029401467, Front="dull", Sentence="The lecture was so dull I fell asleep.", Translation="乏味")
+    mw.col.add(1790522641481, Front="dull", Sentence="The lecture was so dull I fell asleep.", Translation="枯燥乏味")
+    panel, tr, flag, dup, long_, test = fresh_panel()
+    full_h = dup._list.height()
+    assert empty_h < full_h <= addon._batch.LIST_MAX_PX, (empty_h, full_h)
+    texts = [w for w in dup.list_w.findChildren(QLabel) if w.text()]
+    for want in ("dull  (2 cards)", "The lecture was so dull I fell asleep.", "added 2026-05-29", "Translation: 乏味"):
+        lbl = next((w for w in texts if want in w.text()), None)
+        assert lbl is not None and lbl.textInteractionFlags() & sel, f"{want!r} 不能選取"
+    nid, box = dup._boxes[0]
+    click_checkbox(box)
+    assert box.isChecked(), "句子拆出去之後勾選框點不到"
+    panel.close(); _app.processEvents()
+    return f"清單框 {empty_h}px → {full_h}px"
+
+@check("五個視窗（⌘A／⌘S／⌘F／⌘D／Settings）所有文字都能選取複製，含重掃後新建的列")
+def _():
+    from PyQt6.QtWidgets import QLabel
+    sel = Qt.TextInteractionFlag.TextSelectableByMouse
+    seed(2, flagged=1, longsent=1)
+    mw.col.add(NID_BASE + 950, Front="caf\u00e9\u5496")          # 非英文 → ⌘S 的提示列
+    stuck = {}
+    def scan(name, w):
+        bad = [l.text()[:30] for l in w.findChildren(QLabel) if l.text() and not l.textInteractionFlags() & sel]
+        if bad:
+            stuck[name] = bad
+    dlgs = [("⌘A", addon._dlg_add.AddWordDialog(mw)), ("⌘S", addon._dlg_backfill.BackfillDialog(mw)),
+            ("⌘F", addon._dlg_batch.BatchOperationsDialog(mw)),
+            ("⌘D", addon._dlg_terms.TranslationTermsDialog(mw)), ("Settings", addon._dlg_settings.SettingsDialog(mw))]
+    for name, d in dlgs:
+        d.show(); _app.processEvents(); scan(name, d)
+    terms = dlgs[3][1]
+    terms._toggle_manage(); _app.processEvents(); scan("⌘D 清單", terms)
+    backfill = dlgs[1][1]
+    backfill.reopen(); _app.processEvents(); scan("⌘S 重掃", backfill)
+    for _, d in dlgs:
+        d.close() if not hasattr(d, "_force_close") else d._force_close(0)
+    _app.processEvents()
+    assert not stuck, f"不能選取：{stuck}"
+    return f"{len(dlgs)} 個視窗＋⌘D 清單＋⌘S 重掃，全部可選"
+
+@check("⌘F 三個清單區塊長得一樣：空的時清單框同高、灰字同色；動作鈕同寬、右緣對齊清單框")
+def _():
+    seed(0)
+    panel, tr, flag, dup, long_, test = fresh_panel()
+    boxes = {"flag": flag._list, "dup": dup._list, "long": long_._list}
+    heights = {k: b.height() for k, b in boxes.items()}
+    assert len(set(heights.values())) == 1, f"空清單框高度不一：{heights}"
+    styles = {k: b.text.styleSheet() for k, b in boxes.items()}
+    assert len(set(styles.values())) == 1, f"灰字樣式不一：{styles}"
+    btns = {"flag": flag.clear_btn, "dup": dup.del_btn, "long": long_.clear_btn}
+    widths = {k: b.width() for k, b in btns.items()}
+    assert len(set(widths.values())) == 1, f"按鈕寬度不一：{widths}"
+    def right(w):
+        return w.mapTo(panel, w.rect().topRight()).x()
+    edges = {k: right(btns[k]) - right(boxes[k]) for k in btns}
+    assert all(abs(d) <= 1 for d in edges.values()), f"按鈕右緣沒對齊清單框（差幾 px）：{edges}"
+    assert [b.text() for b in btns.values()] == ["Clear", "Delete Checked", "Clear"]
+    panel.close(); _app.processEvents()
+    return f"空清單框 {heights['flag']}px；按鈕 {widths['flag']}px"
 
 @check("TranslationTermsDialog：Approve／Discard／Add／Manage 清單 Remove 都立刻存檔")
 def _():

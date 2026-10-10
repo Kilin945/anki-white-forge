@@ -6,6 +6,7 @@ from aqt.qt import (
 )
 from aqt.utils import showWarning, tooltip
 from ._config import ACTIONS, DEFAULT_SHORTCUTS, _shortcut
+from ._batch import _selectable_all
 
 
 class SettingsDialog(QDialog):
@@ -24,6 +25,7 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(440)
         self._edits = {}
         self._setup_ui()
+        _selectable_all(self)            # 文字都能用滑鼠選取複製
 
     def _setup_ui(self):
         root = QVBoxLayout(self)

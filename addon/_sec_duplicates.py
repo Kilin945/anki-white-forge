@@ -4,10 +4,10 @@ import os
 import time
 from aqt import mw
 from aqt.qt import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QWidget, QCheckBox, QPixmap, QIcon, QSize, QMessageBox, Qt,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, QCheckBox, QPixmap, QIcon, QSize, QMessageBox, Qt,
 )
 from ._text import _clean_text, _image_filename
-from ._batch import _blocked_by_batch, _deck_note_ids, _section_title, _sync_after_batch
+from ._batch import _blocked_by_batch, _deck_note_ids, _section_title, _selectable, _sync_after_batch, ListBox, _button_row
 
 
 def _duplicate_groups(items):
@@ -102,35 +102,24 @@ class DuplicatesSection(QWidget):
         desc.setWordWrap(True)
         root.addWidget(desc)
 
-        self.list_w = QWidget()
-        self.list_layout = QVBoxLayout(self.list_w)
-        self.list_layout.setContentsMargins(4, 4, 4, 4)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(self.list_w)
-        scroll.setMinimumHeight(260)       # 一列含縮圖約 70px → 至少看得到一組兩張
-        root.addWidget(scroll)
+        self._list = ListBox()            # 清單框範本：沒重複卡一行高、有就跟著長高
+        self.list_w = self._list.body
+        root.addWidget(self._list)
 
-        self.status = QLabel("")
+        self.status = _selectable(QLabel(""))
         self.status.setWordWrap(True)
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status.setStyleSheet("color:#16a34a; font-weight:600;")
         self.status.setVisible(False)
         root.addWidget(self.status)
 
-        row = QHBoxLayout()
-        row.addStretch()
         self.del_btn = QPushButton("Delete Checked")
         self.del_btn.setEnabled(False)
         self.del_btn.clicked.connect(self._on_delete)
-        row.addWidget(self.del_btn)
-        root.addLayout(row)
+        root.addWidget(_button_row(self.del_btn))
 
     def _clear_list(self):
-        while self.list_layout.count():
-            w = self.list_layout.takeAt(0).widget()
-            if w is not None:
-                w.deleteLater()
+        self._list.clear_rows()
         self._boxes = []
 
     def _scan(self):
@@ -138,19 +127,20 @@ class DuplicatesSection(QWidget):
         notes = {nid: mw.col.get_note(nid) for nid in _deck_note_ids()}
         self._groups = _duplicate_groups((nid, n["Front"]) for nid, n in notes.items())
         if not self._groups:
-            self.list_layout.addWidget(QLabel("No duplicate cards."))
+            self._list.set_text("No duplicate cards.")
             self.del_btn.setEnabled(False)
             return
         media_dir = mw.col.media.dir()
         for key, nids in self._groups:
-            head = QLabel(f"{key}  ({len(nids)} cards)")
+            head = _selectable(QLabel(f"{key}  ({len(nids)} cards)"))
             head.setStyleSheet("font-weight:600; color:#1E293B;")
-            self.list_layout.addWidget(head)
+            self._list.add_row(head)
             group_notes = [notes[nid] for nid in nids]
             diff = _differing_fields(group_notes)
             for nid in nids:
-                self.list_layout.addWidget(self._card_row(nid, notes[nid], diff, media_dir))
+                self._list.add_row(self._card_row(nid, notes[nid], diff, media_dir))
         self.del_btn.setEnabled(True)
+        self._list.fit()
 
     def _card_row(self, nid, note, diff, media_dir):
         """One card: thumbnail (click to enlarge) | checkbox with the sentence, then
@@ -166,15 +156,19 @@ class DuplicatesSection(QWidget):
         text = QVBoxLayout()
         text.setSpacing(1)
         sentence = _clean_text(note["Sentence"])[:70] or "(no sentence)"
-        box = QCheckBox(sentence)
-        text.addWidget(box)
+        # 勾選框不帶文字、句子另放可選取的 QLabel（同 ⌘S：單字可複製，勾選框照樣點得到）
+        line = QHBoxLayout()
+        box = QCheckBox()
+        line.addWidget(box)
+        line.addWidget(_selectable(QLabel(sentence)), 1)
+        text.addLayout(line)
         added = time.strftime("%Y-%m-%d", time.localtime(nid // 1000))
-        meta = QLabel(f"added {added} · {_review_summary(*_review_stats(note))}")
+        meta = _selectable(QLabel(f"added {added} · {_review_summary(*_review_stats(note))}"))
         meta.setStyleSheet("color:#64748b;")
         text.addWidget(meta)
         if diff:
             parts = [f"{f}: {_clean_text(note[f]) or '(empty)'}" for f in diff]
-            diff_lbl = QLabel(" · ".join(parts))
+            diff_lbl = _selectable(QLabel(" · ".join(parts)))
             diff_lbl.setWordWrap(True)
             diff_lbl.setStyleSheet("color:#475569;")
             text.addWidget(diff_lbl)

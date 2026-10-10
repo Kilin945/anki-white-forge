@@ -5,7 +5,7 @@ from aqt.qt import (
     QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget,
 )
 from ._config import DECK_NAME, MODEL_NAME
-from ._batch import _blocked_by_batch, _section_title
+from ._batch import _blocked_by_batch, _section_title, _selectable
 from ._dlg_backfill import open_backfill_dialog
 
 
@@ -76,7 +76,7 @@ class TestCardsSection(QWidget):
         row_w.setLayout(row)
         root.addWidget(row_w)
 
-        self.status = QLabel("")
+        self.status = _selectable(QLabel(""))
         self.status.setWordWrap(True)
         self.status.setStyleSheet("color:#16a34a; font-weight:600;")
         self.status.setVisible(False)

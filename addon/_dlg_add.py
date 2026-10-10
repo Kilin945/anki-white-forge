@@ -10,7 +10,7 @@ from aqt.utils import showWarning, tooltip
 from . import _llm
 from ._config import BOX_STYLE, DECK_NAME, FIELD_BOXES, MODEL_NAME, VALIDATE_SCRIPT, VENV_PYTHON, _FIELD_LABEL
 from ._text import _clean_text, _looks_english, _reasons_text
-from ._batch import _BatchDialogMixin, _batch_acquire, _batch_busy_message, _deck_note_ids, _show_nonmodal, _sync_after_batch
+from ._batch import _BatchDialogMixin, _batch_acquire, _batch_busy_message, _deck_note_ids, _show_nonmodal, _sync_after_batch, _selectable_all
 from ._workers import Worker
 
 
@@ -32,6 +32,7 @@ class AddWordDialog(_BatchDialogMixin, QDialog):
         self.setMinimumWidth(580)        # wider than the 5-box row so the stretches centre it (side margins)
         self._worker = None
         self._setup_ui()
+        _selectable_all(self)            # 文字都能用滑鼠選取複製
 
     def _set_batch_status(self, text):
         self._set_status(text, "info")

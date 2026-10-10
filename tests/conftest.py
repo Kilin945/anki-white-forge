@@ -42,6 +42,7 @@ def install_fake_aqt():
     for name in ["QAction", "QDialog", "QVBoxLayout", "QHBoxLayout", "QFormLayout",
                  "QLabel", "QLineEdit", "QPushButton", "QProgressBar", "QScrollArea",
                  "QWidget", "QFrame", "QCheckBox", "QPixmap", "QIcon", "QSize",
+                 "QPainter", "QPalette", "QPen", "QRectF",
                  "QKeySequenceEdit", "QKeySequence", "QMessageBox", "QThread", "QPlainTextEdit", "QTimer",
                  "pyqtSignal", "Qt"]:
         setattr(qt, name, _Any)

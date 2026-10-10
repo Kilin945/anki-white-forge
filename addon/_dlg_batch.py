@@ -3,7 +3,7 @@
 from aqt.qt import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QScrollArea, QWidget, QFrame,
 )
-from ._batch import _BatchDialogMixin, _hline, _show_nonmodal
+from ._batch import _BatchDialogMixin, _hline, _selectable_all, _show_nonmodal
 from ._sec_translate import TranslateSection
 from ._sec_clear_flagged import ClearFlaggedSection
 from ._sec_duplicates import DuplicatesSection
@@ -63,6 +63,9 @@ class BatchOperationsDialog(_BatchDialogMixin, QDialog):
         close_btn.clicked.connect(self.accept)
         close_row.addWidget(close_btn)
         root.addLayout(close_row)         # Close 固定在捲動區外,永遠可見
+
+        # 面板上所有文字都能用滑鼠選取複製（標題、說明也算）；之後重掃才建的清單列各自套 _selectable
+        _selectable_all(content)
 
     # 這個面板的 worker 掛在 TranslateSection 上,不在面板自己身上 → 覆寫這兩個 hook
     def _active_worker(self):

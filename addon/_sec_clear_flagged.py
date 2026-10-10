@@ -2,12 +2,12 @@
 
 from aqt import mw
 from aqt.qt import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QWidget, Qt,
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, Qt,
 )
 from ._config import DECK_NAME, MODEL_NAME, REFILL_CLEAR_FIELDS
 from ._text import _clean_text, _looks_english
 from ._images import _image_source, _record_image_reject
-from ._batch import _blocked_by_batch, _live_note, _section_title, _sync_after_batch
+from ._batch import _blocked_by_batch, _live_note, _section_title, _selectable, _sync_after_batch, ListBox, _button_row
 from ._dlg_backfill import open_backfill_dialog
 
 
@@ -34,16 +34,11 @@ class ClearFlaggedSection(QWidget):
         desc.setWordWrap(True)
         root.addWidget(desc)
 
-        self.word_list = QLabel("")
-        self.word_list.setWordWrap(True)
-        self.word_list.setStyleSheet("color:#475569; padding:4px;")
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(self.word_list)
-        scroll.setMinimumHeight(70)
-        root.addWidget(scroll)
+        self._list = ListBox()            # 清單框範本：沒東西一行高、有東西跟著長高
+        self.word_list = self._list.text
+        root.addWidget(self._list)
 
-        self.status = QLabel("")
+        self.status = _selectable(QLabel(""))
         self.status.setWordWrap(True)
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status.setStyleSheet("color:#16a34a; font-weight:600;")
@@ -52,18 +47,15 @@ class ClearFlaggedSection(QWidget):
 
         # before clearing: a single Clear button (right-aligned). The list above + this
         # press is the only gate — no secondary confirm dialog (matches the old Refill).
-        clear_row = QHBoxLayout()
-        clear_row.addStretch()
-        self.clear_btn = QPushButton("Clear")
+        self.clear_btn = QPushButton("Clear")     # 不顯示張數（使用者覺得醜）
         self.clear_btn.setEnabled(False)
         self.clear_btn.clicked.connect(self._on_clear)
-        clear_row.addWidget(self.clear_btn)
-        self.clear_row_w = QWidget()
-        self.clear_row_w.setLayout(clear_row)
+        self.clear_row_w = _button_row(self.clear_btn)
         root.addWidget(self.clear_row_w)
 
         # after clearing: optional jump to Complete Missing Cards (left), or just finish (right)
         post_row = QHBoxLayout()
+        post_row.setContentsMargins(0, 0, 0, 0)
         self.open_complete_btn = QPushButton("Open Complete Missing Cards")
         self.open_complete_btn.clicked.connect(self._open_complete)
         post_row.addWidget(self.open_complete_btn)
@@ -97,14 +89,13 @@ class ClearFlaggedSection(QWidget):
             word_text = " · ".join(words)
             if skipped > 0:
                 word_text += f"  ({skipped} non-English card(s) skipped)"
-            self.word_list.setText(word_text)
-            self.clear_btn.setText(f"Clear {len(self._flagged)} Cards")
+            self._list.set_text(word_text)
             self.clear_btn.setEnabled(True)
         elif skipped > 0:
-            self.word_list.setText(f"No English flagged cards ({skipped} skipped — not English).")
+            self._list.set_text(f"No English flagged cards ({skipped} skipped — not English).")
             self.clear_btn.setEnabled(False)
         else:
-            self.word_list.setText("No flagged cards.")
+            self._list.set_text("No flagged cards.")
             self.clear_btn.setEnabled(False)
 
     def _on_clear(self):
@@ -129,7 +120,7 @@ class ClearFlaggedSection(QWidget):
         mw.col.save()
         mw.reset()
         _sync_after_batch()
-        self.word_list.setText("")
+        self._list.set_text("")
         self.clear_row_w.setVisible(False)
         self.status.setText(f"✓ Cleared {n} card(s) and removed their flags. "
                             "Word + Association kept. Regenerate them now?")

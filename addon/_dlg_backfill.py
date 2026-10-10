@@ -9,7 +9,7 @@ from aqt.qt import (
 from . import _llm_dispatch as _lld
 from ._config import BACKFILL_BOXES, BOX_STYLE, PLACEHOLDERS, _BADGE_OK_STYLE, _BADGE_WARN_STYLE, _FIELD_LABEL, _shortcut
 from ._text import _clean_text, _image_filename, _looks_english, _preview_html, _reasons_text
-from ._batch import _BatchDialogMixin, _batch_acquire, _batch_busy_message, _batch_release, _deck_note_ids, _live_note, _show_nonmodal, _sync_after_batch
+from ._batch import _BatchDialogMixin, _batch_acquire, _batch_busy_message, _batch_release, _deck_note_ids, _live_note, _selectable_all, _show_nonmodal, _sync_after_batch
 from ._workers import BackfillWorker
 
 
@@ -301,6 +301,7 @@ class BackfillDialog(_BatchDialogMixin, QDialog):
         self.select_all.setChecked(bool(notes))
         self._on_select_all()
         self._update_selection()
+        _selectable_all(self)            # 文字都能用滑鼠選取複製（重掃會重建列 → 每次掃完都套）
 
     def _update_selection(self):
         n = sum(1 for r in self._rows.values() if r.is_checked())

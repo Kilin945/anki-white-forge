@@ -4,7 +4,8 @@ import threading
 import aqt
 from aqt import mw
 from aqt.qt import (
-    QLabel, QFrame, QTimer,
+    QLabel, QFrame, QTimer, Qt, QScrollArea, QWidget, QVBoxLayout, QHBoxLayout,
+    QPainter, QPalette, QPen, QRectF,
 )
 from . import _llm_dispatch as _lld
 from ._config import DECK_NAME, MODEL_NAME
@@ -209,6 +210,109 @@ def _section_title(text):
     lbl = QLabel(f"▸ {text}")
     lbl.setStyleSheet("font-weight:700; font-size:14px; color:#1E293B; padding-top:4px;")
     return lbl
+
+
+def _selectable(label):
+    """文字可以用滑鼠選取、複製（QLabel 預設不行）。同 ⌘S 的單字與退回原因。"""
+    label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    return label
+
+
+def _selectable_all(widget):
+    """widget 底下所有文字標籤都設成可選取。Qt 沒有全域預設可改（QLabel 預設只有連結能點），
+    所以每個視窗建好、以及每次重建清單後各呼叫一次；check_qt_runtime.py 掃過每個視窗守住。"""
+    for label in widget.findChildren(QLabel):
+        _selectable(label)
+
+
+# ── ⌘F 區塊共用的清單框與按鈕列（三個區塊長得一樣：改這裡就全部一起改）────────────
+LIST_MAX_PX = 400            # 清單框最多多高，超過就捲動
+BUTTON_MIN_WIDTH = 140       # 區塊動作鈕的寬度一致，上下對得齊
+LIST_TEXT_STYLE = "color:#475569; padding:4px;"
+
+
+LIST_RADIUS = 6              # 清單框圓角（跟輸入框、按鈕一樣圓）
+
+
+class ListBox(QWidget):
+    """清單框範本：沒東西就一行高（顯示一句灰字），有東西就跟著長高，最多 LIST_MAX_PX、超過捲動。
+    兩種用法：set_text() 放一段文字（紅旗卡、長句）；clear_rows()＋add_row() 放自訂的列（刪重複）。
+    圓角外框用 QPainter 自己畫、不用 stylesheet：父元件一套 stylesheet，底下的 QCheckBox 會改走
+    stylesheet 繪製，在 Anki 裡出過「點方框沒反應」（見 CLAUDE.md）。顏色取調色盤，深色模式照樣對。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        outer = QVBoxLayout(self)
+        pad = LIST_RADIUS // 2            # 內容縮進圓角裡，方形的捲動區不會蓋到圓角
+        outer.setContentsMargins(pad, pad, pad, pad)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll.viewport().setAutoFillBackground(False)
+        outer.addWidget(self._scroll)
+        self.body = QWidget()
+        self.body.setAutoFillBackground(False)
+        self._rows = QVBoxLayout(self.body)
+        self._rows.setContentsMargins(4, 4, 4, 4)
+        self.text = _selectable(QLabel(""))
+        self.text.setWordWrap(True)
+        self.text.setStyleSheet(LIST_TEXT_STYLE)
+        self._rows.addWidget(self.text)
+        self._scroll.setWidget(self.body)
+        self._fit_width = -1
+        self.fit()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(QPen(self.palette().color(QPalette.ColorRole.Mid), 1))
+        p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), LIST_RADIUS, LIST_RADIUS)
+        p.end()
+
+    def set_text(self, text):
+        self.clear_rows()
+        self.text.setText(text)
+        self.text.setVisible(True)
+        self.fit()
+
+    def clear_rows(self):
+        while self._rows.count() > 1:
+            w = self._rows.takeAt(1).widget()
+            if w is not None:
+                w.deleteLater()
+
+    def add_row(self, widget):
+        self.text.setVisible(False)
+        self._rows.addWidget(widget)
+
+    def fit(self):
+        """高度跟著內容（換行的文字依目前寬度算）。加完列要呼叫一次。"""
+        self._rows.activate()
+        width = self._scroll.viewport().width()
+        if width > 0 and self._rows.hasHeightForWidth():
+            content = self._rows.heightForWidth(width)
+        else:
+            content = self.body.sizeHint().height()
+        m = self.layout().contentsMargins()
+        self.setFixedHeight(min(content + m.top() + m.bottom(), LIST_MAX_PX))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._scroll.viewport().width() != self._fit_width:   # 寬度變了 → 換行跟著變，高度重算
+            self._fit_width = self._scroll.viewport().width()
+            self.fit()
+
+
+def _button_row(*buttons):
+    """靠右、不留外邊距、每顆一樣寬的按鈕列（回 QWidget，區塊可以整列顯示/隱藏）。"""
+    row_w = QWidget()
+    row = QHBoxLayout(row_w)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.addStretch()
+    for b in buttons:
+        b.setMinimumWidth(BUTTON_MIN_WIDTH)
+        row.addWidget(b)
+    return row_w
 
 
 def _show_nonmodal(dialog_cls):

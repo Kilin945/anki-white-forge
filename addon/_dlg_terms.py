@@ -8,7 +8,7 @@ from aqt.qt import (
 from aqt.utils import showWarning
 from . import _config
 from ._text import _TERMS_LOCK, load_translation_terms, save_translation_terms
-from ._batch import _hline
+from ._batch import _hline, _selectable_all
 
 
 class TranslationTermsDialog(QDialog):
@@ -28,6 +28,7 @@ class TranslationTermsDialog(QDialog):
         self._setup_ui()
         self._render_pending()
         self._refresh_terms()
+        _selectable_all(self)            # 文字都能用滑鼠選取複製
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
@@ -105,6 +106,7 @@ class TranslationTermsDialog(QDialog):
         self.approve_buttons, self.discard_buttons = {}, {}
         if not self._data["pending"]:
             self._pending_box.addWidget(QLabel("No pending terms."))
+            _selectable_all(self)
             return
         for p in self._data["pending"]:
             term = p["term"]
@@ -131,6 +133,7 @@ class TranslationTermsDialog(QDialog):
             self._pending_box.addWidget(wrap)
             self.approve_buttons[term] = approve
             self.discard_buttons[term] = discard
+        _selectable_all(self)
 
     def _refresh_terms(self):
         self.count_label.setText(f"Approved terms: {len(self._data['terms'])}")
@@ -155,6 +158,7 @@ class TranslationTermsDialog(QDialog):
             self._terms_box.addWidget(_hline())
             self.remove_buttons[term] = rm
         self._terms_box.addStretch()
+        _selectable_all(self)
 
     def _toggle_manage(self):
         show = not self.panel.isVisible()
