@@ -2,6 +2,8 @@
 事故：搜圖拿第一張下載得到的就用——concrete 配到生物課老師、instance 配到 1922 年電話雜誌；
 只看描述挑也不準（concrete 挑到 art class、harness 挑到馬具），所以下載後再讓看圖模型確認。
 不打網路：搜尋、下載、LLM、看圖全部 patch。"""
+import json
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -34,11 +36,12 @@ def _cands(prefix, *alts):
 class TestPickPrompt:
     def test_prompt_lists_numbered_descriptions(self):
         p = llm_mod.image_pick_prompt("concrete", "具體類別", ["A teacher", "", "Code on a laptop"])
-        assert "1. A teacher" in p and "2. (no description)" in p and "具體類別" in p and "NONE" in p
+        assert "1. A teacher" in p and "2. (no description)" in p and "具體類別" in p
+        assert "up to 3" in p and "NONE" in p
 
     @pytest.mark.parametrize("reply,expected", [
-        ("2", 1), (" 3. Code on a laptop", 2), ("NONE", img.PICK_NONE), ("none of them", img.PICK_NONE),
-        ("", None), ("9", None), ("0", None), ("maybe the second", None),
+        ("2", [1]), ("3, 1", [2, 0]), (" 3. Code on a laptop", [2]), ("2, 2, 1", [1, 0]),
+        ("NONE", []), ("none of them", []), ("", None), ("9", None), ("0", None), ("maybe the second", None),
     ])
     def test_parse(self, reply, expected):
         assert llm_mod.parse_image_pick(reply, 3) == expected
@@ -46,55 +49,68 @@ class TestPickPrompt:
     def test_pick_asks_with_sense(self, monkeypatch):
         seen = []
         monkeypatch.setattr(llm_mod, "llm", lambda p, **kw: seen.append(p) or "2")
-        assert REAL_CORE_PICK("concrete", "具體類別", ["teacher", "code"]) == 1
+        assert REAL_CORE_PICK("concrete", "具體類別", ["teacher", "code"]) == [1]
         assert "具體類別" in seen[0]
 
 
-# ── fetch_judged：挑 → 下載 → 看圖 ───────────────────────────────────────────
+# ── fetch_judged：排前 3 → 同時下載、同時看圖 → 取第一張對的 ───────────────────
+
+def _url_of(path):
+    return open(path, "rb").read()[:20].decode(errors="ignore")
+
 
 class TestFetchJudged:
-    def test_vision_no_moves_to_next_source(self, tmp_path, monkeypatch, fast_download):
-        monkeypatch.setattr(img, "SOURCES", [_src("a", _cands("a", "art class")),
-                                             _src("b", _cands("b", "code"))])
+    def test_takes_first_true_in_rank_order(self, tmp_path, monkeypatch, fast_download):
+        monkeypatch.setattr(img, "SOURCES", [_src("a", _cands("a", "art class", "wall", "code", "laptop"))])
         looked = []
         def verify(path):
-            looked.append(open(path, "rb").read()[:12])
-            return b"http://b" in looked[-1]
-        found = img.fetch_judged(str(tmp_path / "o.jpg"), "q", [], lambda alts: 0, verify)
-        assert found[2:] == ("code", "b:0")
-        assert len(looked) == 2
+            looked.append(_url_of(path))
+            return "a/2" in looked[-1] or "a/3" in looked[-1]
+        out = tmp_path / "o.jpg"
+        found = img.fetch_judged(str(out), "q", [], lambda alts: [0, 3, 2], verify)
+        assert found[2:] == ("laptop", "a:3")                 # 排名第二的 3 先於第三的 2
+        assert len(looked) == 3 and "a/3" in _url_of(out)
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["o.jpg"]   # 暫存檔清乾淨
 
-    def test_judge_none_skips_source_without_download(self, tmp_path, monkeypatch, fast_download):
-        monkeypatch.setattr(img, "SOURCES", [_src("a", _cands("a", "teacher")),
-                                             _src("b", _cands("b", "code"))])
+    def test_all_wrong_moves_to_next_source(self, tmp_path, monkeypatch, fast_download):
+        monkeypatch.setattr(img, "SOURCES", [_src("a", _cands("a", "x", "y")), _src("b", _cands("b", "code"))])
+        found = img.fetch_judged(str(tmp_path / "o.jpg"), "q", [], lambda alts: [0, 1],
+                                 lambda path: "http://b" in _url_of(path))
+        assert found[3] == "b:0"
+
+    def test_none_skips_source_without_download(self, tmp_path, monkeypatch, fast_download):
+        monkeypatch.setattr(img, "SOURCES", [_src("a", _cands("a", "teacher")), _src("b", _cands("b", "code"))])
         looked = []
         found = img.fetch_judged(str(tmp_path / "o.jpg"), "q", [],
-                                 lambda alts: img.PICK_NONE if alts == ["teacher"] else 0,
+                                 lambda alts: [] if alts == ["teacher"] else [0],
                                  lambda path: looked.append(path) or True)
         assert found[3] == "b:0" and len(looked) == 1
 
-    def test_vision_unavailable_accepts_pick(self, tmp_path, monkeypatch, fast_download):
-        monkeypatch.setattr(img, "SOURCES", [_src("a", _cands("a", "teacher", "code"))])
-        found = img.fetch_judged(str(tmp_path / "o.jpg"), "q", [], lambda alts: 1, lambda path: None)
+    def test_unverifiable_accepted_but_never_a_rejected_one(self, tmp_path, monkeypatch, fast_download):
+        monkeypatch.setattr(img, "SOURCES", [_src("a", _cands("a", "x", "y"))])
+        answers = {"a/0": False, "a/1": None}
+        found = img.fetch_judged(str(tmp_path / "o.jpg"), "q", [], lambda alts: [0, 1],
+                                 lambda path: answers[next(k for k in answers if k in _url_of(path))])
         assert found[3] == "a:1"
 
-    def test_judge_failure_tries_candidates_in_order(self, tmp_path, monkeypatch, fast_download):
-        monkeypatch.setattr(img, "SOURCES", [_src("a", _cands("a", "x", "y", "z"))])
-        answers = iter([False, True])
+    def test_judge_failure_checks_first_three(self, tmp_path, monkeypatch, fast_download):
+        monkeypatch.setattr(img, "SOURCES", [_src("a", _cands("a", "w", "x", "y", "z"))])
+        looked = []
         found = img.fetch_judged(str(tmp_path / "o.jpg"), "q", [], lambda alts: None,
-                                 lambda path: next(answers))
-        assert found[3] == "a:1"
+                                 lambda path: looked.append(path) or "a/2" in _url_of(path))
+        assert found[3] == "a:2" and len(looked) == 3
 
     def test_rejected_candidates_never_shown(self, tmp_path, monkeypatch, fast_download):
         monkeypatch.setattr(img, "SOURCES", [_src("a", _cands("a", "old pick", "new"))])
         seen = []
         img.fetch_judged(str(tmp_path / "o.jpg"), "q", ["a:0"],
-                         lambda alts: seen.append(alts) or 0, lambda path: True)
+                         lambda alts: seen.append(alts) or [0], lambda path: True)
         assert seen == [["new"]]
 
-    def test_nothing_fits_returns_none(self, tmp_path, monkeypatch, fast_download):
-        monkeypatch.setattr(img, "SOURCES", [_src("a", _cands("a", "x"))])
-        assert img.fetch_judged(str(tmp_path / "o.jpg"), "q", [], lambda alts: 0, lambda p: False) is None
+    def test_nothing_fits_returns_none_and_cleans_up(self, tmp_path, monkeypatch, fast_download):
+        monkeypatch.setattr(img, "SOURCES", [_src("a", _cands("a", "x", "y"))])
+        assert img.fetch_judged(str(tmp_path / "o.jpg"), "q", [], lambda alts: [0, 1], lambda p: False) is None
+        assert list(tmp_path.iterdir()) == []
 
 
 # ── find_picture：詞義 → 日常義 → 通用程式畫面 ───────────────────────────────
@@ -106,7 +122,7 @@ class TestFindPicture:
         def fn(query):
             return [{"id": "1", "url": f"http://a/{query}", "alt": f"photo for {query}", "attribution": ""}]
         monkeypatch.setattr(img, "SOURCES", [("a", fn)])
-        monkeypatch.setattr(pic.llm, "llm_pick_image", lambda w, s, alts: 0)
+        monkeypatch.setattr(pic.llm, "llm_pick_image", lambda w, s, alts: [0])
         def vf(word, sense, path):
             q = open(path, "rb").read().decode(errors="ignore").split("http://a/")[1].split("x")[0]
             calls.append((sense, q))
@@ -148,36 +164,78 @@ class TestFindPicture:
 # ── vision：解析與換模型 ──────────────────────────────────────────────────────
 
 class TestVision:
+    @pytest.fixture(autouse=True)
+    def _cool_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(vision, "COOLDOWN_PATH", str(tmp_path / "cool.json"))
+        monkeypatch.setattr(vision, "_load_key", lambda: "k")
+
     def _img(self, tmp_path):
         p = tmp_path / "i.jpg"; p.write_bytes(b"\xff\xd8" + b"x" * 100)
         return str(p)
 
     def test_yes_no(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(vision, "_load_key", lambda: "k")
-        monkeypatch.setattr(vision, "_cool_until", {})
         for reply, expected in [("YES", True), ("No.", False)]:
-            monkeypatch.setattr(vision, "_ask", lambda m, k, p, d, r=reply: (r, 200))
+            monkeypatch.setattr(vision, "_ask", lambda m, k, p, d, r=reply: (r, 200, ""))
             assert REAL_VISION("w", "s", self._img(tmp_path)) is expected
 
-    def test_rate_limited_model_is_skipped(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(vision, "_load_key", lambda: "k")
-        monkeypatch.setattr(vision, "_cool_until", {})
+    def test_rate_limited_model_is_skipped_across_processes(self, tmp_path, monkeypatch):
         asked = []
         def ask(model, k, p, d):
             asked.append(model)
-            return (None, 429) if model == vision.VISION_MODELS[0] else ("YES", 200)
+            return (None, 429, "") if model == vision.VISION_MODELS[0] else ("YES", 200, "")
         monkeypatch.setattr(vision, "_ask", ask)
         assert REAL_VISION("w", "s", self._img(tmp_path)) is True
         assert REAL_VISION("w", "s", self._img(tmp_path)) is True
-        assert asked == vision.VISION_MODELS[:2] + [vision.VISION_MODELS[1]]   # 第二次不再問冷卻中的
+        assert asked == vision.VISION_MODELS[:2] + [vision.VISION_MODELS[1]]   # 冷卻記在檔案，第二次直接跳過
+        assert vision.VISION_MODELS[0] in json.load(open(vision.COOLDOWN_PATH))
+
+    def test_daily_quota_cools_until_reset(self, tmp_path, monkeypatch):
+        body = '{"error":{"details":[{"violations":[{"quotaId":"GenerateRequestsPerDayPerProjectPerModel"}]},{"retryDelay":"68000s"}]}}'
+        monkeypatch.setattr(vision, "_ask", lambda *a: (None, 429, body))
+        REAL_VISION("w", "s", self._img(tmp_path))
+        until = json.load(open(vision.COOLDOWN_PATH))[vision.VISION_MODELS[0]]
+        assert until - time.time() > 60000
 
     def test_no_key_or_all_down_is_none(self, tmp_path, monkeypatch):
         monkeypatch.setattr(vision, "_load_key", lambda: "")
         assert REAL_VISION("w", "s", self._img(tmp_path)) is None
         monkeypatch.setattr(vision, "_load_key", lambda: "k")
-        monkeypatch.setattr(vision, "_cool_until", {})
-        monkeypatch.setattr(vision, "_ask", lambda *a: (None, 503))
+        monkeypatch.setattr(vision, "_ask", lambda *a: (None, 503, ""))
         assert REAL_VISION("w", "s", self._img(tmp_path)) is None
+
+
+class TestTimeBudget:
+    """整段找圖有上限：時間到就不再換家，改拿舊流程的第一張（圖不能跳過）。"""
+
+    def _sources(self, monkeypatch):
+        def fn(query):
+            return [{"id": "1", "url": f"http://a/{query}", "alt": f"photo for {query}", "attribution": ""}]
+        monkeypatch.setattr(img, "SOURCES", [("a", fn), ("b", fn)])
+
+    def test_slow_judge_is_cut_and_first_image_used(self, tmp_path, monkeypatch, fast_download):
+        self._sources(monkeypatch)
+        monkeypatch.setattr(pic, "JUDGE_TIMEOUT_SECS", 0.2)
+        monkeypatch.setattr(pic.llm, "llm_pick_image", lambda w, s, alts: time.sleep(5) or [0])
+        monkeypatch.setattr(pic.vision, "vision_fits", lambda w, s, p: True)
+        t = time.monotonic()
+        ok, _, desc, _ = pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[], budget=6)
+        assert ok and desc == "photo for q"
+        assert time.monotonic() - t < 3
+
+    def test_out_of_time_still_gets_an_image(self, tmp_path, monkeypatch, fast_download):
+        self._sources(monkeypatch)
+        monkeypatch.setattr(pic, "FALLBACK_RESERVE_SECS", 1)
+        monkeypatch.setattr(pic.llm, "llm_pick_image", lambda w, s, alts: [0])
+        monkeypatch.setattr(pic.vision, "vision_fits", lambda w, s, p: time.sleep(0.6) or False)
+        t = time.monotonic()
+        ok, _, desc, _ = pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[], budget=2)
+        assert ok and desc == "photo for q"            # 看圖一直說不對 → 時間到 → 舊流程第一張
+        assert time.monotonic() - t < 3.5
+
+    def test_timed_returns_none_on_timeout(self):
+        assert pic._timed(lambda: time.sleep(1) or 1, 0.1) is None
+        assert pic._timed(lambda: 7, 1) == 7
+        assert pic._timed(lambda: 7, 0) is None
 
 
 # ── 接線：helper、addon、CLI ─────────────────────────────────────────────────

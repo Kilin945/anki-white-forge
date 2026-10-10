@@ -5,7 +5,6 @@ import shutil
 import threading
 
 from core.examples import examples as _examples
-from core.image import PICK_NONE
 from core.dispatcher import AllProvidersLimited, Dispatcher
 from core.providers import (GROQ_KEY_PATH, GROQ_MODEL, GeminiProvider,
                             GroqProvider, _load_groq_client, build_pools)  # GROQ_MODEL/GROQ_KEY_PATH/_load_groq_client 純 re-export — test_backfill.py 依賴,勿刪
@@ -429,26 +428,28 @@ def llm_pick_sense(word):
 
 
 def image_pick_prompt(word, sense, alts):
-    """挑圖 prompt。KEEP-IN-SYNC: addon/_llm.py::_image_pick_prompt（逐字相同，測試比對）。"""
+    """挑圖 prompt：排出最多 3 張。KEEP-IN-SYNC 已不需要（挑圖只在 core，addon 經 helper 呼叫）。"""
     lines = "\n".join(f"{i + 1}. {a or '(no description)'}" for i, a in enumerate(alts))
     return (
         f'We need a photo that shows the meaning of the English word "{word}": "{sense}".\n'
         f'Here are the descriptions of the candidate photos:\n{lines}\n'
-        f'Reply with the number of the one photo that best shows this meaning. '
-        f'If none of them shows this meaning, reply NONE. Reply with only the number or NONE.'
+        f'Reply with the numbers of up to 3 photos that show this meaning, best first, '
+        f'separated by commas (for example: 4, 1, 7). '
+        f'If none of them shows this meaning, reply NONE. Reply with only the numbers or NONE.'
     )
 
 
 def parse_image_pick(reply, n):
-    """回覆 → 候選索引（0 起算）／PICK_NONE／None（看不懂或沒回 → 呼叫端退回拿第一張）。
-    KEEP-IN-SYNC: addon/_llm.py::_parse_image_pick。"""
+    """回覆 → 排好的候選索引 list（0 起算，去重、只收範圍內）／[]（NONE）／None（看不懂或沒回）。"""
     r = (reply or "").strip().upper()
     if r.startswith("NONE"):
-        return PICK_NONE
-    m = re.match(r"(\d+)", r)
-    if m and 1 <= int(m.group(1)) <= n:
-        return int(m.group(1)) - 1
-    return None
+        return []
+    picks = []
+    for m in re.findall(r"\d+", r):
+        i = int(m) - 1
+        if 0 <= i < n and i not in picks:
+            picks.append(i)
+    return picks or None
 
 
 def llm_pick_image(word, sense, alts):

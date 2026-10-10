@@ -12,6 +12,7 @@ import html
 import json
 import os
 import re
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 
@@ -216,9 +217,9 @@ def _safe_search(fn, query):
 
 
 # ── 挑圖（core/picture.py 用）───────────────────────────────────────────────
-# judge(alts) → 候選索引（0 起算）／PICK_NONE（這家都不合格）／None（挑圖失敗）。
-# verify(path) → True（看過圖、對）／False（看過圖、不對）／None（沒辦法看 → 照收）。
-PICK_NONE = -1
+# judge(alts) → 依好壞排好的候選索引 list（0 起算；[]＝這家都不合格）／None（挑圖失敗）。
+# verify(path) → True（看過圖、對）／False（看過圖、不對）／None（沒辦法看 → 可以照收）。
+TOP_N = 3        # 一家同時下載、同時看圖的張數：一張一張排隊太慢（2026-10-10 實測難找的字 9～13 秒）
 
 
 def ordered_sources(rejects):
@@ -236,20 +237,44 @@ def _result(hit, name):
     return True, hit["attribution"], hit["alt"], f"{name}:{hit['id']}"
 
 
-def fetch_judged(filepath, query, rejects, judge, verify):
-    """一家一家：judge 從描述挑一張 → 下載 → verify 看圖。看圖說不對就換下一家；
-    judge 失敗就依序試這家的候選（每張都要過 verify）。回結果，或 None（每一家都沒有對的圖）。"""
+def _download_and_verify(chosen, name, rejects, filepath, verify):
+    """chosen 同時下載到各自的暫存檔、同時看圖；照排名取第一張「對」的，沒有就取第一張
+    「沒辦法看」的（看圖說不對的絕不收）。選中的搬到 filepath，其餘暫存檔刪掉。"""
+    paths = [f"{filepath}.{i}" for i in range(len(chosen))]
+    with ThreadPoolExecutor(max_workers=len(chosen)) as pool:
+        got = list(pool.map(lambda cp: _download([cp[0]], name, rejects, cp[1]), zip(chosen, paths)))
+        oks = list(pool.map(lambda gp: verify(gp[1]) if gp[0] else False, zip(got, paths)))
+    pick = next((i for i, (g, ok) in enumerate(zip(got, oks)) if g and ok is True), None)
+    if pick is None:
+        pick = next((i for i, (g, ok) in enumerate(zip(got, oks)) if g and ok is None), None)
+    for i, path in enumerate(paths):
+        if i == pick:
+            os.replace(path, filepath)
+        elif os.path.exists(path):
+            os.remove(path)
+    return got[pick] if pick is not None else None
+
+
+def fetch_judged(filepath, query, rejects, judge, verify, keep_going=lambda: True):
+    """一家一家：judge 從描述排出前 TOP_N 張 → 同時下載、同時看圖 → 取第一張對的。
+    這家都不對才換下一家；judge 失敗就拿這家前 TOP_N 張去看。keep_going() 為 False（時間到）就不再換家。
+    回結果，或 None（每一家都沒有對的圖，或時間到）。"""
     for name, fn in ordered_sources(rejects):
+        if not keep_going():
+            return None
+        print(f"  [picture] search {name}", file=sys.stderr, flush=True)
         cands = search_candidates(name, fn, query, rejects)
         if not cands:
             continue
-        pick = judge([c["alt"] for c in cands])
-        if pick == PICK_NONE:
+        ranked = judge([c["alt"] for c in cands])
+        if ranked == []:
             continue
-        for cand in (cands[:MAX_DOWNLOAD_TRIES] if pick is None else [cands[pick]]):
-            hit = _download([cand], name, rejects, filepath)
-            if hit and verify(filepath) is not False:
-                return _result(hit, name)
+        chosen = cands[:TOP_N] if ranked is None else [cands[i] for i in ranked if 0 <= i < len(cands)][:TOP_N]
+        if not chosen:
+            continue
+        hit = _download_and_verify(chosen, name, rejects, filepath, verify)
+        if hit:
+            return _result(hit, name)
     return None
 
 

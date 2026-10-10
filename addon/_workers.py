@@ -22,7 +22,7 @@ from ._images import _image_alt, _image_html
 _log = _lld.get_logger()   # 批次/LLM 事件集中記錄到 logs/addon_llm.log（gitignored）
 
 
-IMAGE_TIMEOUT_SECS = 240   # 挑圖最多看 6 張圖、每次看圖最多 40 秒 → 給足時間，逾時就當沒圖
+IMAGE_TIMEOUT_SECS = 25    # 挑圖本身最多約 10 秒（core/picture.py PICTURE_BUDGET_SECS），加上子程序啟動的餘裕
 
 
 class Worker(QThread):

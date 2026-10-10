@@ -8,20 +8,51 @@
 這些呼叫不經過 Dispatcher（它只管文字），但跟造句池共用同一批 Gemini 模型的額度。
 """
 import base64
+import json
+import os
 import sys
 import threading
 import time
 
 import requests
 
-from core.providers import GEMINI_KEY_PATH, GEMINI_URL, _extract_gemini_text
+from core.providers import GEMINI_KEY_PATH, GEMINI_URL, _REPO, _extract_gemini_text, _gemini_429_secs
 
-VISION_MODELS = ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3-flash-preview", "gemini-3.5-flash"]
-COOLDOWN_SECS = 60          # 撞限或伺服器錯誤後，這個模型多久內不再試
-TIMEOUT_SECS = 40
+# lite：15 張測試集同樣全對、每張 1.4～5 秒（flash 2～35 秒），而且不吃造句池 flash 的每日額度
+# （2026-10-10 看圖把 flash 的每日額度用光，造句只能一路 failover，一張卡拖到 1 分半）。
+VISION_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+COOLDOWN_SECS = 60          # 伺服器錯誤／逾時後，這個模型多久內不再試
+TIMEOUT_SECS = 8            # 單次看圖最多等多久
+# 冷卻記在檔案裡：helper 每張卡都是新的子程序，記在記憶體會讓每張卡都再撞一次「今天額度用完」
+COOLDOWN_PATH = os.path.join(_REPO, "logs", "vision_cooldown.json")
 
-_cool_until = {}            # model → monotonic time
 _lock = threading.Lock()
+
+
+def _load_cooldown():
+    try:
+        with open(COOLDOWN_PATH) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _cool(model, secs):
+    """model 在 secs 秒內不再試（牆上時間，跨子程序有效）。寫檔失敗就算了，不擋看圖。"""
+    with _lock:
+        data = _load_cooldown()
+        data[model] = time.time() + secs
+        try:
+            os.makedirs(os.path.dirname(COOLDOWN_PATH), exist_ok=True)
+            with open(COOLDOWN_PATH, "w") as f:
+                json.dump(data, f)
+        except OSError:
+            pass
+
+
+def _cooling(model):
+    return _load_cooldown().get(model, 0) > time.time()
 
 
 def vision_prompt(word, sense):
@@ -60,8 +91,8 @@ def _ask(model, key, prompt, data):
     r = requests.post(GEMINI_URL.format(model=model), json=body, timeout=TIMEOUT_SECS,
                       headers={"x-goog-api-key": key})
     if r.status_code != 200:
-        return None, r.status_code
-    return _extract_gemini_text(r.json()), 200
+        return None, r.status_code, r.text
+    return _extract_gemini_text(r.json()), 200, ""
 
 
 def vision_fits(word, sense, image_path):
@@ -75,13 +106,12 @@ def vision_fits(word, sense, image_path):
         return None
     prompt = vision_prompt(word, sense)
     for model in VISION_MODELS:
-        with _lock:
-            if _cool_until.get(model, 0) > time.monotonic():
-                continue
+        if _cooling(model):
+            continue
         try:
-            text, status = _ask(model, key, prompt, data)
+            text, status, err = _ask(model, key, prompt, data)
         except (requests.RequestException, ValueError, KeyError):
-            text, status = None, 0
+            text, status, err = None, 0, ""
         if text:
             answer = text.strip().upper()
             if answer.startswith("YES"):
@@ -89,7 +119,7 @@ def vision_fits(word, sense, image_path):
             if answer.startswith("NO"):
                 return False
             continue                     # 回了別的（不是 YES/NO）→ 換下一個模型問，不冷卻
-        with _lock:
-            _cool_until[model] = time.monotonic() + COOLDOWN_SECS
-        print(f"  [vision] {model} unavailable (HTTP {status}) → next model", file=sys.stderr)
+        secs = _gemini_429_secs(err, 1) if status == 429 else COOLDOWN_SECS   # 每日額度用完 → 冷卻到重置
+        _cool(model, secs)
+        print(f"  [vision] {model} unavailable (HTTP {status}) → cool {secs:.0f}s, next model", file=sys.stderr)
     return None
