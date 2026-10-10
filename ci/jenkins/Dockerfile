@@ -6,5 +6,5 @@ RUN jenkins-plugin-cli --plugin-file /usr/share/jenkins/ref/plugins.txt
 
 # 設定全部來自 casc.yaml，跳過第一次開啟的安裝精靈
 ENV JAVA_OPTS="-Djenkins.install.runSetupWizard=false"
-ENV CASC_JENKINS_CONFIG=/usr/share/jenkins/ref/casc.yaml
-COPY casc.yaml /usr/share/jenkins/ref/casc.yaml
+# casc.yaml 由 docker-compose 掛進來，改設定只要重啟容器、不用重建 image
+ENV CASC_JENKINS_CONFIG=/var/jenkins_casc/casc.yaml

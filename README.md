@@ -164,11 +164,40 @@ Qt 檢查要用本機的 Anki.app。Docker 裡是 Linux，跑不了 Mac 版 Anki
 1. 進到 `ci/jenkins/`。
 2. 把 `.env.example` 複製成 `.env`，填密碼和工作資料夾。
 3. 執行 `docker compose up -d`，啟動主控台。
-4. 執行 `./start-agent.sh`，啟動 Mac 工作機。這個視窗要一直開著。
+4. 執行 `./install-agent-service.sh`，讓 Mac 工作機登入後自動啟動。
 5. 打開 `http://localhost:18080`，用 `.env` 的帳號登入。
 6. 在 `anki-white-forge` 按 Build Now。
 
 四個階段都是綠色就成功了。測試結果在該次建置的 Test Result 頁。
+
+不想裝成自動啟動的話，第 4 步改成執行 `./start-agent.sh`。這個視窗要一直開著。
+
+工作機裝成自動啟動後，Docker 沒開時它會在背景等。打開 Docker 後，約 10 秒內就會連上。
+
+### 什麼時候會自動建置
+
+有兩種觸發方式：
+
+- push 到 GitHub 後，GitHub 用 webhook 通知 Jenkins，幾秒內開始建置。
+- Jenkins 每 15 分鐘檢查一次 GitHub。Docker 或 Tailscale 沒開時漏掉的 push，會在這時補跑。
+
+webhook 要讓 GitHub 連得到你的 Mac。做法是用 Tailscale Funnel，只開放 `/github-webhook/` 這一條路徑：
+
+```bash
+tailscale funnel --bg --set-path /github-webhook/ http://127.0.0.1:18080/github-webhook/
+```
+
+第一次執行時，Tailscale 會給一個網址，要你到管理頁面同意開放 Funnel。
+
+GitHub 那邊的設定：
+
+1. 到 repo 的 Settings，進 Webhooks，按 Add webhook。
+2. Payload URL 填 `https://<你的機器名稱>.<tailnet 名稱>.ts.net/github-webhook/`。
+3. Content type 選 `application/json`。
+4. Secret 填一組隨機字串。
+5. 事件只勾 push。
+
+同一組 Secret 也要存進 Jenkins。到 Manage Jenkins 的 Credentials，新增一筆 Secret text，ID 填 `github-webhook-secret`。Jenkins 用它驗證通知真的來自 GitHub，驗不過就丟掉。
 
 Jenkins 的設定寫在 `ci/jenkins/casc.yaml`。這個檔案裡有的設定，在網頁上改了也會在 Jenkins 重啟時被蓋回去。要改就改這個檔案。
 
@@ -203,7 +232,7 @@ anki/
 ├── templates/                 # 卡片模板 front.html、back.html、style.css
 ├── tests/                     # pytest、conftest.py、兩支 Anki/Qt 相容性檢查
 ├── .github/workflows/         # GitHub Actions：每次 push 跑 pytest
-├── ci/jenkins/                # 本機 Jenkins：Docker 主控台、Mac 工作機啟動腳本
+├── ci/jenkins/                # 本機 Jenkins：Docker 主控台、Mac 工作機啟動與自動啟動腳本
 ├── Jenkinsfile                # Jenkins 的建置流程
 ├── tools/                     # 偶爾才跑的工具
 ├── docs/                      # README 用的圖、設計文件

@@ -26,10 +26,25 @@ jenkins:
 unclassified:
   location:
     url: "http://localhost:18080/"
+  gitHubPluginConfig:
+    # GitHub 送來的 webhook 要用這組密鑰驗簽名，驗不過就丟掉。
+    # 密鑰本身在網頁的 Credentials 裡（id 如下），不寫在這個檔案。
+    hookSecretConfigs:
+      - credentialsId: "github-webhook-secret"
 
 jobs:
   - script: >
       pipelineJob('anki-white-forge') {
+        properties {
+          pipelineTriggers {
+            triggers {
+              // 主要：GitHub push 後經 webhook 通知
+              githubPush()
+              // 補漏：Docker 沒開時漏掉的 push，開機後由輪詢補跑
+              pollSCM { scmpoll_spec('H/15 * * * *') }
+            }
+          }
+        }
         definition {
           cpsScm {
             scm {
