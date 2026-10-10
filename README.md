@@ -199,6 +199,20 @@ GitHub 那邊的設定：
 
 同一組 Secret 也要存進 Jenkins。到 Manage Jenkins 的 Credentials，新增一筆 Secret text，ID 填 `github-webhook-secret`。Jenkins 用它驗證通知真的來自 GitHub，驗不過就丟掉。
 
+### 在 GitHub 上看 Jenkins 的結果
+
+Jenkins 會把結果寫到 GitHub 上每個 commit 旁邊。建置開始時是黃點，結束時改成 ✓ 或 ✗。點開可以看到 GitHub Actions 和 jenkins 各一行。
+
+這要一把 GitHub token：
+
+1. 到 GitHub 的 Settings，進 Developer settings，建立 Fine-grained token。
+2. Repository access 只選這個 repo。
+3. Repositories 權限只開 Commit statuses 的 Read and write。
+4. 設到期日，例如 90 天。
+5. 在 Jenkins 的 Credentials 新增一筆 Secret text，ID 填 `github-status-token`，Secret 貼上 token。
+
+沒設 token 或 token 過期時，建置照常跑，只是不會回報。log 裡會出現 `could not report status to GitHub`。
+
 Jenkins 的設定寫在 `ci/jenkins/casc.yaml`。這個檔案裡有的設定，在網頁上改了也會在 Jenkins 重啟時被蓋回去。要改就改這個檔案。
 
 ---
