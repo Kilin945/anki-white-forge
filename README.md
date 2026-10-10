@@ -146,6 +146,34 @@ Mac：⌘A、⌘S、⌘F 寫完卡片後會自動同步。沒登入 AnkiWeb 時�
 
 ---
 
+## 自動測試（CI）
+
+有兩套 CI，各跑一部分：
+
+| CI | 在哪裡跑 | 跑什麼 |
+|---|---|---|
+| GitHub Actions | GitHub 的 Linux 機器 | pytest |
+| Jenkins | 主控台在 Docker，建置在你的 Mac | pytest、兩支 Anki/Qt 檢查 |
+
+Qt 檢查要用本機的 Anki.app。Docker 裡是 Linux，跑不了 Mac 版 Anki，所以 Jenkins 把建置派給 Mac 工作機。
+
+### 架起本機 Jenkins
+
+需要 Docker、Java 21、Anki.app。
+
+1. 進到 `ci/jenkins/`。
+2. 把 `.env.example` 複製成 `.env`，填密碼和工作資料夾。
+3. 執行 `docker compose up -d`，啟動主控台。
+4. 執行 `./start-agent.sh`，啟動 Mac 工作機。這個視窗要一直開著。
+5. 打開 `http://localhost:18080`，用 `.env` 的帳號登入。
+6. 在 `anki-white-forge` 按 Build Now。
+
+四個階段都是綠色就成功了。測試結果在該次建置的 Test Result 頁。
+
+Jenkins 的設定寫在 `ci/jenkins/casc.yaml`。這個檔案裡有的設定，在網頁上改了也會在 Jenkins 重啟時被蓋回去。要改就改這個檔案。
+
+---
+
 ## 專案結構
 
 ```
@@ -175,6 +203,8 @@ anki/
 ├── templates/                 # 卡片模板 front.html、back.html、style.css
 ├── tests/                     # pytest、conftest.py、兩支 Anki/Qt 相容性檢查
 ├── .github/workflows/         # GitHub Actions：每次 push 跑 pytest
+├── ci/jenkins/                # 本機 Jenkins：Docker 主控台、Mac 工作機啟動腳本
+├── Jenkinsfile                # Jenkins 的建置流程
 ├── tools/                     # 偶爾才跑的工具
 ├── docs/                      # README 用的圖、設計文件
 ├── add_word.py                # CLI 新增單字

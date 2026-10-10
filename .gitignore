@@ -21,3 +21,6 @@ docs/recap/
 translation_terms.json
 
 example_index.json*
+
+# Jenkins 本機設定（密碼）
+ci/jenkins/.env

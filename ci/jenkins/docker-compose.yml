@@ -1,0 +1,15 @@
+services:
+  jenkins:
+    build: .
+    image: anki-jenkins
+    container_name: anki-jenkins
+    env_file: .env
+    ports:
+      # 只綁本機；避開 Tomcat 等服務常用的 8080
+      - "127.0.0.1:18080:8080"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+    restart: unless-stopped
+
+volumes:
+  jenkins_home:

@@ -1,0 +1,45 @@
+# Jenkins 主控台的全部設定。${...} 由 docker-compose 從 .env 帶進來，密碼不寫在這裡。
+jenkins:
+  systemMessage: "anki-white-forge CI"
+  # 主控台本身不跑建置，一律派給工作機（Docker 裡是 Linux，跑不了 Mac 的 Anki）
+  numExecutors: 0
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "${JENKINS_ADMIN_ID}"
+          password: "${JENKINS_ADMIN_PASSWORD}"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+  nodes:
+    - permanent:
+        name: "mac"
+        labelString: "mac anki"
+        numExecutors: 1
+        remoteFS: "${MAC_AGENT_WORKDIR}"
+        launcher:
+          inbound:
+            webSocket: true
+        retentionStrategy: "always"
+
+unclassified:
+  location:
+    url: "http://localhost:18080/"
+
+jobs:
+  - script: >
+      pipelineJob('anki-white-forge') {
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote { url('https://github.com/Kilin945/anki-white-forge.git') }
+                branch('*/${JENKINS_BRANCH}')
+              }
+            }
+            scriptPath('Jenkinsfile')
+            lightweight(true)
+          }
+        }
+      }
