@@ -52,6 +52,11 @@ Test report: ${env.BUILD_URL}testReport/
   }
 }
 
+// 回報到 GitHub 的說明文字；量到覆蓋率時附在後面
+def withCoverage(String text) {
+  return env.COVERAGE_PCT ? "${text} · coverage ${env.COVERAGE_PCT}%" : text
+}
+
 pipeline {
   agent { label 'mac' }
 
@@ -68,21 +73,36 @@ pipeline {
     stage('Install') {
       steps { sh 'uv sync --locked' }
     }
+    // 三組測試的覆蓋率記在同一份 .coverage：pytest 開頭會清掉上次的紀錄，兩支 Qt 檢查用 --append 累加
     stage('Unit tests') {
-      steps { sh 'uv run pytest -q --junitxml=reports/pytest.xml' }
+      steps { sh 'uv run pytest -q --junitxml=reports/pytest.xml --cov=addon --cov=core --cov-report=' }
       post { always { junit 'reports/pytest.xml' } }
     }
     stage('Qt compat') {
-      steps { sh 'uv run python tests/check_qt_compat.py' }
+      steps { sh 'uv run coverage run --append --source=addon,core tests/check_qt_compat.py' }
     }
     stage('Qt runtime') {
-      steps { sh 'uv run python tests/check_qt_runtime.py' }
+      steps { sh 'uv run coverage run --append --source=addon,core tests/check_qt_runtime.py' }
+    }
+    stage('Coverage') {
+      steps {
+        sh 'uv run coverage xml -o reports/coverage.xml'
+        script {
+          env.COVERAGE_PCT = sh(script: 'uv run coverage report --format=total', returnStdout: true).trim()
+        }
+        // 低於 85% 就把建置標成失敗（會回報 ✗ 並寄信）
+        recordCoverage(
+          tools: [[parser: 'COBERTURA', pattern: 'reports/coverage.xml']],
+          sourceCodeRetention: 'EVERY_BUILD',
+          qualityGates: [[threshold: 85.0, metric: 'LINE', baseline: 'PROJECT', criticality: 'FAILURE']]
+        )
+      }
     }
   }
 
   post {
-    success { script { reportToGitHub('success', 'pytest + Anki Qt checks passed') } }
-    unsuccessful { script { reportToGitHub('failure', 'pytest or Anki Qt checks failed') } }
+    success { script { reportToGitHub('success', withCoverage('pytest + Anki Qt checks passed')) } }
+    unsuccessful { script { reportToGitHub('failure', withCoverage('build failed')) } }
     // 只在失敗、以及從失敗恢復時寄信；平常的成功不寄
     failure { script { notifyByEmail('failed') } }
     fixed { script { notifyByEmail('is back to normal') } }

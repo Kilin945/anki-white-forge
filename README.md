@@ -213,6 +213,19 @@ Jenkins 會把結果寫到 GitHub 上每個 commit 旁邊。建置開始時是�
 
 沒設 token 或 token 過期時，建置照常跑，只是不會回報。log 裡會出現 `could not report status to GitHub`。
 
+### 測試覆蓋率
+
+覆蓋率是「跑測試時，程式碼有幾成被執行到」。只在 Jenkins 量，因為要把兩支 Qt 檢查也算進去。
+
+每次建置會：
+
+1. 累計 pytest 和兩支 Qt 檢查跑到的程式碼。
+2. 在建置頁產生覆蓋率報告。點進檔案，看得到哪幾行沒被測到。
+3. 低於 85% 就算建置失敗。
+4. 把百分比附在 GitHub 上 jenkins 那一行，例如 `coverage 90%`。
+
+GitHub Actions 不量覆蓋率。它跑不了 Qt 檢查，只量 pytest 的話數字會偏低，跟 Jenkins 的對不上。
+
 ### 建置失敗時收到 Email
 
 建置失敗時會寄信。從失敗恢復成功時，也會寄一次。平常的成功不寄。

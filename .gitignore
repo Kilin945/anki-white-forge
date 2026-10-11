@@ -24,3 +24,8 @@ example_index.json*
 
 # Jenkins 本機設定（密碼）
 ci/jenkins/.env
+
+# 覆蓋率量測產生的檔案
+.coverage
+.coverage.*
+reports/
