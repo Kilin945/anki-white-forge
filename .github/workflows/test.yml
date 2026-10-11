@@ -7,11 +7,15 @@ on:
 
 jobs:
   pytest:
-    runs-on: ubuntu-latest
+    # 寫死 Ubuntu 版本；ubuntu-latest 會被 GitHub 換到新版
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      # 第三方步驟寫死 commit 編號（標籤可能被移走），版本號寫在註解；升版要手動改
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # 版本都不寫在這裡：uv 版本讀 pyproject.toml 的 required-version，Python 版本讀 .python-version
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          version-file: pyproject.toml
       # --locked: uv.lock 跟 pyproject.toml 對不上就失敗，不偷偷改版本
       - run: uv sync --locked
       - run: uv run pytest -q
