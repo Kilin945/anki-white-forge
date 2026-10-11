@@ -18,3 +18,7 @@ dev = [
 testpaths = ["tests"]
 # "." 讓測試 import 得到 addon／core／根目錄的 CLI；"tools" 讓 test_script_imports 與 test_zh_chars import 得到 check_simplified
 pythonpath = [".", "tools"]
+
+[tool.uv]
+# uv 版本寫死，本機、Jenkins 由 uv 自己檢查，GitHub Actions 的 setup-uv 照這個版本安裝
+required-version = "==0.13.0"
