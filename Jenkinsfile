@@ -28,6 +28,30 @@ def sendStatus(String state, String description) {
   }
 }
 
+// 寄信給 NOTIFY_EMAIL（casc.yaml 的全域變數，信箱不寫在這裡）。
+// 沒設收件人就不寄；寄信失敗只印一行，不讓建置本身失敗。
+def notifyByEmail(String headline) {
+  if (!env.NOTIFY_EMAIL?.trim()) {
+    echo 'NOTIFY_EMAIL is not set, skip email'
+    return
+  }
+  def commit = env.GIT_COMMIT ?: 'unknown'
+  try {
+    mail(
+      to: env.NOTIFY_EMAIL,
+      subject: "[anki-white-forge] Build #${env.BUILD_NUMBER} ${headline}",
+      body: """Build #${env.BUILD_NUMBER} ${headline}.
+
+Commit: https://github.com/Kilin945/anki-white-forge/commit/${commit}
+Build log: ${env.BUILD_URL}console
+Test report: ${env.BUILD_URL}testReport/
+"""
+    )
+  } catch (err) {
+    echo "WARNING: could not send email: ${err}"
+  }
+}
+
 pipeline {
   agent { label 'mac' }
 
@@ -59,5 +83,8 @@ pipeline {
   post {
     success { script { reportToGitHub('success', 'pytest + Anki Qt checks passed') } }
     unsuccessful { script { reportToGitHub('failure', 'pytest or Anki Qt checks failed') } }
+    // 只在失敗、以及從失敗恢復時寄信；平常的成功不寄
+    failure { script { notifyByEmail('failed') } }
+    fixed { script { notifyByEmail('is back to normal') } }
   }
 }

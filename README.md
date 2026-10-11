@@ -213,6 +213,20 @@ Jenkins 會把結果寫到 GitHub 上每個 commit 旁邊。建置開始時是�
 
 沒設 token 或 token 過期時，建置照常跑，只是不會回報。log 裡會出現 `could not report status to GitHub`。
 
+### 建置失敗時收到 Email
+
+建置失敗時會寄信。從失敗恢復成功時，也會寄一次。平常的成功不寄。
+
+寄信用 iCloud 的寄信伺服器。在 `ci/jenkins/.env` 填三個值：
+
+1. `SMTP_USERNAME`：你的 iCloud 信箱，信會從這裡寄出。
+2. `SMTP_PASSWORD`：Apple 帳號的 App 專用密碼，不是登入密碼。到 account.apple.com 的「登入與安全性」產生。
+3. `NOTIFY_EMAIL`：收件人。
+
+填完執行 `docker compose up -d --force-recreate`。
+
+三個值沒填就不寄信，建置照常跑。
+
 Jenkins 的設定寫在 `ci/jenkins/casc.yaml`。這個檔案裡有的設定，在網頁上改了也會在 Jenkins 重啟時被蓋回去。要改就改這個檔案。
 
 ---

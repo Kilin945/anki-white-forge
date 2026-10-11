@@ -22,10 +22,28 @@ jenkins:
           inbound:
             webSocket: true
         retentionStrategy: "always"
+  # 失敗通知的收件人做成全域變數，Jenkinsfile 只讀變數，信箱不進 git
+  globalNodeProperties:
+    - envVars:
+        env:
+          - key: "NOTIFY_EMAIL"
+            value: "${NOTIFY_EMAIL:-}"
 
 unclassified:
   location:
     url: "http://localhost:18080/"
+    # 寄件人；iCloud 只接受用登入的那個帳號當寄件人
+    adminAddress: "anki-white-forge CI <${SMTP_USERNAME:-}>"
+  mailer:
+    # iCloud 的寄信伺服器：587 port、STARTTLS。密碼是 Apple 帳號的 App 專用密碼
+    smtpHost: "smtp.mail.me.com"
+    smtpPort: "587"
+    useTls: true
+    useSsl: false
+    charset: "UTF-8"
+    authentication:
+      username: "${SMTP_USERNAME:-}"
+      password: "${SMTP_PASSWORD:-}"
   gitHubPluginConfig:
     # GitHub 送來的 webhook 要用這組密鑰驗簽名，驗不過就丟掉。
     # 密鑰本身在網頁的 Credentials 裡（id 如下），不寫在這個檔案。
