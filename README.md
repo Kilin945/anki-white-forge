@@ -166,9 +166,9 @@ Qt 檢查要用本機的 Anki.app。Docker 裡是 Linux，跑不了 Mac 版 Anki
 3. 執行 `docker compose up -d`，啟動主控台。
 4. 執行 `./install-agent-service.sh`，讓 Mac 工作機登入後自動啟動。
 5. 打開 `http://localhost:18080`，用 `.env` 的帳號登入。
-6. 在 `anki-white-forge` 按 Build Now。
+6. 打開 `anki-white-forge`。Jenkins 會自動找出 GitHub 上的每個分支，各自建置一次。
 
-四個階段都是綠色就成功了。測試結果在該次建置的 Test Result 頁。
+每個階段都是綠色就成功了。測試結果在該次建置的 Test Result 頁。
 
 不想裝成自動啟動的話，第 4 步改成執行 `./start-agent.sh`。這個視窗要一直開著。
 
@@ -176,10 +176,12 @@ Qt 檢查要用本機的 Anki.app。Docker 裡是 Linux，跑不了 Mac 版 Anki
 
 ### 什麼時候會自動建置
 
+每個分支各自建置，建置紀錄也分開放。分支在 GitHub 上刪掉後，Jenkins 也會把它收掉。
+
 有兩種觸發方式：
 
-- push 到 GitHub 後，GitHub 用 webhook 通知 Jenkins，幾秒內開始建置。
-- Jenkins 每 15 分鐘檢查一次 GitHub。Docker 或 Tailscale 沒開時漏掉的 push，會在這時補跑。
+- push 任何分支到 GitHub 後，GitHub 用 webhook 通知 Jenkins，幾秒內開始建置那個分支。
+- Jenkins 每 15 分鐘掃描一次 GitHub 的分支清單。Docker 或 Tailscale 沒開時漏掉的 push，會在這時補跑。
 
 webhook 要讓 GitHub 連得到你的 Mac。做法是用 Tailscale Funnel，只開放 `/github-webhook/` 這一條路徑：
 
@@ -203,13 +205,16 @@ GitHub 那邊的設定：
 
 Jenkins 會把結果寫到 GitHub 上每個 commit 旁邊。建置開始時是黃點，結束時改成 ✓ 或 ✗。點開可以看到 GitHub Actions 和 jenkins 各一行。
 
-這要一把 GitHub token：
+這要一把 GitHub token。Jenkins 也用它查 GitHub 上有哪些分支。
 
 1. 到 GitHub 的 Settings，進 Developer settings，建立 Fine-grained token。
 2. Repository access 只選這個 repo。
-3. Repositories 權限只開 Commit statuses 的 Read and write。
+3. Repositories 權限開兩項：Commit statuses 選 Read and write，Contents 選 Read-only。
 4. 設到期日，例如 90 天。
 5. 在 Jenkins 的 Credentials 新增一筆 Secret text，ID 填 `github-status-token`，Secret 貼上 token。
+6. 再新增一筆 Username with password，ID 填 `github-scan`。Username 填 GitHub 帳號，Password 貼上同一把 token。查分支的外掛只收這種格式。
+
+token 到期換新時，這兩筆都要更新。
 
 沒設 token 或 token 過期時，建置照常跑，只是不會回報。log 裡會出現 `could not report status to GitHub`。
 

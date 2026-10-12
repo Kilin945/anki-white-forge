@@ -52,27 +52,30 @@ unclassified:
 
 jobs:
   - script: >
-      pipelineJob('anki-white-forge') {
-        properties {
-          pipelineTriggers {
-            triggers {
-              // 主要：GitHub push 後經 webhook 通知
-              githubPush()
-              // 補漏：Docker 沒開時漏掉的 push，開機後由輪詢補跑
-              pollSCM { scmpoll_spec('H/15 * * * *') }
-            }
-          }
-        }
-        definition {
-          cpsScm {
-            scm {
-              git {
-                remote { url('https://github.com/Kilin945/anki-white-forge.git') }
-                branch('*/${JENKINS_BRANCH}')
+      multibranchPipelineJob('anki-white-forge') {
+        // 每個分支各自建置；GitHub push 後經 webhook 通知（github-scan 憑證用來查分支清單）
+        branchSources {
+          branchSource {
+            source {
+              github {
+                id('anki-white-forge')
+                repoOwner('Kilin945')
+                repository('anki-white-forge')
+                repositoryUrl('https://github.com/Kilin945/anki-white-forge')
+                configuredByUrl(false)
+                credentialsId('github-scan')
+                traits {
+                  // 只找分支、不另外建 PR 的建置：PR 建置測的是「合併後」的 commit，
+                  // 回報的 jenkins 狀態會掛在 PR 看不到的那個 commit 上
+                  gitHubBranchDiscovery { strategyId(3) }
+                  // 外掛預設會自己再回報一次（continuous-integration/jenkins/branch），
+                  // 跟 Jenkinsfile 回報的 jenkins 重複，關掉只留 jenkins
+                  githubSkipNotifications()
+                }
               }
             }
-            scriptPath('Jenkinsfile')
-            lightweight(true)
           }
         }
+        // 補漏：Docker 沒開時漏掉的 push，開機後由定期掃描補跑
+        triggers { periodicFolderTrigger { interval('15m') } }
       }

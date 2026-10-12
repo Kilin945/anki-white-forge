@@ -1,7 +1,7 @@
 // Jenkins 的建置流程。Qt 兩支檢查要用本機的 Anki.app，所以只能派給 Mac 工作機。
 
 // 把結果寫到 GitHub 上這個 commit 旁邊（commit status）。
-// token 在 Jenkins Credentials（id: github-status-token），只有這個 repo 的 Commit statuses 權限。
+// token 在 Jenkins Credentials（id: github-status-token），只有這個 repo 的 Commit statuses 讀寫和 Contents 唯讀權限。
 // 回報失敗（沒設 token、token 過期、連不上 GitHub）只印一行，不讓建置本身失敗。
 def reportToGitHub(String state, String description) {
   try {

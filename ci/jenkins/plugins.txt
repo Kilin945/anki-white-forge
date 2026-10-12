@@ -11,6 +11,8 @@ junit:1436.v04461a_d56ca_f
 credentials-binding:728.v902a_273b_8947
 timestamper:1.30
 coverage:3.3393.v529418274711
+github-branch-source:1983.vfa_27ed961853
+skip-notifications-trait:625.vb_f5e11e9b_158
 
 # 上面那些外掛需要的相依外掛
 antisamy-markup-formatter:173.v680e3a_b_69ff3
@@ -44,6 +46,7 @@ jakarta-mail-api:2.1.5-1
 jakarta-xml-bind-api:4.0.9-19.v2b_a_5b_44d9a_1c
 javax-activation-api:1.2.0-8
 jaxb:2.3.9-143.v5979df3304e6
+jjwt-api:0.13.0-141.vd58b_a_9592b_6c
 joda-time-api:2.15.0-208.v6b_084e7a_d9f0
 jquery3-api:3.7.1-687.v68d468e40b_30
 json-api:20260814-226.v20f9685d642c
