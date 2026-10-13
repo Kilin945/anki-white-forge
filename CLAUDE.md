@@ -101,6 +101,15 @@ Anki 自動化單字系統，牌組 `My Daily English`、筆記類型 `English_W
 - commit type 用 conventional 風格：`feat` / `fix` / `docs` / `style` / `refactor` / `perf` / `chore` 等。commit 標題與內文依全域規則用**英文**（Workspace 專案 = 練英文 commit；2026-08-25 起）
 - commit 前先跑 Pre-push Checklist
 - 不確定要不要 commit 時，問使用者
+- **分支與 PR 流程（2026-10-13）** <!-- @assert:cmd gh api repos/Kilin945/anki-white-forge/branches/main/protection --jq .enforce_admins.enabled | grep -q true -->：main 有分支保護——必須透過 PR、`pytest` 和 `jenkins` 都 ✓ 才能合併、管理員也不能跳過、不需要別人核准。所以**任何改動都不能直接 push 到 main**，只改 CLAUDE.md 或 README 也一樣，直接推會被 GitHub 拒絕。流程：
+  1. 從最新的 main 切分支：`git switch main`、`git pull`、`git switch -c <type>/<簡短描述>`。type 跟 commit type 一樣（`fix/`、`feat/`、`docs/`…）。
+  2. commit（照 `commit-message` skill）、`git push -u origin <分支>`。
+  3. 開 PR：`gh pr create --base main`。PR 內文和 review 怎麼寫，見 `commit-message` skill。
+  4. 等 `gh pr checks` 兩個都 ✓。GitHub Actions 只在開 PR 和 push 到 main 時跑，所以 `pytest` 要開了 PR 才會出現。
+  5. Claude 在 PR 上留 review（一般留言，內容先給使用者確認）。
+  6. 使用者確認後合併，一律用 **Squash and merge**。GitHub 會自動刪掉遠端分支；本機要 `git switch main`、`git pull`、`git branch -D <分支>`（squash 後 git 認不出分支已合併，小寫 `-d` 會拒絕）。
+
+  **使用者正在練這套流程**：push、開 PR、合併這三步，預設由使用者自己打指令或點網頁，Claude 給指令（一行一個）、查狀態；使用者明確叫 Claude 做才代做。`jenkins` 一直沒出現時，先查 webhook 送達紀錄：2026-10-13 合併時 webhook 連兩次 `EOF` 失敗，Jenkins 靠每 15 分鐘的掃描，11 分鐘後才補跑；要馬上補跑，Jenkins 上按 **Scan Repository Now**，或在 GitHub 的 webhook 紀錄對那筆按 **Redeliver**。判定失效：分支保護被關掉或改了（上面的 assert 會失敗），或 main 上又出現不是經過 PR 進來的 commit（squash 合併的標題結尾有 `(#數字)`，沒有的就是直接推的）。
 
 ## Running
 
