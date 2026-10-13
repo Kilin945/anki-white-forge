@@ -187,7 +187,7 @@ def test_cli_passes_hint_to_translation():
     with patch.object(backfill_words, "llm_sentence", lambda w, association="", photo="": GOOD), \
          patch.object(backfill_words, "llm_translate",
                       lambda w, s, sense="": seen.update(word=sense) or "瀑布模型"), \
-         patch.object(backfill_words, "make_audio", lambda *a, **k: None), \
+         patch.object(backfill_words, "try_make_audio", lambda *a, **k: True), \
          patch.object(backfill_words, "anki", MagicMock()):
         backfill_words.process_note(note)
     assert seen == {"word": SENSE}

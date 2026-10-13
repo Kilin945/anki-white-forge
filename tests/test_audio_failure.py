@@ -128,3 +128,56 @@ class TestCmdSRefillsEmptyAudio:
     """⌘S 判斷要不要補句音的純函式：⌘A 留空的 Audio 會被補。"""
     def test_empty_sentence_audio_is_refilled(self):
         assert addon._text._need_sentence_audio("", "The ladder leans on the wall.", False)
+
+
+# ── CLI（backfill_words.py／add_word.py 共用 core.tts.try_make_audio）─────────
+
+import core.tts
+
+
+class TestTryMakeAudio:
+    def test_failure_returns_false(self):
+        with patch.object(core.tts, "make_audio", side_effect=RuntimeError("429")):
+            assert core.tts.try_make_audio("hi", "/tmp/x.mp3") is False
+
+    def test_success_returns_true(self):
+        with patch.object(core.tts, "make_audio", return_value=None):
+            assert core.tts.try_make_audio("hi", "/tmp/x.mp3") is True
+
+
+def _run_cli(audio_ok):
+    import backfill_words
+    note = {"noteId": 1, "fields": {k: {"value": ""} for k in (
+        "Front", "Sentence", "Image_Prompt", "Audio", "Front_Audio",
+        "Translation", "Sentence_CN", "Association")}}
+    note["fields"]["Front"]["value"] = "ladder"
+    sent = {}
+    def fake_anki(action, **kw):
+        if action == "updateNoteFields":
+            sent.update(kw["note"]["fields"])
+    with patch.object(backfill_words, "anki", fake_anki), \
+         patch.object(backfill_words, "llm_pick_sense", return_value=""), \
+         patch.object(backfill_words, "llm_image_query", return_value="ladder"), \
+         patch.object(backfill_words, "_do_image", return_value=("ladder_img.jpg", True, "", "Ladder.", "pexels:1")), \
+         patch.object(backfill_words, "llm_sentence", return_value="The ladder leans on the wall."), \
+         patch.object(backfill_words, "llm_translate", return_value="梯子"), \
+         patch.object(backfill_words, "try_make_audio", return_value=audio_ok):
+        backfill_words.process_note(note)
+    return sent
+
+
+class TestCliBackfillAudioFailure:
+    def test_other_fields_are_written(self):
+        sent = _run_cli(audio_ok=False)
+        assert sent["Sentence"] == "The ladder leans on the wall."
+        assert "<img" in sent["Image_Prompt"]
+        assert sent["Translation"] == "梯子"
+
+    def test_audio_fields_not_written(self):
+        sent = _run_cli(audio_ok=False)
+        assert "Audio" not in sent and "Front_Audio" not in sent
+
+    def test_audio_ok_writes_both_fields(self):
+        sent = _run_cli(audio_ok=True)
+        assert sent["Audio"] == "[sound:ladder_tts.mp3]"
+        assert sent["Front_Audio"] == "[sound:ladder_word.mp3]"
