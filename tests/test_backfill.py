@@ -122,13 +122,19 @@ class TestProcessNote:
         assert status == "skipped"
 
 
+def _helper_error(r):
+    """語音小程式失敗時，把它最後一行錯誤（例如微軟回的狀態碼）帶進測試失敗訊息。"""
+    lines = r.stderr.strip().splitlines()
+    return lines[-1] if lines else f"exit {r.returncode}, no stderr"
+
+
 class TestGttsHelper:
     def test_single_mode(self, tmp_path):
         import subprocess
         fp = str(tmp_path / "test.mp3")
         r = subprocess.run(["uv", "run", "python", "_gtts_helper.py", "hello", fp],
                            capture_output=True, text=True, timeout=20, cwd=_REPO)
-        assert r.returncode == 0 and os.path.exists(fp)
+        assert r.returncode == 0 and os.path.exists(fp), _helper_error(r)
 
     def test_batch_mode(self, tmp_path):
         import subprocess
@@ -136,7 +142,7 @@ class TestGttsHelper:
         items = json.dumps([{"text": "hello", "filepath": f1}, {"text": "world", "filepath": f2}])
         r = subprocess.run(["uv", "run", "python", "_gtts_helper.py", "--batch", items],
                            capture_output=True, text=True, timeout=30, cwd=_REPO)
-        assert r.returncode == 0 and os.path.exists(f1) and os.path.exists(f2)
+        assert r.returncode == 0 and os.path.exists(f1) and os.path.exists(f2), _helper_error(r)
 
 
 class TestImageQuery:
