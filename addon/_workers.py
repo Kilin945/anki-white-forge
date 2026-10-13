@@ -174,6 +174,11 @@ class Worker(QThread):
                 self._make_audio_batch(audio_items)
                 self.step.emit("audio", "ok" if sentence_ok else "warn",
                                "" if sentence_ok else "skipped: no sentence")
+            except RuntimeError as e:
+                # 語音失敗照樣建卡：兩個語音欄位留空，⌘S 會補（issue #2）
+                _log.warning("audio rejected word=%s reason=audio-failed detail=%s", word, e)
+                audio_filename = front_audio_filename = ""
+                self.step.emit("audio", "warn", "audio failed")
             finally:
                 if trans_thread:
                     trans_thread.join()    # always join so the thread doesn't leak on audio failure
@@ -527,6 +532,12 @@ class BackfillWorker(QThread):
             if audio_batch:
                 self._w._make_audio_batch(audio_batch)
                 self.step.emit(note_id, "audio", "ok", "")
+        except RuntimeError as e:
+            # 語音失敗不丟掉這輪生好的其他欄位：語音欄位不寫，下次 ⌘S 再補（issue #2）
+            _log.warning("audio rejected word=%s reason=audio-failed detail=%s", word, e)
+            fields.pop("Audio", None)
+            fields.pop("Front_Audio", None)
+            self.step.emit(note_id, "audio", "warn", "audio failed")
         finally:
             if trans_thread:
                 trans_thread.join()
