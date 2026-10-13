@@ -133,7 +133,7 @@ class TestBackfillWordsOrder:
              patch.object(backfill_words, "llm_image_query", lambda w, d="": "ladder wall"), \
              patch.object(backfill_words, "fetch_image", fake_fetch), \
              patch.object(backfill_words, "llm_translate", lambda w, s, sense="": "梯子"), \
-             patch.object(backfill_words, "make_audio", lambda *a, **k: None), \
+             patch.object(backfill_words, "try_make_audio", lambda *a, **k: True), \
              patch.object(backfill_words, "anki", MagicMock()) as anki:
             backfill_words.process_note(note)
         fields = anki.call_args.kwargs["note"]["fields"] if anki.called else {}

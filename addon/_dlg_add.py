@@ -274,7 +274,7 @@ class AddWordDialog(_BatchDialogMixin, QDialog):
             note["Sentence"]    = data["sentence"]
             note["Image_Prompt"] = data["image_field"]
             note["Audio"]       = f'[sound:{data["audio_filename"]}]' if data["audio_filename"] else ""
-            note["Front_Audio"] = f'[sound:{data["front_audio_filename"]}]'
+            note["Front_Audio"] = f'[sound:{data["front_audio_filename"]}]' if data["front_audio_filename"] else ""
             if "Translation" in note:
                 note["Translation"] = data.get("translation", "")
             if "Sentence_CN" in note:

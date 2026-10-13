@@ -9,7 +9,7 @@ from spellchecker import SpellChecker
 
 from core.anki import anki, DECK_NAME, MODEL_NAME
 from core.llm import llm_sentence, llm_image_query, llm_pick_sense, llm_translate, llm_translate_sentence, engine_description
-from core.tts import make_audio, VOICE_WORD, VOICE_SENTENCE
+from core.tts import try_make_audio, VOICE_WORD, VOICE_SENTENCE
 from core.image import fetch_image
 from core.picture import find_picture
 from core.text import image_html
@@ -134,9 +134,10 @@ def main():
 
     audio_filename = f"{word}_tts.mp3"
     front_audio_filename = f"{word}_word.mp3"
-    make_audio(sentence, os.path.join(MEDIA_DIR, audio_filename), voice=VOICE_SENTENCE)
-    make_audio(word, os.path.join(MEDIA_DIR, front_audio_filename), voice=VOICE_WORD)
-    print(f"  Audio ✓")
+    # 語音失敗照樣建卡：語音欄位留空，⌘S 會補（issue #2）
+    audio_ok = try_make_audio(sentence, os.path.join(MEDIA_DIR, audio_filename), voice=VOICE_SENTENCE)
+    front_ok = try_make_audio(word, os.path.join(MEDIA_DIR, front_audio_filename), voice=VOICE_WORD)
+    print(f"  Audio {'✓' if audio_ok and front_ok else '⚠️ failed — run ⌘S later to fill it in'}")
 
     trans_thread.join()
     translation = translation_result[0]
@@ -153,8 +154,8 @@ def main():
         fields = {
             "Front": word, "Association": association,
             "Sentence": sentence, "Image_Prompt": image_field,
-            "Audio": f"[sound:{audio_filename}]",
-            "Front_Audio": f"[sound:{front_audio_filename}]",
+            "Audio": f"[sound:{audio_filename}]" if audio_ok else "",
+            "Front_Audio": f"[sound:{front_audio_filename}]" if front_ok else "",
             "Translation": translation,
         }
         if has_cn:

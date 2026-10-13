@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.anki import anki, DECK_NAME
 from core.text import strip_html, is_placeholder, has_image, sentence_usable, image_alt, image_html
 from core.llm import llm_sentence, llm_image_query, llm_pick_sense, llm_translate, engine_description
-from core.tts import make_audio, VOICE_WORD, VOICE_SENTENCE
+from core.tts import try_make_audio, VOICE_WORD, VOICE_SENTENCE
 from core.image import fetch_image
 from core.picture import find_picture
 
@@ -30,15 +30,15 @@ def _do_image(word, img_query, sense=""):
 
 
 def _do_sentence_audio(word, sentence):
+    """回檔名；語音失敗回 ""（欄位不寫，下次再補）。"""
     fname = f"{word}_tts.mp3"
-    make_audio(sentence, os.path.join(MEDIA_DIR, fname), voice=VOICE_SENTENCE)
-    return fname
+    return fname if try_make_audio(sentence, os.path.join(MEDIA_DIR, fname), voice=VOICE_SENTENCE) else ""
 
 
 def _do_word_audio(word):
+    """回檔名；語音失敗回 ""（欄位不寫，下次再補）。"""
     fname = f"{word}_word.mp3"
-    make_audio(word, os.path.join(MEDIA_DIR, fname), voice=VOICE_WORD)
-    return fname
+    return fname if try_make_audio(word, os.path.join(MEDIA_DIR, fname), voice=VOICE_WORD) else ""
 
 
 def note_complete(n):
@@ -130,12 +130,16 @@ def process_note(note):
             futures["translation"] = pool.submit(llm_translate, word, sentence, sense=current_assoc)
 
         if "audio" in futures:
-            fields["Audio"] = f"[sound:{futures['audio'].result()}]"
-            lines.append(f"  Audio    : ✓ [Ava]")
+            fname = futures["audio"].result()
+            if fname:
+                fields["Audio"] = f"[sound:{fname}]"
+            lines.append(f"  Audio    : {'✓ [Ava]' if fname else '⚠ failed'}")
 
         if "front_audio" in futures:
-            fields["Front_Audio"] = f"[sound:{futures['front_audio'].result()}]"
-            lines.append(f"  FrontAud : ✓ [Andrew]")
+            fname = futures["front_audio"].result()
+            if fname:
+                fields["Front_Audio"] = f"[sound:{fname}]"
+            lines.append(f"  FrontAud : {'✓ [Andrew]' if fname else '⚠ failed'}")
 
         if "translation" in futures:
             trans = futures["translation"].result()
