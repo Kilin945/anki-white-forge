@@ -59,7 +59,7 @@ def add_cards(n):
             else:
                 raise
     print(f"Added {added} test card(s)" + (f", skipped {skipped} duplicate(s)" if skipped else ""))
-    print(f"→ 開 Anki 按 ⌘S(Complete Missing Cards),它們(Front 以 zztest 開頭)就會出現。")
+    print("→ 開 Anki 按 ⌘S(Complete Missing Cards),它們(Front 以 zztest 開頭)就會出現。")
 
 
 def clean():

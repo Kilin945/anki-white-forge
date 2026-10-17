@@ -3,7 +3,6 @@ import os
 
 _REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))   # tests/ → repo 根目錄
 import json
-import pytest
 from unittest.mock import patch
 
 from core.text import strip_html, normalize, is_placeholder, has_image

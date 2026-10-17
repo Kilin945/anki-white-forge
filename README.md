@@ -152,8 +152,10 @@ Mac：⌘A、⌘S、⌘F 寫完卡片後會自動同步。沒登入 AnkiWeb 時�
 
 | CI | 在哪裡跑 | 跑什麼 |
 |---|---|---|
-| GitHub Actions | GitHub 的 Linux 機器 | pytest |
-| Jenkins | 主控台在 Docker，建置在你的 Mac | pytest、兩支 Anki/Qt 檢查 |
+| GitHub Actions | GitHub 的 Linux 機器 | ruff、pytest |
+| Jenkins | 主控台在 Docker，建置在你的 Mac | ruff、pytest、兩支 Anki/Qt 檢查 |
+
+ruff 是靜態檢查：不執行程式，只讀程式碼，抓沒定義的名字、沒用到的 import 和變數。本機跑 `uv run ruff check .`。
 
 Qt 檢查要用本機的 Anki.app。Docker 裡是 Linux，跑不了 Mac 版 Anki，所以 Jenkins 把建置派給 Mac 工作機。
 
@@ -277,7 +279,7 @@ anki/
 │   └── _sec_*.py              #   ⌘F 面板的五個區塊
 ├── templates/                 # 卡片模板 front.html、back.html、style.css
 ├── tests/                     # pytest、conftest.py、兩支 Anki/Qt 相容性檢查
-├── .github/workflows/         # GitHub Actions：每次 push 跑 pytest
+├── .github/workflows/         # GitHub Actions：每次 push 跑 ruff 和 pytest
 ├── ci/jenkins/                # 本機 Jenkins：Docker 主控台、Mac 工作機啟動與自動啟動腳本
 ├── Jenkinsfile                # Jenkins 的建置流程
 ├── tools/                     # 偶爾才跑的工具

@@ -1,7 +1,6 @@
 """擋簡體：簡體獨有字表（core／addon 兩份 KEEP-IN-SYNC）與四個翻譯函式的轉換行為。"""
 import os
 import subprocess
-import sys
 from unittest.mock import patch
 
 import pytest

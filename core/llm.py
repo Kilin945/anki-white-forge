@@ -6,8 +6,9 @@ import threading
 
 from core.examples import examples as _examples
 from core.dispatcher import AllProvidersLimited, Dispatcher
-from core.providers import (GROQ_KEY_PATH, GROQ_MODEL, GeminiProvider,
-                            GroqProvider, _load_groq_client, build_pools)  # GROQ_MODEL/GROQ_KEY_PATH/_load_groq_client 純 re-export — test_backfill.py 依賴,勿刪
+from core.providers import build_pools
+# 純 re-export — test_backfill.py 依賴,勿刪（`as` 同名寫法是跟 ruff 說「這是刻意匯出」）
+from core.providers import GROQ_KEY_PATH as GROQ_KEY_PATH, _load_groq_client as _load_groq_client
 from core.rate_limiter import RateLimitReached
 from core.text import sentence_acceptable, sentence_has_word
 from core.zh_chars import has_simplified, to_traditional

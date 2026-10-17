@@ -273,7 +273,7 @@ class TestDownloadUrlsAndSize:
         assert seen == ["http://o/t1", "http://o/f1"]            # 第二張完全沒被要
 
     def test_oversized_skipped_next_candidate_chosen(self, tmp_path, monkeypatch):
-        seen = self._fake(monkeypatch, {"http://a/big": (200, 2_000_000), "http://a/ok": (200, 6000)})
+        self._fake(monkeypatch, {"http://a/big": (200, 2_000_000), "http://a/ok": (200, 6000)})
         monkeypatch.setattr(img, "SOURCES", [_src("a", [
             {"id": "1", "url": "http://a/big", "alt": ""}, {"id": "2", "url": "http://a/ok", "alt": ""}])])
         assert img.fetch_image("w", str(tmp_path / "o.jpg"), "q", rejects=[])[3] == "a:2"
