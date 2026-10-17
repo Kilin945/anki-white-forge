@@ -73,6 +73,10 @@ pipeline {
     stage('Install') {
       steps { sh 'uv sync --locked' }
     }
+    // 靜態檢查：沒定義的名字、沒用到的 import，不用跑到那行就抓得到；規則在 pyproject.toml
+    stage('Lint') {
+      steps { sh 'uv run ruff check .' }
+    }
     // 三組測試的覆蓋率記在同一份 .coverage：pytest 開頭會清掉上次的紀錄，兩支 Qt 檢查用 --append 累加
     stage('Unit tests') {
       steps { sh 'uv run pytest -q --junitxml=reports/pytest.xml --cov=addon --cov=core --cov-report=' }

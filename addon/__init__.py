@@ -14,10 +14,10 @@ from ._dlg_backfill import BackfillDialog, open_backfill_dialog
 from ._dlg_batch import BatchOperationsDialog, open_batch_operations_dialog
 from ._dlg_terms import open_translation_terms_dialog
 from ._dlg_settings import open_settings_dialog
-# 子模組全部明寫：測試用 addon._text.X 這種路徑找名字，不靠上面 from-import 的間接綁定  # noqa: F401
-from . import (_config, _text, _llm, _images, _batch, _workers, _dlg_add, _dlg_backfill,
-               _sec_translate, _sec_clear_flagged, _sec_duplicates, _sec_long_sentences,
-               _sec_test_cards, _dlg_batch, _dlg_terms, _dlg_settings)
+# 子模組全部明寫：測試用 addon._text.X 這種路徑找名字，不靠上面 from-import 的間接綁定
+from . import (_config, _text, _llm, _images, _batch, _workers, _dlg_add, _dlg_backfill,  # noqa: F401
+               _sec_translate, _sec_clear_flagged, _sec_duplicates, _sec_long_sentences,  # noqa: F401
+               _sec_test_cards, _dlg_batch, _dlg_terms, _dlg_settings)  # noqa: F401
 
 
 # ── menu entries ──────────────────────────────────────────────────────────────

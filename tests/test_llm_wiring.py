@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 
 import core.llm as llm_mod
-from core.dispatcher import AllProvidersLimited, Dispatcher
+from core.dispatcher import AllProvidersLimited
 from core.rate_limiter import RateLimitReached
 
 

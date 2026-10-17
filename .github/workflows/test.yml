@@ -18,4 +18,5 @@ jobs:
           version-file: pyproject.toml
       # --locked: uv.lock 跟 pyproject.toml 對不上就失敗，不偷偷改版本
       - run: uv sync --locked
+      - run: uv run ruff check .
       - run: uv run pytest -q

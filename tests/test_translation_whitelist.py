@@ -254,7 +254,6 @@ class TestHardening:
         assert not os.path.exists(path)
 
     def test_bad_file_backed_up(self, impl):
-        import os
         mod, path = impl
         _write(path, "{oops")
         mod.load_translation_terms(path)

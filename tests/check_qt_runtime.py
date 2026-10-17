@@ -20,7 +20,7 @@
 
 覆蓋面只到「想得到的破法」為止。之後每遇到一種升級踩雷,就往這裡加一條。
 """
-import json, logging, os, pathlib, sys, tempfile, threading, time, types, io
+import json, logging, os, pathlib, sys, tempfile, threading, time, types
 
 APP = pathlib.Path(os.environ.get("ANKI_APP", "/Applications/Anki.app"))
 PKGS = APP / "Contents/Resources/app_packages"
@@ -132,6 +132,9 @@ mw = FakeMw()
 aqt.mw = mw
 sys.path.insert(0, str(REPO))
 import addon
+
+# 跨檢查項共用的視窗：前一項用 globals()["DLG1"] = dlg 存，後一項讀。先宣告讓 ruff 知道名字存在。
+DLG1 = DLG2 = DLG4 = DLG6 = None
 
 # ── stub every outbound call ─────────────────────────────────────────────────
 GATE = threading.Event(); GATE.set()      # held closed to keep a batch running
@@ -645,9 +648,11 @@ def _():
     addon._dlg_add.AddWordDialog._spellcheck = lambda self, w: ("nonword", None)
     hit = click_modal_button("Yes")
     out = DLG4._validate_word_ui("zzqqxx")
+    assert hit, "沒抓到 modal QMessageBox"
     assert out == "zzqqxx", out
     hit2 = click_modal_button("No")
     out2 = DLG4._validate_word_ui("zzqqxx")
+    assert hit2, "沒抓到 modal QMessageBox"
     assert out2 is None, out2
     DLG4.close(); _app.processEvents()
     return f"Yes→{out!r}, No→{out2!r}"
@@ -883,7 +888,7 @@ def _():
         slow.set()
         pump(lambda: addon._batch._batch_busy() is None, 20, "stopped")
         filled = sum(1 for n in mw.col._notes.values() if n["Sentence_CN"])
-        assert filled < 8, f"Stop 沒作用，8 張全翻完了"
+        assert filled < 8, "Stop 沒作用，8 張全翻完了"
         assert tr.status.text().endswith("left."), tr.status.text()
         assert "sync" not in tr.status.text().lower(), tr.status.text()
         panel.close(); _app.processEvents()

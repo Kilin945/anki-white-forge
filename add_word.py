@@ -86,7 +86,7 @@ def main():
     raw_word = sys.argv[1].strip().lower()
     association = sys.argv[2].strip() if len(sys.argv) > 2 else ""
 
-    print(f"\n[0] Validating…")
+    print("\n[0] Validating…")
     word = prompt_word(raw_word)
     if word is None:
         sys.exit(0)
@@ -109,7 +109,7 @@ def main():
     if hint and not association:
         print(f"\n  Sense: {hint}")
 
-    print(f"\n[1] Image…")
+    print("\n[1] Image…")
     img_filename = f"{word}_img_{int(time.time())}.jpg"
     img_query = llm_image_query(word, definition=hint)
     img_path = os.path.join(MEDIA_DIR, img_filename)

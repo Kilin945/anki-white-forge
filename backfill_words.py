@@ -107,7 +107,7 @@ def process_note(note):
             lines.append(f"  Sentence : {sentence[:80]}")
         else:
             sentence = f"Please add an example sentence for '{word}'."
-            lines.append(f"  Sentence : ⚠ LLM failed")
+            lines.append("  Sentence : ⚠ LLM failed")
         fields["Sentence"] = sentence
     else:
         sentence = current_sentence
@@ -149,7 +149,7 @@ def process_note(note):
 
     if fields:
         anki("updateNoteFields", note={"id": note_id, "fields": fields})
-        lines.append(f"  ✓ Updated")
+        lines.append("  ✓ Updated")
 
     with _print_lock:
         print("\n".join(lines) + "\n")

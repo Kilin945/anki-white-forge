@@ -13,7 +13,12 @@ dependencies = [
 dev = [
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
+    "ruff==0.16.10",
 ]
+
+[tool.ruff.lint]
+# 只抓會出錯的寫法（沒定義的名字、沒用到的 import 與變數、語法錯誤），不管排版風格
+select = ["F", "E9"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
