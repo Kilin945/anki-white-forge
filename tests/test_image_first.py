@@ -81,16 +81,16 @@ def _capture(fn, *args, **kw):
 class TestPhotoInSentencePrompt:
     def test_photo_block_present(self):
         p = _capture(llm_mod.llm_sentence, "ladder", "", photo="Ladder against a wall.")
-        assert "Photo description: \"Ladder against a wall.\"" in p
-        assert "Never change the meaning or the setting to fit the photo" in p
+        assert "Picture description: \"Ladder against a wall.\"" in p
+        assert "Write the sentence ABOUT this picture" in p and 'use "ladder" in it' in p
 
     def test_no_photo_no_block(self):
         p = _capture(llm_mod.llm_sentence, "ladder")
-        assert "Photo description" not in p
+        assert "Picture description" not in p
 
     def test_photo_block_before_output_line(self):
         p = _capture(llm_mod.llm_sentence, "ladder", "", photo="A ladder.")
-        assert p.index("Photo description") < p.index("Output only the sentence")
+        assert p.index("Picture description") < p.index("Output only the sentence")
 
 
 class TestImageQueryNoSentence:
