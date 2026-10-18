@@ -70,7 +70,7 @@ def _cmd_a(association):
         seen["pick"] += 1
         return SENSE
     w._pick_sense = pick
-    w._fetch_image = lambda word, definition="": seen.update(image=definition) or ""
+    w._fetch_image = lambda word, definition="": seen.update(image=definition) or '<img src="a.jpg">'
     w._llm_sentence = lambda word, association="", photo="": (
         seen.update(sentence=association) or ("The Logger class is concrete.", "Groq"))
     w._groq_translate = lambda word, s, **kw: "具體"
@@ -145,7 +145,8 @@ class TestCmdS:
     def test_only_image_missing_no_pick(self):
         # 句子已經定了詞義 → 另外選詞義反而可能跟句子對不上
         seen = _cmd_s(_note(sentence="The Logger class is concrete."))
-        assert seen["pick"] == 0 and seen["image"] == ""
+        assert seen["pick"] == 0
+        assert seen["image"] == 'as used in this sentence: "The Logger class is concrete."'   # 圖配卡上那句
 
     def test_only_sentence_missing_no_pick(self):
         seen = _cmd_s(_note(image='<img src="o.jpg" alt="Old.">'))
@@ -162,7 +163,8 @@ def _cli(note):
     with patch.object(backfill_words, "llm_pick_sense", pick), \
          patch.object(backfill_words, "llm_image_query",
                       lambda w, d="": seen.update(image=d) or "code screen"), \
-         patch.object(backfill_words, "fetch_image", lambda w, p, search_query=None, **kw: (False, "", "", "")), \
+         patch.object(backfill_words, "find_picture",
+                      lambda w, p, q, s, **kw: (True, "", "photo", "a:1")), \
          patch.object(backfill_words, "llm_sentence",
                       lambda w, association="", photo="": seen.update(sentence=association)
                       or "The Logger class is concrete."), \
@@ -191,4 +193,5 @@ class TestCli:
 
     def test_only_image_missing_no_pick(self):
         seen = _cli(_cli_note(sentence="The Logger class is concrete."))
-        assert seen["pick"] == 0 and seen["image"] == ""
+        assert seen["pick"] == 0
+        assert seen["image"] == 'as used in this sentence: "The Logger class is concrete."'   # 圖配卡上那句

@@ -458,13 +458,6 @@ def llm_pick_image(word, sense, alts):
     return parse_image_pick(llm(image_pick_prompt(word, sense, alts)), len(alts))
 
 
-def llm_is_tech(word, sense):
-    """這個詞義是不是軟體／電腦概念（最後退路要不要放通用程式畫面）。沒回當作不是。"""
-    reply = llm(f'Is this meaning of the English word "{word}" a software, programming or '
-                f'computer concept: "{sense}"? Answer only YES or NO.')
-    return (reply or "").strip().upper().startswith("YES")
-
-
 def llm_image_query(word, definition=""):
     """Stock-photo search query for the word's meaning — picked BEFORE the sentence
     (句子依圖造，所以這裡不看句子)。詞義優先序與造句相同：提示 → SWE → 日常。"""

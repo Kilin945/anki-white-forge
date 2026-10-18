@@ -22,7 +22,18 @@ from ._images import _image_alt, _image_html
 _log = _lld.get_logger()   # 批次/LLM 事件集中記錄到 logs/addon_llm.log（gitignored）
 
 
-IMAGE_TIMEOUT_SECS = 25    # 挑圖本身最多約 10 秒（core/picture.py PICTURE_BUDGET_SECS），加上子程序啟動的餘裕
+# 找圖沒有時間上限（2026-10-18 使用者決定：寧願等，也不要時間到亂收一張）。helper 自己每一步
+# 有逾時（搜尋 8 秒、挑圖 5 秒、看圖 8 秒、每張卡最多看 6 張），所以不會無限等。
+
+
+def _image_sense(assoc, sentence):
+    """找圖用的詞義：有提示用提示；沒提示但卡上已有真句子 → 圖要配那句（圖文要對上）；
+    都沒有回 ''，由 helper 自己選一次詞義。"""
+    if assoc:
+        return assoc
+    if _sentence_usable(sentence):
+        return f'as used in this sentence: "{_clean_text(sentence)}"'
+    return ""
 
 
 def _short_model(name):
@@ -134,6 +145,17 @@ class Worker(QThread):
             image_field = self._fetch_image(word, definition=hint)
             self.step.emit("image", "ok" if image_field else "warn",
                            "" if image_field else "no image")
+            if not image_field:
+                # 沒有看圖確認過的圖 → 停卡：其他欄位都不生成（2026-10-18 使用者決定，例句要照圖寫，
+                # 沒圖就沒得寫）。卡片只帶單字和提示建進去，下次 ⌘S 從圖開始補。
+                for key in ("sentence", "translation", "sentence_cn", "audio"):
+                    self.step.emit(key, "warn", "")
+                self.finished.emit({
+                    "word": word, "association": self.association, "sentence": "",
+                    "image_field": "", "translation": "", "sentence_cn": "",
+                    "audio_filename": "", "front_audio_filename": "",
+                })
+                return
             photo = _image_alt(image_field)
 
             _set_phase("Sentence")
@@ -206,7 +228,8 @@ class Worker(QThread):
     # ── helpers ──────────────────────────────────────────────────────────────
 
     def _run_helper(self, cmd, timeout):
-        """跑 helper，stderr 的 PROGRESS 行即時轉成畫面進度。回 (returncode, stdout, stderr)；逾時 raise。"""
+        """跑 helper，stderr 的 PROGRESS 行即時轉成畫面進度。回 (returncode, stdout, stderr)；
+        timeout 秒內沒結束就殺掉並 raise，None＝不限。"""
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         out, err = [], []
         prog = _current_progress()     # 讀 stderr 的是另一條執行緒 → 先抓住這張卡的進度
@@ -350,13 +373,13 @@ class Worker(QThread):
         filepath = os.path.join(self.media_dir, filename)
         cmd = [VENV_PYTHON, IMAGE_SCRIPT]
         if definition:
-            # 有詞義 → helper 走 core/picture.py：LLM 挑＋看圖確認，不對換下一張（會比較久）
+            # 詞義給 helper：LLM 挑＋看圖確認都照它判。沒詞義時 helper 自己選一次，流程一樣
             cmd.extend(["--definition", definition, "--sense", definition])
         cmd.extend(["--query", _llm._llm_image_query(word, definition)])
         cmd.extend(["--", word, filepath])
         try:
-            returncode, stdout, stderr = self._run_helper(cmd, IMAGE_TIMEOUT_SECS if definition else 60)
-        except Exception as e:          # timeout / spawn failure → no image; leave blank for ⌘S to retry
+            returncode, stdout, stderr = self._run_helper(cmd, None)   # 沒有上限，見檔頭說明
+        except Exception as e:          # spawn failure → no image; leave blank for ⌘S to retry
             _log.warning("image rejected word=%s reason=helper-failed error=%r", word, e)
             return ""                   # called synchronously; must not raise, a failure just leaves the image blank
         if returncode != 0:
@@ -457,18 +480,25 @@ class BackfillWorker(QThread):
         assoc = _clean_text(note["fields"].get("Association", {}).get("value", ""))
         # 詞義只選一次：圖和句子都要重做、又沒提示時，先選詞義給兩邊共用。
         # 只缺其中一樣時不選——另一樣已經定了詞義，另外選反而可能對不上。
-        if not assoc and need_sentence and "<img" not in note["fields"]["Image_Prompt"]["value"]:
+        need_image = "<img" not in note["fields"]["Image_Prompt"]["value"]
+        if not assoc and need_sentence and need_image:
             _set_phase("Meaning")
             assoc = self._w._pick_sense(word)
 
-        # 圖先行：圖不依賴句子（依單字＋詞義搜），先補圖，句子再依照片描述造。
-        need_image = "<img" not in note["fields"]["Image_Prompt"]["value"]
+        # 圖先行：先補圖，句子再照圖寫。只缺圖時，圖要配卡上已有的那句（_image_sense）。
         if need_image:
             _set_phase("Image")
-            image_html = self._w._fetch_image(word, definition=assoc)
-            fields["Image_Prompt"] = image_html or ""
+            image_html = self._w._fetch_image(word, definition=_image_sense(assoc, current))
             self.step.emit(note_id, "image", "ok" if image_html else "warn",
                            "" if image_html else "no image")
+            if not image_html:
+                # 沒有看圖確認過的圖 → 停卡：這輪什麼都不寫，其他欄位亮橘等下次 ⌘S 從圖開始
+                # （2026-10-18 使用者決定：例句要照圖寫，沒圖就沒得寫）
+                for key in ("sentence", "translation", "sentence_cn", "audio"):
+                    self.step.emit(note_id, key, "warn", "")
+                self.card_done.emit(note_id)
+                return f"— {word}"
+            fields["Image_Prompt"] = image_html
         photo = _image_alt(fields.get("Image_Prompt") or note["fields"]["Image_Prompt"]["value"])
 
         if need_sentence:

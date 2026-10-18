@@ -9,8 +9,7 @@ from core.anki import anki, DECK_NAME
 from core.text import strip_html, is_placeholder, has_image, sentence_usable, image_alt, image_html
 from core.llm import llm_sentence, llm_image_query, llm_pick_sense, llm_translate, engine_description
 from core.tts import try_make_audio, VOICE_WORD, VOICE_SENTENCE
-from core.image import fetch_image
-from core.picture import find_picture
+from core.picture import find_picture, everyday_sense
 
 MEDIA_DIR = os.path.expanduser("~/Library/Application Support/Anki2/Kilin/collection.media")
 MAX_WORKERS = 4
@@ -18,15 +17,22 @@ _print_lock = threading.Lock()
 
 
 def _do_image(word, img_query, sense=""):
-    """有詞義就走 core/picture.py 挑圖（LLM 挑＋看圖確認），沒有就拿第一張。"""
+    """一律走 core/picture.py 挑圖（LLM 挑＋看圖確認，只收看圖說對的）。沒詞義就先選一次，
+    再沒有用日常義——2026-10-18 起沒有「拿第一張不挑不看」的路。"""
     img_filename = f"{word}_img_{int(time.time())}.jpg"
     img_path = os.path.join(MEDIA_DIR, img_filename)
-    if sense:
-        found = find_picture(word, img_path, img_query, sense)
-    else:
-        found = fetch_image(word, img_path, search_query=img_query)
-    ok, attribution, description, source = found
+    sense = sense or llm_pick_sense(word) or everyday_sense(word)
+    ok, attribution, description, source = find_picture(word, img_path, img_query, sense)
     return img_filename, ok, attribution, description, source
+
+
+def _image_sense(assoc, sentence):
+    """找圖用的詞義：有提示用提示；只缺圖時圖要配卡上那句。KEEP-IN-SYNC: addon/_workers.py::_image_sense"""
+    if assoc:
+        return assoc
+    if sentence_usable(sentence):
+        return f'as used in this sentence: "{sentence}"'
+    return ""
 
 
 def _do_sentence_audio(word, sentence):
@@ -92,14 +98,18 @@ def process_note(note):
         if current_assoc:
             lines.append(f"  Sense    : {current_assoc}")
     if need_img:
-        img_query = llm_image_query(word, current_assoc)
-        img_filename, ok, attr, description, source = _do_image(word, img_query, sense=current_assoc)
-        if ok:
-            fields["Image_Prompt"] = image_html(img_filename, description, attr, source)
-            photo = description
-        else:
-            fields["Image_Prompt"] = ""
-        lines.append(f"  Image    : {'✓ ' + img_filename if ok else '⚠ not found'}")
+        sense = _image_sense(current_assoc, current_sentence)
+        img_query = llm_image_query(word, sense)
+        img_filename, ok, attr, description, source = _do_image(word, img_query, sense=sense)
+        if not ok:
+            # 沒有看圖確認過的圖 → 停卡：這輪什麼都不寫，下次再從圖開始（2026-10-18 使用者決定）
+            lines.append("  Image    : ⚠ not found — card left untouched, run again later")
+            with _print_lock:
+                print("\n".join(lines) + "\n")
+            return word, "no image"
+        fields["Image_Prompt"] = image_html(img_filename, description, attr, source)
+        photo = description
+        lines.append(f"  Image    : ✓ {img_filename}")
 
     if need_sentence:
         sentence = llm_sentence(word, association=current_assoc, photo=photo)

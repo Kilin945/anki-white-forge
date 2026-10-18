@@ -1,9 +1,10 @@
-"""搜圖：多圖源主從切換（hedged request）。
+"""搜圖：四個圖源與它們的切換。
 
 圖源依優先順序排隊：Pexels → Wikimedia Commons → Openverse → Pixabay。
-先問第一個；它 HEDGE_SECS 秒內沒回結果就「加開」下一個（前一個不取消），
-回錯誤或 0 張則立刻開下一個。**誰先有圖就用誰**——不重試、不 sleep。
-同時搜四家會讓每張卡都打四次 API，所以只在前一家慢或空的時候才往下開。
+生產路徑一律走 `fetch_judged`（core/picture.py 用）：一家做完才換下一家，每張候選都要
+LLM 從描述挑、再看圖確認，只收看圖說「對」的。
+`fetch_image`（hedged：前一家 HEDGE_SECS 秒沒回就加開下一家，誰先有圖就用誰、不挑不看）
+2026-10-18 起沒有生產呼叫者——「沒看過就收」的路全部刪掉（使用者決定）；保留給工具與測試。
 
 退圖：使用者在手機標紅旗 → ⌘F Clear Flagged 清空時，addon 把那張圖的來源記進
 REJECTS_PATH（以單字為鍵）。下次替同一個字找圖：退過的圖源排到最後、退過的那張不再挑。
@@ -225,7 +226,7 @@ def progress(text):
 
 # ── 挑圖（core/picture.py 用）───────────────────────────────────────────────
 # judge(alts) → 依好壞排好的候選索引 list（0 起算；[]＝這家都不合格）／None（挑圖失敗）。
-# verify(path) → True（看過圖、對）／False（看過圖、不對）／None（沒辦法看 → 可以照收）。
+# verify(path) → True（看過圖、對）／False（看過圖、不對）／None（沒辦法看）。只有 True 才收。
 TOP_N = 3        # 一家同時下載、同時看圖的張數：一張一張排隊太慢（2026-10-10 實測難找的字 9～13 秒）
 
 
@@ -245,15 +246,14 @@ def _result(hit, name):
 
 
 def _download_and_verify(chosen, name, rejects, filepath, verify):
-    """chosen 同時下載到各自的暫存檔、同時看圖；照排名取第一張「對」的，沒有就取第一張
-    「沒辦法看」的（看圖說不對的絕不收）。選中的搬到 filepath，其餘暫存檔刪掉。"""
+    """chosen 同時下載到各自的暫存檔、同時看圖；照排名取第一張看圖明確說「對」的。
+    說不對、或沒辦法看（None：沒金鑰、撞限、逾時）都不收——2026-10-18 使用者決定，寧缺勿濫。
+    選中的搬到 filepath，其餘暫存檔刪掉。"""
     paths = [f"{filepath}.{i}" for i in range(len(chosen))]
     with ThreadPoolExecutor(max_workers=len(chosen)) as pool:
         got = list(pool.map(lambda cp: _download([cp[0]], name, rejects, cp[1]), zip(chosen, paths)))
         oks = list(pool.map(lambda gp: verify(gp[1]) if gp[0] else False, zip(got, paths)))
     pick = next((i for i, (g, ok) in enumerate(zip(got, oks)) if g and ok is True), None)
-    if pick is None:
-        pick = next((i for i, (g, ok) in enumerate(zip(got, oks)) if g and ok is None), None)
     for i, path in enumerate(paths):
         if i == pick:
             os.replace(path, filepath)
