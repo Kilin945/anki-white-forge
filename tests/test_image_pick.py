@@ -86,12 +86,14 @@ class TestFetchJudged:
                                  lambda path: looked.append(path) or True)
         assert found[3] == "b:0" and len(looked) == 1
 
-    def test_unverifiable_accepted_but_never_a_rejected_one(self, tmp_path, monkeypatch, fast_download):
+    def test_unverifiable_is_not_accepted(self, tmp_path, monkeypatch, fast_download):
+        """看不了（None）的圖不收——2026-10-18 起只有看圖說 YES 的才收。"""
         monkeypatch.setattr(img, "SOURCES", [_src("a", _cands("a", "x", "y"))])
         answers = {"a/0": False, "a/1": None}
-        found = img.fetch_judged(str(tmp_path / "o.jpg"), "q", [], lambda alts: [0, 1],
+        out = tmp_path / "o.jpg"
+        found = img.fetch_judged(str(out), "q", [], lambda alts: [0, 1],
                                  lambda path: answers[next(k for k in answers if k in _url_of(path))])
-        assert found[3] == "a:1"
+        assert found is None and not out.exists()
 
     def test_judge_failure_checks_first_three(self, tmp_path, monkeypatch, fast_download):
         monkeypatch.setattr(img, "SOURCES", [_src("a", _cands("a", "w", "x", "y", "z"))])
@@ -113,10 +115,10 @@ class TestFetchJudged:
         assert list(tmp_path.iterdir()) == []
 
 
-# ── find_picture：詞義 → 日常義 → 通用程式畫面 ───────────────────────────────
+# ── find_picture：詞義 → 日常義 → 沒圖（沒有退路）───────────────────────────────
 
 class TestFindPicture:
-    def _setup(self, monkeypatch, fits, tech=False):
+    def _setup(self, monkeypatch, fits):
         """fits(sense, query) → 看圖結果。記下每次看圖用的詞義與搜尋字串。"""
         calls = []
         def fn(query):
@@ -128,7 +130,6 @@ class TestFindPicture:
             calls.append((sense, q))
             return fits(sense, q)
         monkeypatch.setattr(pic.vision, "vision_fits", vf)
-        monkeypatch.setattr(pic.llm, "llm_is_tech", lambda w, s: tech)
         return calls
 
     def test_sense_fits_first(self, tmp_path, monkeypatch, fast_download):
@@ -143,22 +144,30 @@ class TestFindPicture:
         assert ok and desc == "photo for concrete"
         assert calls[-1] == (pic.everyday_sense("concrete"), "concrete")
 
-    def test_tech_last_resort_generic_code(self, tmp_path, monkeypatch, fast_download):
-        self._setup(monkeypatch, lambda s, q: False, tech=True)
-        ok, _, desc, _ = pic.find_picture("instance", str(tmp_path / "o.jpg"), "object", "物件實例", rejects=[])
-        assert ok and desc == f"photo for {pic.GENERIC_TECH_QUERY}"
+    def test_tech_word_nothing_fits_is_no_image(self, tmp_path, monkeypatch, fast_download):
+        """技術字也一樣：沒有看圖說對的就沒圖，不再塞通用程式畫面（2026-10-18 使用者否決）。"""
+        calls = self._setup(monkeypatch, lambda s, q: False)
+        out = tmp_path / "o.jpg"
+        assert pic.find_picture("instance", str(out), "object", "物件實例", rejects=[]) == (False, "", "", "")
+        assert [q for _, q in calls] == ["object", "instance"] and not out.exists()
 
     def test_everyday_nothing_fits_no_image_and_no_leftover(self, tmp_path, monkeypatch, fast_download):
-        self._setup(monkeypatch, lambda s, q: False, tech=False)
+        self._setup(monkeypatch, lambda s, q: False)
         out = tmp_path / "o.jpg"
         assert pic.find_picture("whim", str(out), "q", "一時興起", rejects=[]) == (False, "", "", "")
         assert not out.exists()
 
-    def test_vision_budget_then_accepts(self, tmp_path, monkeypatch, fast_download):
+    def test_vision_budget_exhausted_is_no_image(self, tmp_path, monkeypatch, fast_download):
+        """看圖額度用完 → 後面的圖看不了 → 沒圖，不照收。"""
         monkeypatch.setattr(pic, "MAX_VISION_CHECKS", 1)
         calls = self._setup(monkeypatch, lambda s, q: False)
-        ok, _, desc, _ = pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[])
-        assert ok and desc == "photo for w" and len(calls) == 1     # 第二次沒額度看 → 照收
+        assert pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[]) == (False, "", "", "")
+        assert len(calls) == 1
+
+    def test_unverifiable_everywhere_is_no_image(self, tmp_path, monkeypatch, fast_download):
+        """看圖全回 None（沒金鑰、撞限）→ 沒圖；呼叫端會停卡。"""
+        self._setup(monkeypatch, lambda s, q: None)
+        assert pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[]) == (False, "", "", "")
 
 
 # ── vision：解析與換模型 ──────────────────────────────────────────────────────
@@ -204,33 +213,32 @@ class TestVision:
         assert REAL_VISION("w", "s", self._img(tmp_path)) is None
 
 
-class TestTimeBudget:
-    """整段找圖有上限：時間到就不再換家，改拿舊流程的第一張（圖不能跳過）。"""
+class TestPerStepTimeouts:
+    """整段沒有時間上限（2026-10-18）；單次挑圖／看圖各自有逾時，逾時＝這張看不了＝不收。"""
 
     def _sources(self, monkeypatch):
         def fn(query):
             return [{"id": "1", "url": f"http://a/{query}", "alt": f"photo for {query}", "attribution": ""}]
         monkeypatch.setattr(img, "SOURCES", [("a", fn), ("b", fn)])
 
-    def test_slow_judge_is_cut_and_first_image_used(self, tmp_path, monkeypatch, fast_download):
+    def test_slow_judge_is_cut_then_first_three_checked(self, tmp_path, monkeypatch, fast_download):
         self._sources(monkeypatch)
         monkeypatch.setattr(pic, "JUDGE_TIMEOUT_SECS", 0.2)
         monkeypatch.setattr(pic.llm, "llm_pick_image", lambda w, s, alts: time.sleep(5) or [0])
         monkeypatch.setattr(pic.vision, "vision_fits", lambda w, s, p: True)
         t = time.monotonic()
-        ok, _, desc, _ = pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[], budget=6)
-        assert ok and desc == "photo for q"
+        ok, _, desc, _ = pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[])
+        assert ok and desc == "photo for q"            # 挑圖逾時 → 拿前三張去看 → 看圖說對就收
         assert time.monotonic() - t < 3
 
-    def test_out_of_time_still_gets_an_image(self, tmp_path, monkeypatch, fast_download):
+    def test_slow_vision_is_not_accepted(self, tmp_path, monkeypatch, fast_download):
         self._sources(monkeypatch)
-        monkeypatch.setattr(pic, "FALLBACK_RESERVE_SECS", 1)
+        monkeypatch.setattr(pic, "VISION_TIMEOUT_SECS", 0.2)
         monkeypatch.setattr(pic.llm, "llm_pick_image", lambda w, s, alts: [0])
-        monkeypatch.setattr(pic.vision, "vision_fits", lambda w, s, p: time.sleep(0.6) or False)
-        t = time.monotonic()
-        ok, _, desc, _ = pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[], budget=2)
-        assert ok and desc == "photo for q"            # 看圖一直說不對 → 時間到 → 舊流程第一張
-        assert time.monotonic() - t < 3.5
+        monkeypatch.setattr(pic.vision, "vision_fits", lambda w, s, p: time.sleep(5) or True)
+        out = tmp_path / "o.jpg"
+        assert pic.find_picture("w", str(out), "q", "s", rejects=[]) == (False, "", "", "")
+        assert not out.exists()                        # 看圖逾時＝看不了 → 不收，不是照收
 
     def test_timed_returns_none_on_timeout(self):
         assert pic._timed(lambda: time.sleep(1) or 1, 0.1) is None
@@ -255,20 +263,32 @@ def test_helper_sense_uses_find_picture(monkeypatch, capsys):
     import _image_helper as h
     seen = {}
     monkeypatch.setattr(h, "find_picture", lambda w, p, q, s: seen.update(q=q, s=s) or (True, "", "code", "a:1"))
-    monkeypatch.setattr(h, "fetch_image", lambda *a, **k: pytest.fail("不該走舊流程"))
     code, out = _run_helper(monkeypatch, capsys, ["--query", "q", "--sense", "具體類別", "--", "w", "/tmp/x.jpg"])
     assert code == 0 and seen == {"q": "q", "s": "具體類別"} and "SOURCE: a:1" in out
 
 
-def test_helper_without_sense_keeps_old_flow(monkeypatch, capsys):
+def test_helper_without_sense_picks_one_then_find_picture(monkeypatch, capsys):
+    """沒帶詞義也要挑圖：helper 自己選一次詞義，再沒有用日常義。沒有「拿第一張」的路。"""
     import _image_helper as h
-    monkeypatch.setattr(h, "find_picture", lambda *a, **k: pytest.fail("沒詞義不該挑圖"))
-    monkeypatch.setattr(h, "fetch_image", lambda w, p, search_query=None: (True, "", "x", "a:2"))
+    seen = []
+    monkeypatch.setattr(h, "find_picture", lambda w, p, q, s: seen.append(s) or (True, "", "x", "a:2"))
+    monkeypatch.setattr(h, "llm_pick_sense", lambda w: "具體類別")
     code, out = _run_helper(monkeypatch, capsys, ["--query", "q", "--", "w", "/tmp/x.jpg"])
-    assert code == 0 and "SOURCE: a:2" in out
+    assert code == 0 and "SOURCE: a:2" in out and seen == ["具體類別"]
+    monkeypatch.setattr(h, "llm_pick_sense", lambda w: "")
+    _run_helper(monkeypatch, capsys, ["--query", "q", "--", "w", "/tmp/x.jpg"])
+    assert seen[-1] == pic.everyday_sense("w")
 
 
-def test_addon_passes_sense_and_longer_timeout(tmp_path, monkeypatch):
+def test_helper_no_picture_exits_1(monkeypatch, capsys):
+    import _image_helper as h
+    monkeypatch.setattr(h, "find_picture", lambda w, p, q, s: (False, "", "", ""))
+    code, out = _run_helper(monkeypatch, capsys, ["--query", "q", "--sense", "s", "--", "w", "/tmp/x.jpg"])
+    assert code == 1 and "FAIL" in out and "SOURCE" not in out
+
+
+def test_addon_passes_sense_and_no_timeout(tmp_path, monkeypatch):
+    """找圖沒有時間上限（2026-10-18）：helper 不被 addon 殺掉，自己每一步有逾時。"""
     seen = {}
     def run(self, cmd, timeout):
         seen.update(cmd=cmd, timeout=timeout)
@@ -278,19 +298,29 @@ def test_addon_passes_sense_and_longer_timeout(tmp_path, monkeypatch):
     w = addon._workers.Worker.__new__(addon._workers.Worker); w.media_dir = str(tmp_path)
     w._fetch_image("concrete", definition="具體類別")
     assert seen["cmd"][seen["cmd"].index("--sense") + 1] == "具體類別"
-    assert seen["timeout"] == addon._workers.IMAGE_TIMEOUT_SECS
+    assert seen["timeout"] is None
     w._fetch_image("concrete")
-    assert "--sense" not in seen["cmd"] and seen["timeout"] == 60
+    assert "--sense" not in seen["cmd"] and seen["timeout"] is None
 
 
-def test_cli_backfill_uses_find_picture_only_with_sense(monkeypatch):
+def test_cli_backfill_always_find_picture(monkeypatch):
+    """CLI 也一律挑圖：有詞義用詞義；沒詞義先選一次，再沒有用日常義。"""
     import backfill_words
-    used = []
-    monkeypatch.setattr(backfill_words, "find_picture", lambda *a: used.append("pick") or (False, "", "", ""))
-    monkeypatch.setattr(backfill_words, "fetch_image", lambda *a, **k: used.append("plain") or (False, "", "", ""))
+    senses = []
+    monkeypatch.setattr(backfill_words, "find_picture", lambda w, p, q, s: senses.append(s) or (False, "", "", ""))
+    monkeypatch.setattr(backfill_words, "llm_pick_sense", lambda w: "")
     backfill_words._do_image("concrete", "q", sense="具體類別")
     backfill_words._do_image("concrete", "q")
-    assert used == ["pick", "plain"]
+    assert senses == ["具體類別", pic.everyday_sense("concrete")]
+
+
+def test_image_sense_prefers_hint_then_sentence():
+    """只缺圖時圖要配卡上那句（圖文要對上）；addon 與 CLI 同一條規則。"""
+    import backfill_words
+    for fn in (addon._workers._image_sense, backfill_words._image_sense):
+        assert fn("具體類別", "The Logger class is concrete.") == "具體類別"
+        assert fn("", "The Logger class is concrete.") == 'as used in this sentence: "The Logger class is concrete."'
+        assert fn("", "") == "" and fn("", "Please add an example sentence for 'x'.") == ""
 
 
 # ── 畫面進度：helper 的 PROGRESS 行、換模型、⌘S 三張同時跑不互蓋 ─────────────────

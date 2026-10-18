@@ -107,16 +107,14 @@ def _isolate_pick_sense(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _isolate_pick_image(monkeypatch):
-    """挑圖會打 LLM 和看圖模型 → 測試期間一律關掉：挑圖回 None（挑圖失敗）、看圖回 None（沒辦法看）、
-    不是技術義；CLI 的 find_picture 直接轉給（測試自己 patch 過的）fetch_image。
+    """挑圖會打 LLM 和看圖模型 → 測試期間一律關掉：挑圖回 None（挑圖失敗）、看圖回 None（沒辦法看）；
+    CLI 的 find_picture 預設回「沒圖」，要圖的測試自己 patch `backfill_words.find_picture`／`add_word.find_picture`。
     要測挑圖本身的測試，在模組層先拿原函式。"""
     import core.llm
     import core.vision
     import backfill_words
     import add_word
     monkeypatch.setattr(core.llm, "llm_pick_image", lambda w, s, alts: None)
-    monkeypatch.setattr(core.llm, "llm_is_tech", lambda w, s: False)
     monkeypatch.setattr(core.vision, "vision_fits", lambda w, s, p: None)
     for mod in (backfill_words, add_word):
-        monkeypatch.setattr(mod, "find_picture",
-                            lambda w, p, q, s, _m=mod, **k: _m.fetch_image(w, p, search_query=q))
+        monkeypatch.setattr(mod, "find_picture", lambda w, p, q, s, **k: (False, "", "", ""))

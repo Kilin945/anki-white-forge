@@ -32,13 +32,11 @@ _TRANSLATION_SENSE_TEMPLATE = ' The word "{word}" here means: "{sense}". Transla
 
 
 _PHOTO_BLOCK_TEMPLATE = (
-    '\n\nA photo was already picked for this card. Photo description: "{photo}"\n'
-    'Use the photo only if it fits both the meaning AND the setting you picked. If you picked '
-    'the software-engineering sense, the sentence must stay in a code/tech situation, so use '
-    'the photo only if it shows software, computers or tech. If you picked an everyday or '
-    'hint-driven sense, use the photo if it shows that meaning. When you use it, set the '
-    'sentence in the scene of the photo, so the picture and the sentence match. Otherwise '
-    'ignore the photo. Never change the meaning or the setting to fit the photo.'
+    '\n\nA picture was already chosen for this card and checked to show the meaning you should teach. '
+    'Picture description: "{photo}"\n'
+    'Write the sentence ABOUT this picture: say what the picture shows and use "{word}" in it, '
+    'so that a learner who looks at the picture and reads the sentence links the word to that scene. '
+    'The picture decides the scene and the details; do not invent a different situation.'
 )
 
 
@@ -48,7 +46,7 @@ def _sentence_prompt(word, association="", photo="", must_contain=False, example
     definition/circular sentence.
     KEEP IN SYNC with core/llm._sentence_instructions — addon cannot import core, so this
     is a deliberate duplicate. Change one → change both.
-    photo（照片描述）非空時附 _PHOTO_BLOCK_TEMPLATE：句子依圖造，詞義優先序不變。"""
+    photo（照片描述）非空時附 _PHOTO_BLOCK_TEMPLATE：句子就是在描述那張圖，詞義優先序不變。"""
     hint = f'1. If a hint is given, use the sense the hint points to. Hint: "{association}"\n' if association else ""
     swe_n = "2." if association else "1."
     common_n = "3." if association else "2."
@@ -72,7 +70,7 @@ def _sentence_prompt(word, association="", photo="", must_contain=False, example
         f'Do NOT write a definition or a circular sentence (no "X means ...", "X is when ...", '
         f'"{word} is a kind of ..."); show the meaning through a real, concrete situation.'
         + _examples.examples_block(examples)
-        + (_PHOTO_BLOCK_TEMPLATE.format(photo=photo) if photo else "")
+        + (_PHOTO_BLOCK_TEMPLATE.format(photo=photo, word=word) if photo else "")
         + (_WORD_MUST_APPEAR_TEMPLATE.format(word=word) if must_contain else "")
         + (_SENSE_RETRY_TEMPLATE.format(word=word, sense=association, previous=previous)
            if previous else "")

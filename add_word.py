@@ -10,8 +10,7 @@ from spellchecker import SpellChecker
 from core.anki import anki, DECK_NAME, MODEL_NAME
 from core.llm import llm_sentence, llm_image_query, llm_pick_sense, llm_translate, llm_translate_sentence, engine_description
 from core.tts import try_make_audio, VOICE_WORD, VOICE_SENTENCE
-from core.image import fetch_image
-from core.picture import find_picture
+from core.picture import find_picture, everyday_sense
 from core.text import image_html
 
 MEDIA_DIR = os.path.expanduser("~/Library/Application Support/Anki2/Kilin/collection.media")
@@ -113,16 +112,27 @@ def main():
     img_filename = f"{word}_img_{int(time.time())}.jpg"
     img_query = llm_image_query(word, definition=hint)
     img_path = os.path.join(MEDIA_DIR, img_filename)
-    if hint:      # 有詞義 → 挑圖（LLM 挑＋看圖確認）
-        found = find_picture(word, img_path, img_query, hint)
-    else:
-        found = fetch_image(word, img_path, search_query=img_query)
-    ok, attribution, description, source = found
-    image_field = image_html(img_filename, description, attribution, source) if ok else ""
-    print(f"  Image {'✓' if ok else '⚠️ not found'}")
+    # 一律挑圖（LLM 挑＋看圖確認，只收看圖說對的）；沒詞義就用日常義
+    ok, attribution, description, source = find_picture(word, img_path, img_query, hint or everyday_sense(word))
+    if not ok:
+        # 沒有看圖確認過的圖 → 只建單字和提示，其他欄位留給 ⌘S（2026-10-18 使用者決定：例句要照圖寫）
+        print("  Image ⚠️ not found — adding the word only; run ⌘S later to fill the card")
+        try:
+            note_id = anki("addNote", note={
+                "deckName": DECK_NAME, "modelName": MODEL_NAME,
+                "fields": {"Front": word, "Association": association},
+                "options": {"allowDuplicate": False},
+                "tags": ["auto-added"],
+            })
+            print(f"\n  ✓ Added word only (ID: {note_id})")
+        except RuntimeError as e:
+            print(f"\n  Error: {e}")
+        return
+    image_field = image_html(img_filename, description, attribution, source)
+    print("  Image ✓")
 
     print("[2] Sentence…")
-    sentence = llm_sentence(word, hint, photo=description if ok else "") or f"Please add an example sentence for '{word}'."
+    sentence = llm_sentence(word, hint, photo=description) or f"Please add an example sentence for '{word}'."
     print(f"  {sentence[:80]}")
 
     print("[3] Audio + Translation (parallel)…")

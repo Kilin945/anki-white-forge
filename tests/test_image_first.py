@@ -81,16 +81,16 @@ def _capture(fn, *args, **kw):
 class TestPhotoInSentencePrompt:
     def test_photo_block_present(self):
         p = _capture(llm_mod.llm_sentence, "ladder", "", photo="Ladder against a wall.")
-        assert "Photo description: \"Ladder against a wall.\"" in p
-        assert "Never change the meaning or the setting to fit the photo" in p
+        assert "Picture description: \"Ladder against a wall.\"" in p
+        assert "Write the sentence ABOUT this picture" in p and 'use "ladder" in it' in p
 
     def test_no_photo_no_block(self):
         p = _capture(llm_mod.llm_sentence, "ladder")
-        assert "Photo description" not in p
+        assert "Picture description" not in p
 
     def test_photo_block_before_output_line(self):
         p = _capture(llm_mod.llm_sentence, "ladder", "", photo="A ladder.")
-        assert p.index("Photo description") < p.index("Output only the sentence")
+        assert p.index("Picture description") < p.index("Output only the sentence")
 
 
 class TestImageQueryNoSentence:
@@ -126,12 +126,13 @@ class TestBackfillWordsOrder:
         def fake_sentence(word, association="", photo=""):
             calls["photo"] = photo
             return sentence
-        def fake_fetch(word, path, search_query=None, **kw):
-            calls["query"] = search_query
+        def fake_fetch(word, path, query, sense, **kw):
+            calls["query"] = query
+            calls["sense"] = sense
             return fetch
         with patch.object(backfill_words, "llm_sentence", fake_sentence), \
              patch.object(backfill_words, "llm_image_query", lambda w, d="": "ladder wall"), \
-             patch.object(backfill_words, "fetch_image", fake_fetch), \
+             patch.object(backfill_words, "find_picture", fake_fetch), \
              patch.object(backfill_words, "llm_translate", lambda w, s, sense="": "梯子"), \
              patch.object(backfill_words, "try_make_audio", lambda *a, **k: True), \
              patch.object(backfill_words, "anki", MagicMock()) as anki:
@@ -145,16 +146,18 @@ class TestBackfillWordsOrder:
         assert 'alt="Ladder against a wall."' in fields["Image_Prompt"]
         assert 'data-source="pexels:1"' in fields["Image_Prompt"]
 
-    def test_image_fail_still_generates_sentence(self):
+    def test_image_fail_stops_card(self):
+        """沒有看圖確認過的圖 → 這輪什麼都不寫（2026-10-18：例句要照圖寫，沒圖就沒得寫）。"""
         calls, fields = self._run(_note(), fetch=(False, "", "", ""))
-        assert calls["photo"] == ""
-        assert fields["Sentence"] == "The ladder leans on the wall."
+        assert "photo" not in calls
+        assert fields == {}
 
     def test_existing_sentence_not_rewritten_when_image_missing(self):
         calls, fields = self._run(_note(sentence="My ladder is tall.", audio="[sound:a.mp3]", translation="梯子"))
         assert "photo" not in calls
         assert "Sentence" not in fields
         assert "<img" in fields["Image_Prompt"]
+        assert calls["sense"] == 'as used in this sentence: "My ladder is tall."'   # 圖要配卡上那句
 
     def test_existing_image_alt_feeds_sentence(self):
         calls, fields = self._run(_note(image='<img src="o.jpg" alt="Old ladder photo.">'))

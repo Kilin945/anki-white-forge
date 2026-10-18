@@ -89,11 +89,16 @@ class TestCmdAOrder:
         assert data["sentence"] == "The ladder leans on the wall."
         assert data["sentence_cn"] == "梯子靠在牆上。"
 
-    def test_no_image_still_makes_sentence(self):
+    def test_no_image_stops_card(self):
+        """沒有看圖確認過的圖 → 例句、翻譯、語音都不做，卡片只帶單字建進去（2026-10-18）。"""
         w, seen = _worker("", "The ladder leans on the wall.")
         w.run()
-        assert seen["photo"] == ""
-        assert w.finished.calls[0][0]["sentence"] == "The ladder leans on the wall."
+        assert "photo" not in seen
+        data = w.finished.calls[0][0]
+        assert data["sentence"] == "" and data["image_field"] == ""
+        assert data["translation"] == data["sentence_cn"] == ""
+        assert data["audio_filename"] == data["front_audio_filename"] == ""
+        assert ("image", "warn", "no image") in w.step.calls
 
     def test_sentence_fail_keeps_image_skips_translation(self):
         w, _ = _worker('<img src="a.jpg" alt="Ladder.">', "")
@@ -173,6 +178,11 @@ class TestCmdSOrder:
         assert "Image_Prompt" in sent
         for k in ("Translation", "Sentence_CN", "Audio"):
             assert k not in sent
+
+    def test_no_image_writes_nothing(self):
+        """⌘S 也停卡：找不到圖就這輪不寫任何欄位，下次再從圖開始（2026-10-18）。"""
+        log, sent = _run_s(_note(), "", "The ladder leans on the wall.")
+        assert log == ["image"] and sent == {}
 
 
 def test_image_query_prompt_matches_core():

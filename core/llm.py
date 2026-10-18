@@ -71,13 +71,11 @@ WORD_MUST_APPEAR_TEMPLATE = (
 )
 
 PHOTO_BLOCK_TEMPLATE = (
-    '\n\nA photo was already picked for this card. Photo description: "{photo}"\n'
-    'Use the photo only if it fits both the meaning AND the setting you picked. If you picked '
-    'the software-engineering sense, the sentence must stay in a code/tech situation, so use '
-    'the photo only if it shows software, computers or tech. If you picked an everyday or '
-    'hint-driven sense, use the photo if it shows that meaning. When you use it, set the '
-    'sentence in the scene of the photo, so the picture and the sentence match. Otherwise '
-    'ignore the photo. Never change the meaning or the setting to fit the photo.'
+    '\n\nA picture was already chosen for this card and checked to show the meaning you should teach. '
+    'Picture description: "{photo}"\n'
+    'Write the sentence ABOUT this picture: say what the picture shows and use "{word}" in it, '
+    'so that a learner who looks at the picture and reads the sentence links the word to that scene. '
+    'The picture decides the scene and the details; do not invent a different situation.'
 )
 
 
@@ -85,7 +83,8 @@ def _sentence_instructions(word, association="", photo="", must_contain=False, e
                            previous=""):
     """Shared meaning-selection + sentence-quality rules for example-sentence prompts.
     Priority: hint (association) > software-engineering sense > most common everyday sense.
-    photo（照片描述）非空時在結尾附 PHOTO_BLOCK_TEMPLATE：句子依圖造，但詞義優先序不變。
+    photo（照片描述）非空時在結尾附 PHOTO_BLOCK_TEMPLATE：句子就是在描述那張圖（圖已看圖確認過
+    詞義，所以詞義優先序不變、場景照圖寫）——2026-10-18：圖和句要對上，靠的就是這段。
     KEEP IN SYNC with addon/_llm.py::_sentence_prompt (含 photo block) — the addon cannot
     import core, so it keeps a deliberate duplicate. Change one → change both."""
     hint = f'1. If a hint is given, use the sense the hint points to. Hint: "{association}"\n' if association else ""
@@ -111,7 +110,7 @@ def _sentence_instructions(word, association="", photo="", must_contain=False, e
         f'Do NOT write a definition or a circular sentence (no "X means ...", "X is when ...", '
         f'"{word} is a kind of ..."); show the meaning through a real, concrete situation.'
         + _examples.examples_block(examples)
-        + (PHOTO_BLOCK_TEMPLATE.format(photo=photo) if photo else "")
+        + (PHOTO_BLOCK_TEMPLATE.format(photo=photo, word=word) if photo else "")
         + (WORD_MUST_APPEAR_TEMPLATE.format(word=word) if must_contain else "")
         + (SENSE_RETRY_TEMPLATE.format(word=word, sense=association, previous=previous)
            if previous else "")
@@ -456,13 +455,6 @@ def parse_image_pick(reply, n):
 def llm_pick_image(word, sense, alts):
     """從候選照片描述挑出表現這個詞義的那張（輕量池）。"""
     return parse_image_pick(llm(image_pick_prompt(word, sense, alts)), len(alts))
-
-
-def llm_is_tech(word, sense):
-    """這個詞義是不是軟體／電腦概念（最後退路要不要放通用程式畫面）。沒回當作不是。"""
-    reply = llm(f'Is this meaning of the English word "{word}" a software, programming or '
-                f'computer concept: "{sense}"? Answer only YES or NO.')
-    return (reply or "").strip().upper().startswith("YES")
 
 
 def llm_image_query(word, definition=""):
