@@ -78,6 +78,20 @@ def _sentence_prompt(word, association="", photo="", must_contain=False, example
     )
 
 
+def _sentence_cn_prompt(sentence, word="", sense=""):
+    """整句翻譯 prompt。KEEP-IN-SYNC: core/llm.py::sentence_cn_prompt（逐字相同，測試比對）。
+    詞義一定要放在句子前面，原因見 core 那份。"""
+    meant = _TRANSLATION_SENSE_TEMPLATE.format(word=word, sense=sense) if sense and word else ""
+    return (
+        "Translate this English sentence into natural, complete Traditional Chinese. "
+        "Keep product / framework / library / tool proper nouns (e.g. Spring, React, Hazelcast) "
+        "in English inside the translation; do not translate such names literally. "
+        "Write Traditional Chinese as used in Taiwan; never use Simplified Chinese characters. "
+        "Output only the translation. No explanation, no quotes."
+        f'{meant}\n\nSentence: "{sentence}"'
+    )
+
+
 def _sense_check_prompt(word, sense, sentence):
     """例句有沒有照詞義寫。KEEP-IN-SYNC: core/llm.py::sense_check_prompt（逐字相同，測試比對）。"""
     return (

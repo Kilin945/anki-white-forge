@@ -163,7 +163,7 @@ def sentence_fits_sense(word, sense, sentence):
     return sense_fits_reply(llm(sense_check_prompt(word, sense, sentence)))
 
 
-# KEEP-IN-SYNC: addon/_workers.py（Worker._groq_translate 與 _groq_translate_sentence 的 prompt）
+# KEEP-IN-SYNC: addon/_workers.py::Worker._groq_translate、addon/_llm.py::_sentence_cn_prompt
 _TW_RULE = "Write Traditional Chinese as used in Taiwan; never use Simplified Chinese characters. "
 
 
@@ -185,14 +185,19 @@ def llm_translate(word, sentence="", sense=""):
     return _accept_word_translation(word, result)
 
 
-SENTENCE_CN_PROMPT = (
-    "Translate this English sentence into natural, complete Traditional Chinese. "
-    "Keep product / framework / library / tool proper nouns (e.g. Spring, React, Hazelcast) "
-    "in English inside the translation; do not translate such names literally. "
-    "Write Traditional Chinese as used in Taiwan; never use Simplified Chinese characters. "
-    "Output only the translation. No explanation, no quotes.\n\n"
-    'Sentence: "{sentence}"'
-)
+def sentence_cn_prompt(sentence, word="", sense=""):
+    """整句翻譯 prompt。KEEP-IN-SYNC: addon/_llm.py::_sentence_cn_prompt（逐字相同，測試比對）。
+    詞義一定要放在句子前面：接在句子後面時 gemini-3.5-flash-lite 會把它當成句子一起翻，
+    整句翻譯多出「這裡的 X 意思是：…」（2026-10-22 實測 12 次漏 10 次，移到前面 0 次）。"""
+    meant = TRANSLATION_SENSE_TEMPLATE.format(word=word, sense=sense) if sense and word else ""
+    return (
+        "Translate this English sentence into natural, complete Traditional Chinese. "
+        "Keep product / framework / library / tool proper nouns (e.g. Spring, React, Hazelcast) "
+        "in English inside the translation; do not translate such names literally. "
+        "Write Traditional Chinese as used in Taiwan; never use Simplified Chinese characters. "
+        "Output only the translation. No explanation, no quotes."
+        f'{meant}\n\nSentence: "{sentence}"'
+    )
 
 
 def _accept_word_translation(word, reply):
@@ -338,6 +343,25 @@ def record_rejected_translation(word, translation, path=None):
         return added
 
 
+# 整句翻譯多寫了單字解釋：漏出來的一律是「意思是：」「意指：」這種關鍵字＋冒號。
+# 不收沒冒號的「是指」「這裡的」「一詞」——指標、這裡的居民這種正常譯文會被誤擋。
+# 英文原句有對應的字時是照翻，不算
+# KEEP-IN-SYNC: addon/_text.py::_EXPLAIN_MARKERS
+EXPLAIN_MARKERS = (
+    (r"(意思是|意思為|意指|含義是|含意是)\s*[：:]", r"\bmean"),
+    (r"(指的是|是指)\s*[：:]", r"\b(refer|mean)"),
+)
+
+
+def explains_word(translation, sentence):
+    """整句翻譯是不是多寫了單字的解釋（「這裡的 X 意思是：…」）。誤擋的代價是那張卡
+    每次重翻都被擋、永遠補不起來，所以寧可漏抓也不誤擋。KEEP-IN-SYNC: addon/_text.py::_explains_word。"""
+    for marker, english in EXPLAIN_MARKERS:
+        if re.search(marker, translation) and not re.search(english, sentence, re.IGNORECASE):
+            return True
+    return False
+
+
 def _looks_like_chinese_translation(text, terms=None):
     """整句翻譯驗證：要有中文，且扣掉白名單術語後英文字 < 3（3+ 視為前言／英文散文）。
     terms 省略 → 每次重讀 translation_terms.json（不快取，⌘D 改完立即生效）。
@@ -365,13 +389,14 @@ def llm_translate_sentence(sentence, *, strict=False, word="", sense=""):
     """
     if not sentence:
         return ""
-    prompt = SENTENCE_CN_PROMPT.format(sentence=sentence)
-    if sense and word:
-        prompt += TRANSLATION_SENSE_TEMPLATE.format(word=word, sense=sense)
+    prompt = sentence_cn_prompt(sentence, word=word, sense=sense)
     result = groq_generate_strict(prompt) if strict else llm(prompt)
     result = result.strip().strip('"').strip()
     if has_simplified(result):          # 簡體先轉繁體，再進驗證
         result = to_traditional(result)
+    if result and explains_word(result, sentence):
+        print(f"  [sentence_cn] rejected word={word} reason=explains-word reply={result!r}")
+        return ""
     if _looks_like_chinese_translation(result):
         return result
     if result and re.search(r"[一-鿿]", result):         # 只記「英文字太多」造成的誤殺;沒中文＝沒翻／洩漏,不記
