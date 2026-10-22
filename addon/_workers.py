@@ -15,7 +15,7 @@ from . import _llm_dispatch as _lld
 from . import _llm
 from . import _examples
 from ._config import ANKI_URL, GTTS_SCRIPT, IMAGE_SCRIPT, MAX_BACKFILL_WORKERS, PLACEHOLDERS, SHORT_WALL_WAIT, VENV_PYTHON, VOICE_SENTENCE, VOICE_WORD
-from ._text import _accept_word_translation, _clean_text, _key_error_lines, _looks_like_chinese_translation, _need_sentence_audio, _sentence_acceptable, _sentence_has_word, _sentence_reason_text, _sentence_to_write, _sentence_usable, _translation_reject_reason, record_rejected_translation
+from ._text import _accept_word_translation, _clean_text, _explains_word, _key_error_lines, _looks_like_chinese_translation, _need_sentence_audio, _sentence_acceptable, _sentence_has_word, _sentence_reason_text, _sentence_to_write, _sentence_usable, _translation_reject_reason, record_rejected_translation
 from ._llm import _AddonRateLimited, _sentence_prompt, _to_traditional_logged
 from ._images import _image_alt, _image_html
 
@@ -334,18 +334,16 @@ class Worker(QThread):
         reasons：呼叫端給的 dict，被退時寫入 reasons["sentence_cn"]＝畫面短句（完整原因在 log）。"""
         if not sentence:
             return ""
-        prompt = ('Translate this English sentence into natural, complete Traditional '
-                  'Chinese. Keep product / framework / library / tool proper nouns (e.g. '
-                  'Spring, React, Hazelcast) in English inside the translation; do not '
-                  'translate such names literally. Write Traditional Chinese as used in Taiwan; '
-                  'never use Simplified Chinese characters. '
-                  'Output only the translation. No explanation, '
-                  f'no quotes.\n\nSentence: "{sentence}"')
-        if sense and word:
-            prompt += _llm._TRANSLATION_SENSE_TEMPLATE.format(word=word, sense=sense)
+        prompt = _llm._sentence_cn_prompt(sentence, word=word, sense=sense)
         reply = _llm._groq_chat(prompt, temperature=0.3, max_tokens=200, timeout=15,
                            strict=strict).strip().strip('"').strip()
         reply = _to_traditional_logged(word, reply)
+        if reply and _explains_word(reply, sentence):
+            _log.warning("sentence_cn rejected word=%s reason=explains-word reply=%r sentence=%r",
+                         word, reply, sentence)
+            if reasons is not None:
+                reasons["sentence_cn"] = "explains the word"
+            return ""
         if _looks_like_chinese_translation(reply):
             return reply
         if reply and re.search(r"[一-鿿]", reply):        # 只記「英文字太多」造成的誤殺;沒中文＝沒翻／洩漏,不記
