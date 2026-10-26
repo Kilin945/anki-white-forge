@@ -125,7 +125,7 @@ class TestFindPicture:
             return [{"id": "1", "url": f"http://a/{query}", "alt": f"photo for {query}", "attribution": ""}]
         monkeypatch.setattr(img, "SOURCES", [("a", fn)])
         monkeypatch.setattr(pic.llm, "llm_pick_image", lambda w, s, alts: [0])
-        def vf(word, sense, path):
+        def vf(word, sense, path, **k):
             q = open(path, "rb").read().decode(errors="ignore").split("http://a/")[1].split("x")[0]
             calls.append((sense, q))
             return fits(sense, q)
@@ -158,11 +158,19 @@ class TestFindPicture:
         assert not out.exists()
 
     def test_vision_budget_exhausted_is_no_image(self, tmp_path, monkeypatch, fast_download):
-        """看圖額度用完 → 後面的圖看不了 → 沒圖，不照收。"""
+        """看圖額度用完 → 後面的圖看不了 → 沒圖，不照收。額度每一輪各算：第一輪用完，
+        第二輪（日常義）照樣看得到（2026-10-26 inherit：第一輪看滿 6 張，懷錶那輪一張都沒看就停卡）。"""
         monkeypatch.setattr(pic, "MAX_VISION_CHECKS", 1)
         calls = self._setup(monkeypatch, lambda s, q: False)
         assert pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[]) == (False, "", "", "")
-        assert len(calls) == 1
+        assert [s for s, _ in calls] == ["s", pic.everyday_sense("w")]
+
+    def test_second_stage_sees_photos_after_first_used_budget(self, tmp_path, monkeypatch, fast_download):
+        monkeypatch.setattr(pic, "MAX_VISION_CHECKS", 1)
+        self._setup(monkeypatch, lambda s, q: q == "w")
+        status = {}
+        assert pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[], status=status)[0]
+        assert status == {"sense": pic.everyday_sense("w")}
 
     def test_unverifiable_everywhere_is_no_image(self, tmp_path, monkeypatch, fast_download):
         """看圖全回 None（沒金鑰、撞限）→ 沒圖；呼叫端會停卡。"""
@@ -209,8 +217,70 @@ class TestVision:
         monkeypatch.setattr(vision, "_load_key", lambda: "")
         assert REAL_VISION("w", "s", self._img(tmp_path)) is None
         monkeypatch.setattr(vision, "_load_key", lambda: "k")
+        monkeypatch.setattr(vision, "RETRY_PAUSE_SECS", 0)
         monkeypatch.setattr(vision, "_ask", lambda *a: (None, 503, ""))
         assert REAL_VISION("w", "s", self._img(tmp_path)) is None
+
+    def test_timeout_and_server_error_do_not_cool(self, tmp_path, monkeypatch):
+        """逾時、5xx 是單次的慢或忙，不冷卻：2026-10-26 一次逾時就冷卻 60 秒，同一張卡後面的圖全部看不了、停卡。"""
+        import requests
+        def ask(model, k, p, d):
+            if model == vision.VISION_MODELS[0]:
+                raise requests.ReadTimeout("slow")
+            return None, 503, ""
+        monkeypatch.setattr(vision, "RETRY_PAUSE_SECS", 0)
+        monkeypatch.setattr(vision, "_ask", ask)
+        assert REAL_VISION("w", "s", self._img(tmp_path)) is None
+        assert vision._load_cooldown() == {}
+
+    def test_server_error_retried_once_timeout_not(self, tmp_path, monkeypatch):
+        """5xx 回得快 → 第二輪再問一次；逾時的模型第二輪不再等。"""
+        import requests
+        asked = []
+        busy = {"n": 0}
+        def ask(model, k, p, d):
+            asked.append(model)
+            if model == vision.VISION_MODELS[0]:
+                raise requests.ReadTimeout("slow")
+            busy["n"] += 1
+            return (None, 503, "") if busy["n"] == 1 else ("YES", 200, "")
+        monkeypatch.setattr(vision, "RETRY_PAUSE_SECS", 0)
+        monkeypatch.setattr(vision, "_ask", ask)
+        assert REAL_VISION("w", "s", self._img(tmp_path)) is True
+        assert asked == [vision.VISION_MODELS[0], vision.VISION_MODELS[1], vision.VISION_MODELS[1]]
+
+
+class TestPictureStatus:
+    """找不到圖時分清楚：看圖服務不能用（下次再試）vs 看過了都不對。"""
+
+    def _one_source(self, monkeypatch, verdict, pick=(0,)):
+        def fn(query):
+            return [{"id": "1", "url": f"http://a/{query}", "alt": "photo", "attribution": ""}]
+        monkeypatch.setattr(img, "SOURCES", [("a", fn)])
+        monkeypatch.setattr(pic.llm, "llm_pick_image", lambda w, s, alts: list(pick))
+        monkeypatch.setattr(pic.vision, "vision_fits", lambda w, s, p, **k: verdict)
+
+    def test_all_unverifiable_marks_unavailable(self, tmp_path, monkeypatch, fast_download):
+        self._one_source(monkeypatch, None)
+        status = {}
+        assert pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[], status=status)[0] is False
+        assert status == {"vision": "unavailable"}
+
+    def test_seen_and_rejected_is_not_unavailable(self, tmp_path, monkeypatch, fast_download):
+        self._one_source(monkeypatch, False)
+        status = {}
+        pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[], status=status)
+        assert status == {}
+
+    def test_no_candidates_is_not_unavailable(self, tmp_path, monkeypatch, fast_download):
+        self._one_source(monkeypatch, None, pick=())
+        status = {}
+        pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[], status=status)
+        assert status == {}
+
+    def test_status_optional(self, tmp_path, monkeypatch, fast_download):
+        self._one_source(monkeypatch, None)
+        assert pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[]) == (False, "", "", "")
 
 
 class TestPerStepTimeouts:
@@ -225,7 +295,7 @@ class TestPerStepTimeouts:
         self._sources(monkeypatch)
         monkeypatch.setattr(pic, "JUDGE_TIMEOUT_SECS", 0.2)
         monkeypatch.setattr(pic.llm, "llm_pick_image", lambda w, s, alts: time.sleep(5) or [0])
-        monkeypatch.setattr(pic.vision, "vision_fits", lambda w, s, p: True)
+        monkeypatch.setattr(pic.vision, "vision_fits", lambda w, s, p, **k: True)
         t = time.monotonic()
         ok, _, desc, _ = pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[])
         assert ok and desc == "photo for q"            # 挑圖逾時 → 拿前三張去看 → 看圖說對就收
@@ -235,7 +305,7 @@ class TestPerStepTimeouts:
         self._sources(monkeypatch)
         monkeypatch.setattr(pic, "VISION_TIMEOUT_SECS", 0.2)
         monkeypatch.setattr(pic.llm, "llm_pick_image", lambda w, s, alts: [0])
-        monkeypatch.setattr(pic.vision, "vision_fits", lambda w, s, p: time.sleep(5) or True)
+        monkeypatch.setattr(pic.vision, "vision_fits", lambda w, s, p, **k: time.sleep(5) or True)
         out = tmp_path / "o.jpg"
         assert pic.find_picture("w", str(out), "q", "s", rejects=[]) == (False, "", "", "")
         assert not out.exists()                        # 看圖逾時＝看不了 → 不收，不是照收
@@ -262,7 +332,7 @@ def _run_helper(monkeypatch, capsys, argv):
 def test_helper_sense_uses_find_picture(monkeypatch, capsys):
     import _image_helper as h
     seen = {}
-    monkeypatch.setattr(h, "find_picture", lambda w, p, q, s: seen.update(q=q, s=s) or (True, "", "code", "a:1"))
+    monkeypatch.setattr(h, "find_picture", lambda w, p, q, s, **k: seen.update(q=q, s=s) or (True, "", "code", "a:1"))
     code, out = _run_helper(monkeypatch, capsys, ["--query", "q", "--sense", "具體類別", "--", "w", "/tmp/x.jpg"])
     assert code == 0 and seen == {"q": "q", "s": "具體類別"} and "SOURCE: a:1" in out
 
@@ -271,7 +341,7 @@ def test_helper_without_sense_picks_one_then_find_picture(monkeypatch, capsys):
     """沒帶詞義也要挑圖：helper 自己選一次詞義，再沒有用日常義。沒有「拿第一張」的路。"""
     import _image_helper as h
     seen = []
-    monkeypatch.setattr(h, "find_picture", lambda w, p, q, s: seen.append(s) or (True, "", "x", "a:2"))
+    monkeypatch.setattr(h, "find_picture", lambda w, p, q, s, **k: seen.append(s) or (True, "", "x", "a:2"))
     monkeypatch.setattr(h, "llm_pick_sense", lambda w: "具體類別")
     code, out = _run_helper(monkeypatch, capsys, ["--query", "q", "--", "w", "/tmp/x.jpg"])
     assert code == 0 and "SOURCE: a:2" in out and seen == ["具體類別"]
@@ -282,9 +352,32 @@ def test_helper_without_sense_picks_one_then_find_picture(monkeypatch, capsys):
 
 def test_helper_no_picture_exits_1(monkeypatch, capsys):
     import _image_helper as h
-    monkeypatch.setattr(h, "find_picture", lambda w, p, q, s: (False, "", "", ""))
+    monkeypatch.setattr(h, "find_picture", lambda w, p, q, s, **k: (False, "", "", ""))
     code, out = _run_helper(monkeypatch, capsys, ["--query", "q", "--sense", "s", "--", "w", "/tmp/x.jpg"])
     assert code == 1 and "FAIL" in out and "SOURCE" not in out
+    assert "photo check unavailable" not in out
+
+
+def test_helper_vision_unavailable_says_so(monkeypatch, capsys):
+    import _image_helper as h
+    monkeypatch.setattr(h, "find_picture",
+                        lambda w, p, q, s, status=None, **k: status.update(vision="unavailable") or (False, "", "", ""))
+    code, out = _run_helper(monkeypatch, capsys, ["--query", "q", "--sense", "s", "--", "w", "/tmp/x.jpg"])
+    assert code == 1 and "FAIL: photo check unavailable" in out
+
+
+@pytest.mark.parametrize("stdout, short", [
+    ("FAIL: photo check unavailable\n", "photo check unavailable, retry later"),
+    ("FAIL: no usable image found\n", "no image"),
+])
+def test_addon_image_reason(tmp_path, monkeypatch, stdout, short):
+    """畫面要分得出「看圖服務暫時不能用」和「真的沒圖」（2026-10-26 oven 停卡卻只寫 no image）。"""
+    monkeypatch.setattr(addon._workers.Worker, "_run_helper", lambda self, cmd, t: (1, stdout, "err"))
+    monkeypatch.setattr(addon._llm, "_llm_image_query", lambda w, d="": "q")
+    w = addon._workers.Worker.__new__(addon._workers.Worker); w.media_dir = str(tmp_path)
+    reasons = {}
+    assert w._fetch_image("oven", definition="s", reasons=reasons) == ""
+    assert reasons == {"image": short}
 
 
 def test_addon_passes_sense_and_no_timeout(tmp_path, monkeypatch):
@@ -307,7 +400,7 @@ def test_cli_backfill_always_find_picture(monkeypatch):
     """CLI 也一律挑圖：有詞義用詞義；沒詞義先選一次，再沒有用日常義。"""
     import backfill_words
     senses = []
-    monkeypatch.setattr(backfill_words, "find_picture", lambda w, p, q, s: senses.append(s) or (False, "", "", ""))
+    monkeypatch.setattr(backfill_words, "find_picture", lambda w, p, q, s, **k: senses.append(s) or (False, "", "", ""))
     monkeypatch.setattr(backfill_words, "llm_pick_sense", lambda w: "")
     backfill_words._do_image("concrete", "q", sense="具體類別")
     backfill_words._do_image("concrete", "q")
@@ -371,3 +464,74 @@ def test_model_switch_goes_to_the_card_on_this_thread():
 def test_no_progress_registered_is_silent():
     addon._llm._dispatcher.listener("try", "groq:x")      # 測試、⌘F 翻譯：沒登記 → 不炸
     addon._workers._set_phase("Image")
+
+
+# ── 例句照圖寫：描述用看圖模型寫的那句（2026-10-26 inherit：標籤串描述 → 例句對不上圖）─────
+
+@pytest.mark.parametrize("reply, expected", [
+    ("YES: A baker puts croissants into an oven.", (True, "A baker puts croissants into an oven.")),
+    ("YES", (True, "")),
+    ("Yes - Two kids\nbuild a fort.", (True, "Two kids")),
+    ("NO", (False, "")),
+    ("No. It is a code screen.", (False, "")),
+    ("**YES**: A kettle on a stove.", (True, "A kettle on a stove.")),
+    ("maybe", (None, "")),
+    ("", (None, "")),
+])
+def test_parse_answer(reply, expected):
+    assert vision.parse_answer(reply) == expected
+
+
+def test_vision_prompt_rejects_generic_and_asks_description():
+    p = vision.vision_prompt("inherit", "parent class")
+    assert "screens of code or text" in p and "YES followed by a colon" in p
+
+
+def test_vision_writes_description_only_on_yes(tmp_path, monkeypatch):
+    monkeypatch.setattr(vision, "COOLDOWN_PATH", str(tmp_path / "cool.json"))
+    monkeypatch.setattr(vision, "_load_key", lambda: "k")
+    p = tmp_path / "i.jpg"; p.write_bytes(b"\xff\xd8" + b"x" * 100)
+    for reply, verdict, notes_after in [("YES: An old watch in a hand.", True, {"description": "An old watch in a hand."}),
+                                        ("NO", False, {})]:
+        monkeypatch.setattr(vision, "_ask", lambda m, k, pr, d, r=reply: (r, 200, ""))
+        notes = {}
+        assert REAL_VISION("w", "s", str(p), notes=notes) is verdict and notes == notes_after
+
+
+def test_find_picture_uses_vision_description(tmp_path, monkeypatch, fast_download):
+    """選中的圖，描述換成看圖模型寫的那句；圖庫的標籤串不拿去造句。"""
+    def fn(query):
+        return [{"id": str(i), "url": f"http://a/{i}", "alt": "program, software, code", "attribution": ""}
+                for i in range(3)]
+    monkeypatch.setattr(img, "SOURCES", [("a", fn)])
+    monkeypatch.setattr(pic.llm, "llm_pick_image", lambda w, s, alts: [0, 1, 2])
+
+    def vf(w, s, path, notes=None):
+        fits = "/1" in _url_of(path)
+        if notes is not None:
+            notes["description"] = f"scene of {_url_of(path)}"
+        return fits
+    monkeypatch.setattr(pic.vision, "vision_fits", vf)
+    ok, _, desc, source = pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[])
+    assert ok and source == "a:1" and desc == f"scene of {_url_of(str(tmp_path / 'o.jpg'))}"
+    assert "/1" in desc
+
+
+def test_find_picture_keeps_source_alt_without_vision_description(tmp_path, monkeypatch, fast_download):
+    monkeypatch.setattr(img, "SOURCES", [("a", lambda q: [{"id": "1", "url": "http://a/1", "alt": "an oven",
+                                                           "attribution": ""}])])
+    monkeypatch.setattr(pic.llm, "llm_pick_image", lambda w, s, alts: [0])
+    monkeypatch.setattr(pic.vision, "vision_fits", lambda w, s, p, **k: True)
+    assert pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[])[2] == "an oven"
+
+
+def test_unreadable_file_is_not_a_fit(tmp_path, monkeypatch):
+    """圖源回了 HTML 之類：Gemini 回 400 → 當這張不對，不當「看不了」（不然畫面一直說稍後再試）。
+    金鑰無效的 400 仍算看不了。"""
+    monkeypatch.setattr(vision, "COOLDOWN_PATH", str(tmp_path / "cool.json"))
+    monkeypatch.setattr(vision, "_load_key", lambda: "k")
+    p = tmp_path / "i.jpg"; p.write_bytes(b"<html>" + b"x" * 100)
+    monkeypatch.setattr(vision, "_ask", lambda *a: (None, 400, '{"error":{"message":"Unable to process input image"}}'))
+    assert REAL_VISION("w", "s", str(p)) is False
+    monkeypatch.setattr(vision, "_ask", lambda *a: (None, 400, '{"error":{"status":"INVALID_ARGUMENT","details":[{"reason":"API_KEY_INVALID"}]}}'))
+    assert REAL_VISION("w", "s", str(p)) is None

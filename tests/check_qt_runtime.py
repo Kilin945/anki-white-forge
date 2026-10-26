@@ -150,7 +150,7 @@ addon._workers.Worker._llm_sentence            = stub_sentence
 addon._workers.Worker._groq_sentence           = lambda self,w,a="",photo="": f"stub {w}"
 addon._workers.Worker._groq_translate          = lambda self,w,s,reasons=None,sense="": "字義"
 addon._workers.Worker._groq_translate_sentence = lambda self,s,strict=False,word="",reasons=None,sense="": "這是中文翻譯。"
-addon._workers.Worker._fetch_image             = lambda self,w,definition="": "<img src='stub.jpg'>"
+addon._workers.Worker._fetch_image             = lambda self,w,definition="",**kw: "<img src='stub.jpg'>"
 addon._workers.Worker._pick_sense              = lambda self,w: ""
 addon._workers.Worker._make_audio_batch        = lambda self,items: None
 addon._llm._groq_spellcheck                = lambda w: ("ok", None)
@@ -403,7 +403,7 @@ def _():
     img.save(os.path.join(media, "preview_probe.png"))
     orig_dir, orig_fetch = mw.col.media.dir, addon._workers.Worker._fetch_image
     mw.col.media.dir = lambda: media
-    addon._workers.Worker._fetch_image = lambda self, w, definition="": '<img src="preview_probe.png" alt="red">'
+    addon._workers.Worker._fetch_image = lambda self, w, definition="", **kw: '<img src="preview_probe.png" alt="red">'
     hits = []
     try:
         dlg = open_backfill()

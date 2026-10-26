@@ -3,7 +3,9 @@ stdout 協定（addon `Worker._fetch_image` 解析）：
   ALT: <照片描述>            有描述才印
   ATTRIBUTION: <署名 HTML>   有署名才印
   SOURCE: <來源:ID>          有圖必印（退圖辨識用）
-失敗印 'FAIL: no usable image found' 並 exit 1。
+  SENSE: <詞義>              圖是退回日常義找到的才印；addon 拿它造句、翻譯，圖和例句才對得上
+失敗印 'FAIL: no usable image found' 並 exit 1；有圖沒看成（看圖服務慢或掛了）印
+'FAIL: photo check unavailable'，addon 據此在畫面寫「稍後再試」。
 一律走 core/picture.py 挑圖（LLM 從描述挑＋看圖確認，只收看圖說對的）。--sense 是詞義；沒帶就
 在這裡選一次（llm_pick_sense），再沒有就用「最常見的日常意思」——2026-10-18 起沒有「不挑不看拿第一張」的路。"""
 import os
@@ -27,6 +29,7 @@ def main():
     parser.add_argument("--definition", default="")
     parser.add_argument("--query", default="")
     parser.add_argument("--sense", default="")
+    parser.add_argument("--no-everyday", action="store_true")   # 卡上例句不重寫 → 不准退回日常義
     args = parser.parse_args()
 
     sense = args.sense or llm_pick_sense(args.word) or everyday_sense(args.word)
@@ -34,7 +37,9 @@ def main():
     query = args.query or llm_image_query(args.word, args.definition or sense)
     print(f"QUERY: {query}" + ("" if args.query else f" [{engine_description()}]"), file=sys.stderr)
 
-    ok, attribution, description, source = find_picture(args.word, args.filepath, query, sense)
+    status = {}
+    ok, attribution, description, source = find_picture(args.word, args.filepath, query, sense, status=status,
+                                                         everyday=not args.no_everyday)
     if ok:
         if description:
             print(f"ALT: {description}")
@@ -42,9 +47,12 @@ def main():
             print(f"ATTRIBUTION: {attribution}")
         if source:
             print(f"SOURCE: {source}")
+        if status.get("sense"):
+            print(f"SENSE: {status['sense']}")
         _exit(0)
 
-    print("FAIL: no usable image found")
+    print("FAIL: photo check unavailable" if status.get("vision") == "unavailable"
+          else "FAIL: no usable image found")
     _exit(1)
 
 

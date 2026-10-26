@@ -115,6 +115,6 @@ def _isolate_pick_image(monkeypatch):
     import backfill_words
     import add_word
     monkeypatch.setattr(core.llm, "llm_pick_image", lambda w, s, alts: None)
-    monkeypatch.setattr(core.vision, "vision_fits", lambda w, s, p: None)
+    monkeypatch.setattr(core.vision, "vision_fits", lambda w, s, p, **k: None)
     for mod in (backfill_words, add_word):
         monkeypatch.setattr(mod, "find_picture", lambda w, p, q, s, **k: (False, "", "", ""))

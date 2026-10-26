@@ -70,7 +70,7 @@ def _cmd_a(association):
         seen["pick"] += 1
         return SENSE
     w._pick_sense = pick
-    w._fetch_image = lambda word, definition="": seen.update(image=definition) or '<img src="a.jpg">'
+    w._fetch_image = lambda word, definition="", **kw: seen.update(image=definition) or '<img src="a.jpg">'
     w._llm_sentence = lambda word, association="", photo="": (
         seen.update(sentence=association) or ("The Logger class is concrete.", "Groq"))
     w._groq_translate = lambda word, s, **kw: "具體"
@@ -119,7 +119,7 @@ def _cmd_s(note):
         return SENSE
     bw._w = SimpleNamespace(
         _pick_sense=pick,
-        _fetch_image=lambda word, definition="": seen.update(image=definition) or '<img src="a.jpg">',
+        _fetch_image=lambda word, definition="", **kw: seen.update(image=definition) or '<img src="a.jpg">',
         _llm_sentence=lambda word, association="", photo="": (
             seen.update(sentence=association) or ("The Logger class is concrete.", "Groq")),
         _groq_translate=lambda word, s, **kw: "具體",

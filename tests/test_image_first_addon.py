@@ -69,7 +69,7 @@ def _worker(image_html, sentence):
     w.word, w.association, w.media_dir = "ladder", "", "/tmp"
     w.step, w.finished, w.error = _Emit(), _Emit(), _Emit()
     seen = {}
-    w._fetch_image = lambda word, definition="": image_html
+    w._fetch_image = lambda word, definition="", **kw: image_html
     def fake_sentence(word, association="", photo=""):
         seen["photo"] = photo
         return (sentence, "Groq") if sentence else ("", "failed")
@@ -132,7 +132,7 @@ def _run_s(note, image_html, sentence):
     bw.step, bw.card_done = _Emit(), _Emit()
     log = []
     w = SimpleNamespace()
-    def fetch(word, definition=""):
+    def fetch(word, definition="", **kw):
         log.append("image"); return image_html
     def llm_sentence(word, association="", photo=""):
         log.append(("sentence", photo))

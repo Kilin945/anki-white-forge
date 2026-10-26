@@ -214,7 +214,7 @@ def test_cmd_a_passes_hint_to_translations():
     w.word, w.association, w.media_dir = "waterfall", SENSE, "/tmp"
     w.step, w.finished, w.error = _Emit(), _Emit(), _Emit()
     seen = {}
-    w._fetch_image = lambda word, definition="": '<img src="a.jpg">'
+    w._fetch_image = lambda word, definition="", **kw: '<img src="a.jpg">'
     w._llm_sentence = lambda word, association="", photo="": (GOOD, "Groq")
     w._groq_translate = lambda word, s, sense="", **kw: seen.update(word=sense) or "瀑布模型"
     w._groq_translate_sentence = lambda s, word="", sense="", **kw: seen.update(cn=sense) or "團隊用瀑布模型。"
@@ -240,7 +240,7 @@ def test_cmd_s_passes_hint_to_translations():
     seen = {}
     bw._w = SimpleNamespace(
         _pick_sense=lambda word: "",
-        _fetch_image=lambda word, definition="": '<img src="a.jpg">',
+        _fetch_image=lambda word, definition="", **kw: '<img src="a.jpg">',
         _llm_sentence=lambda word, association="", photo="": (GOOD, "Groq"),
         _groq_translate=lambda word, s, sense="", **kw: seen.update(word=sense) or "瀑布模型",
         _groq_translate_sentence=lambda s, strict=False, word="", sense="", **kw: seen.update(cn=sense) or "團隊用瀑布模型。",

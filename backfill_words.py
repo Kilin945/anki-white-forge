@@ -16,13 +16,13 @@ MAX_WORKERS = 4
 _print_lock = threading.Lock()
 
 
-def _do_image(word, img_query, sense=""):
+def _do_image(word, img_query, sense="", status=None, everyday=True):
     """一律走 core/picture.py 挑圖（LLM 挑＋看圖確認，只收看圖說對的）。沒詞義就先選一次，
     再沒有用日常義——2026-10-18 起沒有「拿第一張不挑不看」的路。"""
     img_filename = f"{word}_img_{int(time.time())}.jpg"
     img_path = os.path.join(MEDIA_DIR, img_filename)
     sense = sense or llm_pick_sense(word) or everyday_sense(word)
-    ok, attribution, description, source = find_picture(word, img_path, img_query, sense)
+    ok, attribution, description, source = find_picture(word, img_path, img_query, sense, status=status, everyday=everyday)
     return img_filename, ok, attribution, description, source
 
 
@@ -100,15 +100,22 @@ def process_note(note):
     if need_img:
         sense = _image_sense(current_assoc, current_sentence)
         img_query = llm_image_query(word, sense)
-        img_filename, ok, attr, description, source = _do_image(word, img_query, sense=sense)
+        status = {}
+        # 例句這次不重寫 → 不准退回日常義：退回去的圖一定對不上卡上那句（KEEP-IN-SYNC addon ⌘S）
+        img_filename, ok, attr, description, source = _do_image(word, img_query, sense=sense, status=status,
+                                                                everyday=need_sentence)
         if not ok:
             # 沒有看圖確認過的圖 → 停卡：這輪什麼都不寫，下次再從圖開始（2026-10-18 使用者決定）
-            lines.append("  Image    : ⚠ not found — card left untouched, run again later")
+            why = "photo check unavailable" if status.get("vision") == "unavailable" else "not found"
+            lines.append(f"  Image    : ⚠ {why} — card left untouched, run again later")
             with _print_lock:
                 print("\n".join(lines) + "\n")
             return word, "no image"
         fields["Image_Prompt"] = image_html(img_filename, description, attr, source)
         photo = description
+        if status.get("sense"):                  # 圖退回日常義 → 例句、翻譯跟著用日常義（圖文要對上）
+            current_assoc = status["sense"]
+            lines.append(f"  Sense    : {current_assoc} (picture fallback)")
         lines.append(f"  Image    : ✓ {img_filename}")
 
     if need_sentence:

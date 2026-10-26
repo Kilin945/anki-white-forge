@@ -113,10 +113,13 @@ def main():
     img_query = llm_image_query(word, definition=hint)
     img_path = os.path.join(MEDIA_DIR, img_filename)
     # 一律挑圖（LLM 挑＋看圖確認，只收看圖說對的）；沒詞義就用日常義
-    ok, attribution, description, source = find_picture(word, img_path, img_query, hint or everyday_sense(word))
+    status = {}
+    ok, attribution, description, source = find_picture(word, img_path, img_query, hint or everyday_sense(word),
+                                                        status=status)
     if not ok:
         # 沒有看圖確認過的圖 → 只建單字和提示，其他欄位留給 ⌘S（2026-10-18 使用者決定：例句要照圖寫）
-        print("  Image ⚠️ not found — adding the word only; run ⌘S later to fill the card")
+        why = "photo check unavailable" if status.get("vision") == "unavailable" else "not found"
+        print(f"  Image ⚠️ {why} — adding the word only; run ⌘S later to fill the card")
         try:
             note_id = anki("addNote", note={
                 "deckName": DECK_NAME, "modelName": MODEL_NAME,
@@ -130,6 +133,9 @@ def main():
         return
     image_field = image_html(img_filename, description, attribution, source)
     print("  Image ✓")
+    if status.get("sense"):                  # 圖退回日常義 → 例句、翻譯跟著用日常義（圖文要對上）
+        hint = status["sense"]
+        print(f"  Sense: {hint} (picture fallback)")
 
     print("[2] Sentence…")
     sentence = llm_sentence(word, hint, photo=description) or f"Please add an example sentence for '{word}'."
