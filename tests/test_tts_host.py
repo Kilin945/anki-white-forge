@@ -1,31 +1,20 @@
-"""edge-tts 要連新的語音伺服器。
+"""語音要用 edge-tts 自己的連線設定，不要再自己改伺服器。
 
-微軟 2026-10 起逐區關掉 edge-tts 7.2.8 預設的舊伺服器（speech.platform.bing.com 回 403），
-core/tts.py 與 _gtts_helper.py 載入時把連線網址換成新伺服器。兩份 KEEP-IN-SYNC。
+微軟 2026-10 起要求第 2 版驗證碼（Sec-MS-GEC-Version 2-…），edge-tts 7.3.0 起支援。
+之前（7.2.8）是自己把連線改到 api.msedgeservices.com 避開 403，但那台伺服器在短時間內
+多打幾次就回 429（2026-10-26 實測 48 次擋 12 次；7.3.1 的設定 72 次擋 0 次）。
 """
 import importlib
 
 import edge_tts.communicate as communicate
-
-NEW_HOST = "wss://api.msedgeservices.com/"
-LEGACY = "wss://speech.platform.bing.com/legacy"
+from edge_tts import constants
 
 
-def test_core_tts_uses_new_host():
-    communicate.WSS_URL = LEGACY
-    import core.tts
-    importlib.reload(core.tts)
-    assert communicate.WSS_URL.startswith(NEW_HOST)
+def test_token_is_v2():
+    assert constants.SEC_MS_GEC_VERSION.startswith("2-")
 
 
-def test_helper_uses_new_host():
-    communicate.WSS_URL = LEGACY
-    import _gtts_helper
-    importlib.reload(_gtts_helper)
-    assert communicate.WSS_URL.startswith(NEW_HOST)
-
-
-def test_both_copies_match():
-    import core.tts
-    import _gtts_helper
-    assert core.tts.WSS_URL == _gtts_helper.WSS_URL
+def test_core_and_helper_keep_default_host():
+    for name in ("core.tts", "_gtts_helper"):
+        importlib.reload(importlib.import_module(name))
+        assert communicate.WSS_URL == constants.WSS_URL, name

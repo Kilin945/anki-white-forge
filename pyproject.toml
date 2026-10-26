@@ -6,7 +6,7 @@ dependencies = [
     "requests",
     "pyspellchecker>=0.9.0",
     "groq>=1.2.0",
-    "edge-tts>=7.2.8",
+    "edge-tts>=7.3.1",
 ]
 
 [dependency-groups]
