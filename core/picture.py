@@ -11,6 +11,10 @@
 寧願沒圖停卡，也不要一張沒看過的圖（當天 42 張卡裡最離譜的錯圖全是退路收的）。
 整段也不再有時間上限（原本 10 秒，時間一到就走退路亂收）；單次挑圖／看圖仍各有逾時，
 逾時就當這張看不了。沒圖時卡片怎麼處理見呼叫端（⌘A／⌘S／CLI：其他欄位都不生成，停卡等下次）。
+
+沒圖分兩種，呼叫端給 status dict 才分得出來：有圖沒看成（看圖服務慢或掛了）→ status["vision"]＝
+"unavailable"，畫面要說「稍後再試」；有看過、都說不對 → 不寫，就是真的沒圖。
+2026-10-26：Gemini 變慢，連 oven 都停卡，畫面卻只寫「no image」，看不出是產線壞了。
 """
 import os
 import sys
@@ -19,9 +23,11 @@ import threading
 from core import image, vision
 import core.llm as llm
 
-MAX_VISION_CHECKS = 6       # 每張卡最多看幾張圖；看滿之後的圖都算看不了＝沒有
-JUDGE_TIMEOUT_SECS = 5      # 從描述挑圖，單次最多等多久
-VISION_TIMEOUT_SECS = 8     # 看圖，單次最多等多久（含換模型）
+MAX_VISION_CHECKS = 6       # 每一輪（詞義／日常義）最多看幾張圖；看滿之後的圖都算看不了＝沒有
+# 原本整張卡共用 6 張：第一輪看滿 6 張都說不對，第二輪挑出的圖一張都沒看就停卡（2026-10-26 inherit）
+JUDGE_TIMEOUT_SECS = 15     # 從描述挑圖，單次最多等多久（逾時就拿前 3 張去看，不會因此沒圖）
+# 看圖，單次最多等多久：每個模型最多問兩輪、每次最多 vision.TIMEOUT_SECS，中間停一下
+VISION_TIMEOUT_SECS = 2 * len(vision.VISION_MODELS) * vision.TIMEOUT_SECS + vision.RETRY_PAUSE_SECS + 2
 
 
 def everyday_sense(word):
@@ -43,14 +49,17 @@ def _log(msg):
     print(f"  [picture] {msg}", file=sys.stderr, flush=True)
 
 
-def find_picture(word, filepath, query, sense, rejects=None):
-    """回 (ok, attribution_html, description, source_tag)。沒有看圖確認過的圖就回 (False, "", "", "")。"""
+def find_picture(word, filepath, query, sense, rejects=None, status=None):
+    """回 (ok, attribution_html, description, source_tag)。沒有看圖確認過的圖就回 (False, "", "", "")。
+    status：呼叫端給的 dict；有圖沒看成時寫 status["vision"] = "unavailable"。"""
     if rejects is None:
         rejects = image.load_rejects(word)
     checks = [MAX_VISION_CHECKS]
+    verdicts = []                             # 每次看圖的結果：True／False／None（沒看成）
     checks_lock = threading.Lock()            # 同一家的 TOP_N 張同時看圖 → 計數要上鎖
 
     def stage(q, s):
+        checks[0] = MAX_VISION_CHECKS        # 每一輪各自的額度
         def judge(alts):
             image.progress(f"picking from {len(alts)} photos")
             pick = _timed(lambda: llm.llm_pick_image(word, s, alts), JUDGE_TIMEOUT_SECS)
@@ -63,6 +72,7 @@ def find_picture(word, filepath, query, sense, rejects=None):
                     return None
                 checks[0] -= 1
             ok = _timed(lambda: vision.vision_fits(word, s, path), VISION_TIMEOUT_SECS)
+            verdicts.append(ok)
             _log(f"{word}: vision {ok} for {s!r}")
             return ok
         return image.fetch_judged(filepath, q, rejects, judge, verify)
@@ -71,7 +81,11 @@ def find_picture(word, filepath, query, sense, rejects=None):
         found = stage(q, s)
         if found:
             return found
-    _log(f"{word}: no picture passed the check → no image")
+    unavailable = None in verdicts         # 有圖沒看成：那張可能就是對的，不能算「真的沒圖」
+    if unavailable and status is not None:
+        status["vision"] = "unavailable"
+    _log(f"{word}: " + ("photo check unavailable" if unavailable
+                        else "no picture passed the check") + " → no image")
     if os.path.exists(filepath):        # 看圖說不對的那張還留在檔案裡 → 清掉，卡片不會引用它
         os.remove(filepath)
     return False, "", "", ""

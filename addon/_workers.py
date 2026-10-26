@@ -142,9 +142,9 @@ class Worker(QThread):
                 _set_phase("Meaning")
             hint = self.association or self._pick_sense(word)
             _set_phase("Image")
-            image_field = self._fetch_image(word, definition=hint)
+            image_field = self._fetch_image(word, definition=hint, reasons=reasons)
             self.step.emit("image", "ok" if image_field else "warn",
-                           "" if image_field else "no image")
+                           "" if image_field else reasons.get("image", "no image"))
             if not image_field:
                 # 沒有看圖確認過的圖 → 停卡：其他欄位都不生成（2026-10-18 使用者決定，例句要照圖寫，
                 # 沒圖就沒得寫）。卡片只帶單字和提示建進去，下次 ⌘S 從圖開始補。
@@ -366,7 +366,9 @@ class Worker(QThread):
             sink.extend(added)
         return ""
 
-    def _fetch_image(self, word, definition=""):
+    def _fetch_image(self, word, definition="", reasons=None):
+        """reasons：呼叫端給的 dict，沒圖時寫入 reasons["image"]＝畫面短句（完整原因在 log）。
+        看圖服務慢或掛了（helper 印 FAIL: photo check unavailable）跟真的沒圖分開講。"""
         filename = f"{word}_img_{int(time.time())}.jpg"
         filepath = os.path.join(self.media_dir, filename)
         cmd = [VENV_PYTHON, IMAGE_SCRIPT]
@@ -379,10 +381,15 @@ class Worker(QThread):
             returncode, stdout, stderr = self._run_helper(cmd, None)   # 沒有上限，見檔頭說明
         except Exception as e:          # spawn failure → no image; leave blank for ⌘S to retry
             _log.warning("image rejected word=%s reason=helper-failed error=%r", word, e)
+            if reasons is not None:
+                reasons["image"] = "no image"
             return ""                   # called synchronously; must not raise, a failure just leaves the image blank
         if returncode != 0:
-            _log.warning("image rejected word=%s reason=no-result stderr=%r", word,
-                         (stderr or "").strip()[-300:])
+            unavailable = "FAIL: photo check unavailable" in (stdout or "")
+            _log.warning("image rejected word=%s reason=%s stderr=%r", word,
+                         "vision-unavailable" if unavailable else "no-result", (stderr or "").strip()[-3000:])
+            if reasons is not None:
+                reasons["image"] = "photo check unavailable, retry later" if unavailable else "no image"
         if returncode == 0:
             alt = attribution = source = ""
             for line in stdout.splitlines():
@@ -486,9 +493,9 @@ class BackfillWorker(QThread):
         # 圖先行：先補圖，句子再照圖寫。只缺圖時，圖要配卡上已有的那句（_image_sense）。
         if need_image:
             _set_phase("Image")
-            image_html = self._w._fetch_image(word, definition=_image_sense(assoc, current))
+            image_html = self._w._fetch_image(word, definition=_image_sense(assoc, current), reasons=reasons)
             self.step.emit(note_id, "image", "ok" if image_html else "warn",
-                           "" if image_html else "no image")
+                           "" if image_html else reasons.get("image", "no image"))
             if not image_html:
                 # 沒有看圖確認過的圖 → 停卡：這輪什麼都不寫，其他欄位亮橘等下次 ⌘S 從圖開始
                 # （2026-10-18 使用者決定：例句要照圖寫，沒圖就沒得寫）

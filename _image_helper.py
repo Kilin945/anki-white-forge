@@ -3,7 +3,8 @@ stdout 協定（addon `Worker._fetch_image` 解析）：
   ALT: <照片描述>            有描述才印
   ATTRIBUTION: <署名 HTML>   有署名才印
   SOURCE: <來源:ID>          有圖必印（退圖辨識用）
-失敗印 'FAIL: no usable image found' 並 exit 1。
+失敗印 'FAIL: no usable image found' 並 exit 1；有圖沒看成（看圖服務慢或掛了）印
+'FAIL: photo check unavailable'，addon 據此在畫面寫「稍後再試」。
 一律走 core/picture.py 挑圖（LLM 從描述挑＋看圖確認，只收看圖說對的）。--sense 是詞義；沒帶就
 在這裡選一次（llm_pick_sense），再沒有就用「最常見的日常意思」——2026-10-18 起沒有「不挑不看拿第一張」的路。"""
 import os
@@ -34,7 +35,8 @@ def main():
     query = args.query or llm_image_query(args.word, args.definition or sense)
     print(f"QUERY: {query}" + ("" if args.query else f" [{engine_description()}]"), file=sys.stderr)
 
-    ok, attribution, description, source = find_picture(args.word, args.filepath, query, sense)
+    status = {}
+    ok, attribution, description, source = find_picture(args.word, args.filepath, query, sense, status=status)
     if ok:
         if description:
             print(f"ALT: {description}")
@@ -44,7 +46,8 @@ def main():
             print(f"SOURCE: {source}")
         _exit(0)
 
-    print("FAIL: no usable image found")
+    print("FAIL: photo check unavailable" if status.get("vision") == "unavailable"
+          else "FAIL: no usable image found")
     _exit(1)
 
 

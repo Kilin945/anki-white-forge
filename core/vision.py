@@ -3,8 +3,11 @@
 只看描述挑圖不準（2026-10-10 實測：concrete 挑到「art class」、harness 挑到馬具），
 所以下載後讓看得到圖的模型確認。實測 15 張（9 張錯、6 張對）全判對。
 
-回 True／False／None。None＝沒辦法看（沒金鑰、每個模型都撞限或掛掉）→ 呼叫端照收，不擋生成。
-模型照 VISION_MODELS 順序試，撞 429／5xx 就冷卻那個模型、換下一個。
+回 True／False／None。None＝沒辦法看（沒金鑰、每個模型都撞限、逾時或掛掉）→ 呼叫端不收這張圖。
+模型照 VISION_MODELS 順序試。只有 429（額度用完）冷卻那個模型；逾時、5xx 是單次的慢或忙，不冷卻，
+換下一個模型；5xx 回得快，所有模型都問過還沒答案就停一下再問一輪（逾時的模型不再等第二次）。
+2026-10-26 事故：Gemini 那天看一張圖要 18～21 秒，舊的 8 秒上限每張都逾時，又一逾時就冷卻 60 秒，
+同一張卡後面的圖全部看不了，連 oven 都停卡。
 這些呼叫不經過 Dispatcher（它只管文字），但跟造句池共用同一批 Gemini 模型的額度。
 """
 import base64
@@ -22,8 +25,8 @@ from core.providers import GEMINI_KEY_PATH, GEMINI_URL, _REPO, _extract_gemini_t
 # lite：15 張測試集同樣全對、每張 1.4～5 秒（flash 2～35 秒），而且不吃造句池 flash 的每日額度
 # （2026-10-10 看圖把 flash 的每日額度用光，造句只能一路 failover，一張卡拖到 1 分半）。
 VISION_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
-COOLDOWN_SECS = 60          # 伺服器錯誤／逾時後，這個模型多久內不再試
-TIMEOUT_SECS = 8            # 單次看圖最多等多久
+TIMEOUT_SECS = 30           # 單次看圖最多等多久（2026-10-26 實測慢的時候 18～21 秒）
+RETRY_PAUSE_SECS = 2        # 5xx 之後停多久再問第二輪
 # 冷卻記在檔案裡：helper 每張卡都是新的子程序，記在記憶體會讓每張卡都再撞一次「今天額度用完」
 COOLDOWN_PATH = os.path.join(_REPO, "logs", "vision_cooldown.json")
 
@@ -63,6 +66,16 @@ def vision_prompt(word, sense):
         f'Say NO if it shows a different meaning of the word, or something unrelated. '
         f'Answer only YES or NO.'
     )
+
+
+def parse_answer(text):
+    """看圖回覆 → True/False；看不懂的回覆回 None。"""
+    head = (text or "").replace("*", "").strip().upper()    # 模型偶爾回 **YES**
+    if head.startswith("YES"):
+        return True
+    if head.startswith("NO"):
+        return False
+    return None
 
 
 def _mime(data):
@@ -106,22 +119,38 @@ def vision_fits(word, sense, image_path):
     except OSError:
         return None
     prompt = vision_prompt(word, sense)
-    for model in VISION_MODELS:
-        if _cooling(model):
-            continue
-        progress(f"checking photo with {model}")
-        try:
-            text, status, err = _ask(model, key, prompt, data)
-        except (requests.RequestException, ValueError, KeyError):
-            text, status, err = None, 0, ""
-        if text:
-            answer = text.strip().upper()
-            if answer.startswith("YES"):
-                return True
-            if answer.startswith("NO"):
+    models = list(VISION_MODELS)
+    for round_no in range(2):
+        busy = []                        # 這輪回 5xx 的模型，第二輪再問
+        for model in models:
+            if _cooling(model):
+                continue
+            progress(f"checking photo with {model}")
+            try:
+                text, status, err = _ask(model, key, prompt, data)
+            except (requests.RequestException, ValueError, KeyError) as e:
+                print(f"  [vision] {model} no answer ({type(e).__name__}) → next model", file=sys.stderr)
+                continue
+            if text:
+                verdict = parse_answer(text)
+                if verdict is not None:
+                    return verdict
+                continue                 # 回了別的（不是 YES/NO）→ 換下一個模型問，不冷卻
+            if status == 429:            # 額度用完才冷卻；每日額度冷卻到重置
+                secs = _gemini_429_secs(err, 1)
+                _cool(model, secs)
+                print(f"  [vision] {model} rate limited → cool {secs:.0f}s, next model", file=sys.stderr)
+                continue
+            if status == 400 and "API_KEY" not in (err or "").upper():
+                # 檔案不是圖（圖源回了 HTML 之類）：換模型、重試都一樣，這張就當不對。
+                # 當成「看不了」會讓畫面一直說「稍後再試」，其實永遠不會好（2026-10-26 qa 實測）
+                print(f"  [vision] {model} cannot read this file (HTTP 400) → not a fit", file=sys.stderr)
                 return False
-            continue                     # 回了別的（不是 YES/NO）→ 換下一個模型問，不冷卻
-        secs = _gemini_429_secs(err, 1) if status == 429 else COOLDOWN_SECS   # 每日額度用完 → 冷卻到重置
-        _cool(model, secs)
-        print(f"  [vision] {model} unavailable (HTTP {status}) → cool {secs:.0f}s, next model", file=sys.stderr)
+            print(f"  [vision] {model} unavailable (HTTP {status}) → next model", file=sys.stderr)
+            if status >= 500:
+                busy.append(model)
+        if not busy or round_no == 1:
+            break
+        models = busy
+        time.sleep(RETRY_PAUSE_SECS)
     return None

@@ -19,7 +19,7 @@ def _worker(make_audio):
     w = addon._workers.Worker.__new__(addon._workers.Worker)
     w.word, w.association, w.media_dir = "ladder", "", "/tmp"
     w.step, w.finished, w.error = _Emit(), _Emit(), _Emit()
-    w._fetch_image = lambda word, definition="": '<img src="a.jpg" alt="Ladder.">'
+    w._fetch_image = lambda word, definition="", **kw: '<img src="a.jpg" alt="Ladder.">'
     w._llm_sentence = lambda word, association="", photo="": ("The ladder leans on the wall.", "Groq")
     w._groq_translate = lambda word, s, **kw: "梯子"
     w._groq_translate_sentence = lambda s, word="", **kw: "梯子靠在牆上。"
@@ -86,7 +86,7 @@ def _run_s(make_audio):
     bw.step, bw.card_done = _Emit(), _Emit()
     bw._w = SimpleNamespace(
         _pick_sense=lambda word: "",
-        _fetch_image=lambda word, definition="": '<img src="a.jpg" alt="Ladder.">',
+        _fetch_image=lambda word, definition="", **kw: '<img src="a.jpg" alt="Ladder.">',
         _llm_sentence=lambda word, association="", photo="": ("The ladder leans on the wall.", "Groq"),
         _groq_translate=lambda word, s, **kw: "梯子",
         _groq_translate_sentence=lambda s, word="", **kw: "梯子靠在牆上。",
