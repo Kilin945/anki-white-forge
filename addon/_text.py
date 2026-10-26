@@ -169,6 +169,25 @@ def record_rejected_translation(word, translation, path=None):
         return added
 
 
+# 整句翻譯多寫了單字解釋：漏出來的一律是「意思是：」「意指：」這種關鍵字＋冒號。
+# 不收沒冒號的「是指」「這裡的」「一詞」——指標、這裡的居民這種正常譯文會被誤擋。
+# 英文原句有對應的字時是照翻，不算
+# KEEP-IN-SYNC: core/llm.py::EXPLAIN_MARKERS
+_EXPLAIN_MARKERS = (
+    (r"(意思是|意思為|意指|含義是|含意是)\s*[：:]", r"\bmean"),
+    (r"(指的是|是指)\s*[：:]", r"\b(refer|mean)"),
+)
+
+
+def _explains_word(translation, sentence):
+    """整句翻譯是不是多寫了單字的解釋（「這裡的 X 意思是：…」）。誤擋的代價是那張卡
+    每次重翻都被擋、永遠補不起來，所以寧可漏抓也不誤擋。KEEP-IN-SYNC: core/llm.py::explains_word。"""
+    for marker, english in _EXPLAIN_MARKERS:
+        if re.search(marker, translation) and not re.search(english, sentence, re.IGNORECASE):
+            return True
+    return False
+
+
 def _looks_like_chinese_translation(text, terms=None):
     """整句翻譯驗證：要有中文，且扣掉白名單術語後英文字 < 3（3+ 視為前言／英文散文）。
     terms 省略 → 每次重讀 translation_terms.json（不快取，⌘D 改完立即生效）。

@@ -129,6 +129,79 @@ class TestTranslationGetsSense:
         assert all(SENSE in p for p in seen) and len(seen) == 2
 
 
+class TestSentenceCnSenseBeforeSentence:
+    """詞義要放在句子前面（2026-10-22）。事故：詞義接在 `Sentence: "…"` 後面，
+    gemini-3.5-flash-lite 把它當成句子一起翻，Sentence_CN 多出「這裡的 departure 意思是：…」
+    （舊 prompt 12 次漏 10 次，詞義移到前面 0 次）。"""
+
+    def test_core_and_addon_prompt_match(self):
+        for word, sense in (("waterfall", SENSE), ("", ""), ("", SENSE), ("waterfall", "")):
+            assert (llm_mod.sentence_cn_prompt(GOOD, word=word, sense=sense)
+                    == addon._llm._sentence_cn_prompt(GOOD, word=word, sense=sense))
+
+    def test_sense_before_sentence(self):
+        for p in (llm_mod.sentence_cn_prompt(GOOD, word="waterfall", sense=SENSE),
+                  addon._llm._sentence_cn_prompt(GOOD, word="waterfall", sense=SENSE)):
+            assert p.index(SENSE) < p.index("Sentence:")
+            assert p.endswith(f'Sentence: "{GOOD}"')
+
+    def test_callers_send_that_prompt(self, monkeypatch):
+        seen = []
+        with patch.object(llm_mod, "llm", lambda p, **kw: seen.append(p) or "團隊用瀑布模型。"):
+            llm_mod.llm_translate_sentence(GOOD, word="waterfall", sense=SENSE)
+        monkeypatch.setattr(addon._llm, "_groq_chat", lambda p, **kw: seen.append(p) or "團隊用瀑布模型。")
+        w = addon._workers.Worker.__new__(addon._workers.Worker)
+        w._groq_translate_sentence(GOOD, word="waterfall", sense=SENSE)
+        assert seen == [llm_mod.sentence_cn_prompt(GOOD, word="waterfall", sense=SENSE)] * 2
+
+
+# 整句翻譯多寫了單字解釋就退回（2026-10-22）。英文原句本身在講「意思」「這個字」時是正常翻譯，要放過
+LEAKED = [
+    ("The passengers wait in the terminal for their departure.",
+     "「乘客們在航廈裡等待出發。」這裡的 departure 意思是：「從某個地方或情況離開。」"),
+    ("The forest began to regenerate, sprouting new trees quickly.",
+     "這座森林開始復育，迅速長出新樹。這裡的「復育」一詞意指：自然地將某物恢復到原本或健康的狀態。"),
+    ("The vintage snacks on the shelf go stale for shoppers.",
+     "「架上的懷舊零食對消費者而言變得不再新穎。」這裡的「變質／失去新鮮感」意思是：「隨著時間推移而過時或變得比較沒吸引力。」"),
+]
+FAITHFUL = [
+    ("The variable `user` refers to the logged-in person.", "變數 `user` 指的是已登入的使用者。"),
+    ("The dictionary entry shows how to pronounce reject, which means to refuse a request.",
+     "詞典條目顯示了 reject 的發音，意思是拒絕請求。"),
+    ("A hand circles the word concerns on the glass board, highlighting worries.",
+     "一只手在玻璃白板上的 concerns 一詞畫圈，突顯出心中的憂慮。"),
+    ("The passengers wait in the terminal for their departure.", "乘客在航站樓等待他們的離港。"),
+    # 沒冒號的「是指」「這裡的」「含義」是正常譯文（code review 實測會被第一版誤擋）
+    ("This is a landmark building.", "這是指標性的建築。"),
+    ("This is a guide for new users.", "這是指南。"),
+    ("The locals are friendly.", "這裡的居民很友善。"),
+    ("He could not understand the point of the remark.", "他無法理解這句話的含義。"),
+]
+
+
+class TestExplainsWord:
+    def test_leaked_rejected_faithful_kept(self):
+        for check in (llm_mod.explains_word, addon._text._explains_word):
+            assert all(check(cn, en) for en, cn in LEAKED)
+            assert not any(check(cn, en) for en, cn in FAITHFUL)
+
+    def test_core_and_addon_markers_match(self):
+        assert llm_mod.EXPLAIN_MARKERS == addon._text._EXPLAIN_MARKERS
+
+    def test_core_returns_empty(self):
+        en, cn = LEAKED[0]
+        with patch.object(llm_mod, "llm", lambda p, **kw: cn):
+            assert llm_mod.llm_translate_sentence(en, word="departure") == ""
+
+    def test_addon_returns_empty_with_reason(self, monkeypatch):
+        en, cn = LEAKED[0]
+        monkeypatch.setattr(addon._llm, "_groq_chat", lambda p, **kw: cn)
+        w = addon._workers.Worker.__new__(addon._workers.Worker)
+        reasons = {}
+        assert w._groq_translate_sentence(en, word="departure", reasons=reasons) == ""
+        assert reasons == {"sentence_cn": "explains the word"}
+
+
 # ── 三條路徑都把詞義傳給翻譯 ───────────────────────────────────────────────────
 
 class _Emit:
