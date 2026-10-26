@@ -59,23 +59,30 @@ def _cooling(model):
     return _load_cooldown().get(model, 0) > time.time()
 
 
+# 2026-10-26 實測（19 組：8 張真卡圖配自己的字、8 張配別人的字、inherit 程式碼畫面／懷錶、oven）：
+# 舊 prompt 13～14 組對；加「通用畫面回 NO」17 組對，擋掉 inherit 配資料表畫面，concurrency 多螢幕仍收。
 def vision_prompt(word, sense):
     return (
         f'Would this photo work as a memory picture for the English word "{word}" in this meaning: '
         f'"{sense}"? Say YES if it shows the thing, situation or scene this meaning is about. '
         f'Say NO if it shows a different meaning of the word, or something unrelated. '
-        f'Answer only YES or NO.'
+        f'Say NO for screens of code or text, documents, charts and diagrams, unless this meaning is that exact '
+        f'object (for example "keyboard" or "spreadsheet"): a learner cannot tell which word such a picture is about. '
+        f'Answer NO, or YES followed by a colon and one short plain sentence that describes what the photo shows, '
+        f'for example "YES: Two children build a sandcastle on a beach."'
     )
 
 
 def parse_answer(text):
-    """看圖回覆 → True/False；看不懂的回覆回 None。"""
-    head = (text or "").replace("*", "").strip().upper()    # 模型偶爾回 **YES**
+    """看圖回覆 → (True/False/None, 描述)。描述只在 YES 後面有；看不懂的回覆回 (None, "")。"""
+    text = (text or "").replace("*", "").strip()    # 模型偶爾回 **YES**
+    head = text.upper()
     if head.startswith("YES"):
-        return True
+        rest = text[3:].lstrip(" :.-—\t")
+        return True, " ".join(rest.splitlines()[0].split()) if rest else ""
     if head.startswith("NO"):
-        return False
-    return None
+        return False, ""
+    return None, ""
 
 
 def _mime(data):
@@ -109,7 +116,10 @@ def _ask(model, key, prompt, data):
     return _extract_gemini_text(r.json()), 200, ""
 
 
-def vision_fits(word, sense, image_path):
+def vision_fits(word, sense, image_path, notes=None):
+    """notes：呼叫端給的 dict；YES 時寫 notes["description"]＝模型看到的畫面（一句話）。
+    造句照這句寫：圖庫給的描述常是標籤串或檔名（Pixabay、Wikimedia），照它寫例句對不上圖
+    （2026-10-26 inherit：標籤 "program, computer language, …" → 例句講子類別，圖是程式碼畫面）。"""
     key = _load_key()
     if not key:
         return None
@@ -132,7 +142,9 @@ def vision_fits(word, sense, image_path):
                 print(f"  [vision] {model} no answer ({type(e).__name__}) → next model", file=sys.stderr)
                 continue
             if text:
-                verdict = parse_answer(text)
+                verdict, description = parse_answer(text)
+                if verdict is True and notes is not None and description:
+                    notes["description"] = description
                 if verdict is not None:
                     return verdict
                 continue                 # 回了別的（不是 YES/NO）→ 換下一個模型問，不冷卻

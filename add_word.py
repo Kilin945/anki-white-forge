@@ -133,6 +133,9 @@ def main():
         return
     image_field = image_html(img_filename, description, attribution, source)
     print("  Image ✓")
+    if status.get("sense"):                  # 圖退回日常義 → 例句、翻譯跟著用日常義（圖文要對上）
+        hint = status["sense"]
+        print(f"  Sense: {hint} (picture fallback)")
 
     print("[2] Sentence…")
     sentence = llm_sentence(word, hint, photo=description) or f"Please add an example sentence for '{word}'."

@@ -168,7 +168,9 @@ class TestFindPicture:
     def test_second_stage_sees_photos_after_first_used_budget(self, tmp_path, monkeypatch, fast_download):
         monkeypatch.setattr(pic, "MAX_VISION_CHECKS", 1)
         self._setup(monkeypatch, lambda s, q: q == "w")
-        assert pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[])[0]
+        status = {}
+        assert pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[], status=status)[0]
+        assert status == {"sense": pic.everyday_sense("w")}
 
     def test_unverifiable_everywhere_is_no_image(self, tmp_path, monkeypatch, fast_download):
         """看圖全回 None（沒金鑰、撞限）→ 沒圖；呼叫端會停卡。"""
@@ -464,17 +466,63 @@ def test_no_progress_registered_is_silent():
     addon._workers._set_phase("Image")
 
 
-# ── 看圖回覆解析 ─────────────────────────────────────────────────────────────
+# ── 例句照圖寫：描述用看圖模型寫的那句（2026-10-26 inherit：標籤串描述 → 例句對不上圖）─────
 
 @pytest.mark.parametrize("reply, expected", [
-    ("YES", True),
-    ("**YES**", True),
-    ("No.", False),
-    ("maybe", None),
-    ("", None),
+    ("YES: A baker puts croissants into an oven.", (True, "A baker puts croissants into an oven.")),
+    ("YES", (True, "")),
+    ("Yes - Two kids\nbuild a fort.", (True, "Two kids")),
+    ("NO", (False, "")),
+    ("No. It is a code screen.", (False, "")),
+    ("**YES**: A kettle on a stove.", (True, "A kettle on a stove.")),
+    ("maybe", (None, "")),
+    ("", (None, "")),
 ])
 def test_parse_answer(reply, expected):
-    assert vision.parse_answer(reply) is expected
+    assert vision.parse_answer(reply) == expected
+
+
+def test_vision_prompt_rejects_generic_and_asks_description():
+    p = vision.vision_prompt("inherit", "parent class")
+    assert "screens of code or text" in p and "YES followed by a colon" in p
+
+
+def test_vision_writes_description_only_on_yes(tmp_path, monkeypatch):
+    monkeypatch.setattr(vision, "COOLDOWN_PATH", str(tmp_path / "cool.json"))
+    monkeypatch.setattr(vision, "_load_key", lambda: "k")
+    p = tmp_path / "i.jpg"; p.write_bytes(b"\xff\xd8" + b"x" * 100)
+    for reply, verdict, notes_after in [("YES: An old watch in a hand.", True, {"description": "An old watch in a hand."}),
+                                        ("NO", False, {})]:
+        monkeypatch.setattr(vision, "_ask", lambda m, k, pr, d, r=reply: (r, 200, ""))
+        notes = {}
+        assert REAL_VISION("w", "s", str(p), notes=notes) is verdict and notes == notes_after
+
+
+def test_find_picture_uses_vision_description(tmp_path, monkeypatch, fast_download):
+    """選中的圖，描述換成看圖模型寫的那句；圖庫的標籤串不拿去造句。"""
+    def fn(query):
+        return [{"id": str(i), "url": f"http://a/{i}", "alt": "program, software, code", "attribution": ""}
+                for i in range(3)]
+    monkeypatch.setattr(img, "SOURCES", [("a", fn)])
+    monkeypatch.setattr(pic.llm, "llm_pick_image", lambda w, s, alts: [0, 1, 2])
+
+    def vf(w, s, path, notes=None):
+        fits = "/1" in _url_of(path)
+        if notes is not None:
+            notes["description"] = f"scene of {_url_of(path)}"
+        return fits
+    monkeypatch.setattr(pic.vision, "vision_fits", vf)
+    ok, _, desc, source = pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[])
+    assert ok and source == "a:1" and desc == f"scene of {_url_of(str(tmp_path / 'o.jpg'))}"
+    assert "/1" in desc
+
+
+def test_find_picture_keeps_source_alt_without_vision_description(tmp_path, monkeypatch, fast_download):
+    monkeypatch.setattr(img, "SOURCES", [("a", lambda q: [{"id": "1", "url": "http://a/1", "alt": "an oven",
+                                                           "attribution": ""}])])
+    monkeypatch.setattr(pic.llm, "llm_pick_image", lambda w, s, alts: [0])
+    monkeypatch.setattr(pic.vision, "vision_fits", lambda w, s, p, **k: True)
+    assert pic.find_picture("w", str(tmp_path / "o.jpg"), "q", "s", rejects=[])[2] == "an oven"
 
 
 def test_unreadable_file_is_not_a_fit(tmp_path, monkeypatch):
